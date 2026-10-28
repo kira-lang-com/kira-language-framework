@@ -1,0 +1,80 @@
+//! The names GLSL resources take (section 20.2): a source name GLSL
+//! reserves is prefixed with `ksl_`, as the oracle does, because hosts look
+//! GL uniforms up by these names.
+
+/// The GLSL name of a resource called `name`.
+#[must_use]
+pub fn glsl_safe_name(name: &str) -> String {
+    if RESERVED.contains(&name) {
+        return format!("ksl_{name}");
+    }
+    name.to_owned()
+}
+
+const RESERVED: &[&str] = &[
+    "in",
+    "out",
+    "inout",
+    "uniform",
+    "buffer",
+    "layout",
+    "centroid",
+    "coherent",
+    "discard",
+    "readonly",
+    "writeonly",
+    "atomic_uint",
+    "active",
+    "asm",
+    "attribute",
+    "cast",
+    "class",
+    "common",
+    "double",
+    "enum",
+    "extern",
+    "external",
+    "filter",
+    "fixed",
+    "flat",
+    "goto",
+    "half",
+    "highp",
+    "hvec2",
+    "hvec3",
+    "hvec4",
+    "inline",
+    "input",
+    "interface",
+    "invariant",
+    "lowp",
+    "mediump",
+    "namespace",
+    "noinline",
+    "noperspective",
+    "output",
+    "packed",
+    "partition",
+    "patch",
+    "precise",
+    "precision",
+    "public",
+    "resource",
+    "restrict",
+    "row_major",
+    "sample",
+    "shared",
+    "sizeof",
+    "smooth",
+    "static",
+    "subroutine",
+    "superp",
+    "template",
+    "this",
+    "typedef",
+    "union",
+    "unsigned",
+    "using",
+    "varying",
+    "volatile",
+];

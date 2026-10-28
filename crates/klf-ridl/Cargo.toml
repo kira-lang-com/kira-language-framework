@@ -1,0 +1,15 @@
+[package]
+name = "klf-ridl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sha2 = "0.10"
+klf-core = { path = "../klf-core" }
+klf-source = { path = "../klf-source" }
+klf-diag = { path = "../klf-diag" }
+klf-target = { path = "../klf-target" }
+
+[lints]
+workspace = true

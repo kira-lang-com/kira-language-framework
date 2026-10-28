@@ -1,0 +1,15 @@
+[package]
+name = "klf-kir-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustc-hash = "2"
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-source = { path = "../klf-source" }
+
+[lints]
+workspace = true

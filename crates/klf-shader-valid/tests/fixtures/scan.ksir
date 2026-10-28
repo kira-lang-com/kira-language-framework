@@ -1,0 +1,55 @@
+ksir 1
+module @Scan lang "ksl" capabilities()
+
+type %Totals = struct explicit size 16 align 16 {
+  sum: atomic<u32> offset 0 size 4 align 4,
+  count: u32 offset 4 size 4 align 4
+}
+
+global @items: array<u32, runtime, stride 4> space(storage<load store>) binding(0, 0)
+global @totals: %Totals space(storage<load store atomic>) binding(0, 1)
+global @partial: array<u32, 64, stride 4> space(workgroup)
+
+shader @Scan compute {
+  group @Dispatch class(dispatch) { @items, @totals }
+  entries { @compute_main }
+}
+
+entry compute @compute_main(%id: vec3<u32> @builtin(global_invocation_id), %local: u32 @builtin(local_invocation_index)) workgroup(64, 1, 1) {
+  %0 = arg 0
+  %1 = arg 1
+  %2 = global @items
+  %3 = global @totals
+  %4 = global @partial
+  %5 = literal 2u32
+  %6 = literal 1u32
+  emit {
+    %7 = access_index %0, 0
+    %8 = convert %7, uint
+    %9 = array_length %2
+    %10 = binary less %8, %9
+  }
+  if %10 {
+    emit {
+      %11 = access %2, %8
+      %12 = load %11
+      %13 = binary multiply %12, %5
+      %14 = access %4, %1
+    }
+    store %14, %13
+    store %11, %13
+  }
+  control_barrier(workgroup)
+  emit {
+    %15 = access %4, %1
+    %16 = load %15
+    %17 = access_index %3, 0
+  }
+  atomic add %17, %16 -> %18
+  emit {
+    %19 = binary divide %18, %5
+    %20 = access_index %3, 1
+  }
+  store %20, %19
+  return
+}

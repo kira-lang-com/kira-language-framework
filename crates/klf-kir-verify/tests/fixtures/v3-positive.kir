@@ -1,0 +1,6 @@
+module @V3Positive lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @stop() -> unit engine(runtime) {
+bb0():
+  return
+}

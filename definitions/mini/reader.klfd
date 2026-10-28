@@ -1,0 +1,26 @@
+function name_end() -> Int {
+    var index = 0
+    while index < source_len() {
+        if source_byte(index) == (32 as U8) {
+            return index
+        }
+        index = index + 1
+    }
+    return index
+}
+
+function literal_value() -> Int {
+    var index = name_end() + 1
+    var value = 0
+    while index < source_len() {
+        let byte = source_byte(index)
+        if byte < (48 as U8) {
+            return value
+        } else if byte > (57 as U8) {
+            return value
+        }
+        value = value * 10 + (byte as Int) - 48
+        index = index + 1
+    }
+    return value
+}

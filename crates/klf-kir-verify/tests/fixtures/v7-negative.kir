@@ -1,0 +1,13 @@
+module @V7Neg lang "test" target "aarch64-apple-darwin" stage canonical
+
+func private @bad() -> i64 engine(runtime) {
+bb0():
+  %s = stack.alloc i64
+  %a1 = access.begin modify static %s
+  %a2 = access.begin read static %s
+  access.end %a2
+  access.end %a1
+  stack.dealloc %s
+  %z = const.int i64, 0
+  return %z
+}

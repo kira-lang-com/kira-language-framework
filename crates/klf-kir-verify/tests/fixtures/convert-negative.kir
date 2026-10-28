@@ -1,0 +1,7 @@
+module @ConvertNegative lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @bad(%v: f64) -> i64 engine(runtime) {
+bb0(%v: f64):
+  %r = sext %v to i64
+  return %r
+}

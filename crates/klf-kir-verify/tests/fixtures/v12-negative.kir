@@ -1,0 +1,7 @@
+module @V12Neg lang "test" target "aarch64-apple-darwin" stage canonical
+
+func exported @bad(%p: *i64) -> i64 engine(runtime) {
+bb0(%p: *i64):
+  %v = load [trivial] %p
+  return %v
+}

@@ -1,0 +1,49 @@
+// Sections 12.11 and 12.12: the call and exception forms.
+module @Calls lang "test" target "aarch64-apple-darwin" stage raw
+
+type %Printable = struct ridl { }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func private @callee(%a: i64) -> i64 engine(runtime) {
+bb0(%a: i64):
+  return %a
+}
+
+func private foreign @puts(%text: ptr) -> i32 engine(native)
+
+func private @direct(%a: i64) -> i64 engine(runtime) {
+bb0(%a: i64):
+  %result = call @callee(%a)
+  %pointer = func.ref @callee
+  %indirect = call.indirect %pointer(%a) : (i64) -> i64
+  %record = stack.alloc [2 x ptr]
+  %closure = call.closure %record(%a) : (i64) -> i64
+  %callback = closure.callback 1, fn(i64, ptr) -> i64
+  stack.dealloc %record
+  return %result
+}
+
+func private @dispatch(%a: i64, %object: ptr) -> i64 engine(runtime) {
+bb0(%a: i64, %object: ptr):
+  %witness = call.witness i64, %Printable.describe(%a) -> i64
+  %virtual = call.vtable %object, @PrintableVtable, 0(%a) -> i64
+  return %witness
+}
+
+func private @variadic(%format: ptr, %a: i64) -> unit engine(runtime) {
+bb0(%format: ptr, %a: i64):
+  %ignored = call.foreign @puts(%format)
+  call.variadic @puts(%format; %a)
+  return
+}
+
+func private @unwinding(%a: i64) -> i64 engine(runtime) {
+bb0(%a: i64):
+  %value = call @callee(%a)
+  invoke @callee(%a) to bb1(%value) unwind bb2()
+bb1(%result: i64):
+  return %result
+bb2():
+  (%exception, %selector) = landingpad cleanup
+  resume %exception
+}

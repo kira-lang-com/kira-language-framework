@@ -1,0 +1,37 @@
+// Section 12.6: structs, tuples, arrays and enums.
+module @Aggregate lang "test" target "aarch64-apple-darwin" stage raw
+
+type %Pair = struct ridl { first: i64, second: i64 }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+type %Shape = enum ridl { empty, point(i64), segment(i64, i64) }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func private @structs(%a: i64, %b: i64) -> i64 engine(runtime) {
+bb0(%a: i64, %b: i64):
+  %pair = struct.new %Pair(%a, %b)
+  %first = struct.extract %pair, 0
+  (%one, %two) = struct.destructure %pair
+  return %first
+}
+
+func private @tuples(%a: i64, %b: i64) -> i64 engine(runtime) {
+bb0(%a: i64, %b: i64):
+  %tuple = tuple.new(%a, %b)
+  %second = tuple.extract %tuple, 1
+  (%left, %right) = tuple.destructure %tuple
+  %array = array.new i64(%a, %b)
+  return %second
+}
+
+func private @enums(%a: i64, %b: i64) -> i64 engine(runtime) {
+bb0(%a: i64, %b: i64):
+  %shape = enum.new %Shape, 2(%a, %b)
+  %slot = stack.alloc %Shape
+  store [trivial] %shape to %slot
+  %tag = enum.tag %slot
+  %payload = enum.payload.addr %slot, 1
+  enum.inject %slot, 1
+  (%x, %y) = enum.take %slot, 2
+  return %a
+}

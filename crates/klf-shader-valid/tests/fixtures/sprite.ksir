@@ -1,0 +1,158 @@
+ksir 1
+module @Sprite lang "ksl" capabilities()
+
+type %Params = struct explicit size 32 align 16 {
+  tint: vec4<f32> offset 0 size 16 align 16,
+  scale: f32 offset 16 size 4 align 4,
+  mode: u32 offset 20 size 4 align 4
+}
+type %VertexOut = struct none {
+  clip: vec4<f32> @builtin(position),
+  uv: vec2<f32> @location(0),
+  layer: u32 @location(1) @interpolate(flat)
+}
+type %FragmentOut = struct none {
+  color: vec4<f32> @location(0)
+}
+
+%g0 = literal 0.5f32
+const @HALF: f32 = %g0
+
+global @params: %Params space(uniform) binding(0, 0)
+global @albedo: image<2d, sampled<float>> space(handle) binding(0, 1)
+global @albedoSmp: sampler space(handle) binding(0, 2)
+
+shader @Sprite graphics {
+  group @Material class(material) { @params, @albedo, @albedoSmp }
+  entries { @vertex_main, @fragment_main }
+}
+
+func @shade(%tex: image<2d, sampled<float>>, %smp: sampler, %uv: vec2<f32>) -> vec4<f32> {
+  %0 = arg 0
+  %1 = arg 1
+  %2 = arg 2
+  emit {
+    %3 = image_sample %0, %1, %2, level(zero)
+  }
+  return %3
+}
+
+func @bump(%counter: ptr<function, f32>, %amount: f32) {
+  %0 = arg 0
+  %1 = arg 1
+  emit {
+    %2 = load %0
+    %3 = binary add %2, %1
+  }
+  store %0, %3
+  return
+}
+
+entry vertex @vertex_main(%vid: u32 @builtin(vertex_index)) -> %VertexOut {
+  local $out: %VertexOut
+  local $i: u32
+  local $acc: f32
+  local $y: f32
+  %0 = arg 0
+  %1 = local $out
+  %2 = local $i
+  %3 = local $acc
+  %4 = local $y
+  %5 = literal 0u32
+  %6 = literal 1u32
+  %7 = literal 3u32
+  %8 = literal 0.25f32
+  %9 = constant @HALF
+  %10 = literal 0.0f32
+  %11 = literal 1.0f32
+  %12 = literal -1.0f32
+  store %2, %5
+  store %3, %9
+  store %4, %10
+  loop {
+    emit {
+      %13 = load %2
+      %14 = binary greater_equal %13, %0
+    }
+    if %14 {
+      break
+    }
+    call @bump(%3, %8)
+  } continuing {
+    emit {
+      %15 = load %2
+      %16 = binary add %15, %6
+      %17 = binary greater_equal %16, %7
+    }
+    store %2, %16
+  } break_if %17
+  emit {
+    %18 = binary modulo %0, %7
+  }
+  switch %18 {
+    case 0u32: {
+      store %4, %12
+    }
+    case 1u32 fallthrough: {
+    }
+    case 2u32: {
+      store %4, %11
+    }
+    default: {
+    }
+  }
+  emit {
+    %19 = access_index %1, 0
+    %20 = load %3
+    %21 = load %4
+    %22 = binary equal %18, %5
+    %23 = select %22, %12, %20
+    %24 = compose vec4<f32>, [%23, %21, %10, %11]
+  }
+  store %19, %24
+  emit {
+    %25 = access_index %1, 1
+    %26 = compose vec2<f32>, [%20, %21]
+    %27 = splat 2, %10
+    %28 = splat 2, %11
+    %29 = math clamp %26, %27, %28
+  }
+  store %25, %29
+  emit {
+    %30 = access_index %1, 2
+  }
+  store %30, %18
+  emit {
+    %31 = load %1
+  }
+  return %31
+}
+
+entry fragment @fragment_main(%input: %VertexOut) -> %FragmentOut {
+  local $out: %FragmentOut
+  %0 = arg 0
+  %1 = local $out
+  %2 = global @albedo
+  %3 = global @albedoSmp
+  %4 = global @params
+  emit {
+    %5 = access_index %0, 1
+  }
+  call @shade(%2, %3, %5) -> %6
+  emit {
+    %7 = access_index %4, 0
+    %8 = load %7
+    %9 = binary multiply %6, %8
+    %10 = access_index %4, 1
+    %11 = load %10
+    %12 = splat 4, %11
+    %13 = binary multiply %9, %12
+    %14 = swizzle %13, [z, y, x, w]
+    %15 = access_index %1, 0
+  }
+  store %15, %14
+  emit {
+    %16 = load %1
+  }
+  return %16
+}

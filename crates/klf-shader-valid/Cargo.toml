@@ -1,0 +1,11 @@
+[package]
+name = "klf-shader-valid"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-shader = { path = "../klf-shader" }
+
+[lints]
+workspace = true

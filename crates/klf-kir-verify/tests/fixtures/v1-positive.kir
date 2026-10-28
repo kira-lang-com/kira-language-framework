@@ -1,0 +1,12 @@
+module @V1Positive lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @choose(%condition: i1, %value: i64) -> i64 engine(runtime) {
+bb0(%condition: i1, %value: i64):
+  cond.br %condition, bb1(%value), bb2(%value)
+bb1(%left: i64):
+  br bb3(%left)
+bb2(%right: i64):
+  br bb3(%right)
+bb3(%result: i64):
+  return %result
+}

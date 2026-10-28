@@ -1,0 +1,16 @@
+[package]
+name = "klf-shader-spirv"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-shader = { path = "../klf-shader" }
+klf-shader-valid = { path = "../klf-shader-valid" }
+klf-shader-bind = { path = "../klf-shader-bind" }
+
+[dev-dependencies]
+klf-shader-passes = { path = "../klf-shader-passes" }
+
+[lints]
+workspace = true

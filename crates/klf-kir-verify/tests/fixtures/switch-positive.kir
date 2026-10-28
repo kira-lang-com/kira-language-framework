@@ -1,0 +1,14 @@
+module @Switch lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @classify(%n: i64) -> i64 engine(runtime) {
+bb0(%n: i64):
+  switch.int %n, [0: bb_zero(%n), 1: bb_one()], default bb_default()
+bb_zero(%passed: i64):
+  return %passed
+bb_one():
+  %one = const.int i64, 1
+  return %one
+bb_default():
+  %minus = const.int i64, -1
+  return %minus
+}

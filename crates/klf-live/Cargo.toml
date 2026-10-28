@@ -1,0 +1,15 @@
+[package]
+name = "klf-live"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-core = { path = "../klf-core" }
+klf-kir = { path = "../klf-kir" }
+klf-ridl = { path = "../klf-ridl" }
+klf-target = { path = "../klf-target" }
+klf-vm = { path = "../klf-vm" }
+
+[lints]
+workspace = true

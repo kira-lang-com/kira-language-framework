@@ -1,0 +1,12 @@
+module @ConvertPositive lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @widen(%v: i8) -> f64 engine(runtime) {
+bb0(%v: i8):
+  %wide = sext %v to i64
+  %float = sitofp %wide to f64
+  %back = fptosi %float to i32
+  %narrow = trunc %back to i8
+  %zero = zext %narrow to i64
+  %result = sitofp %zero to f64
+  return %result
+}

@@ -1,0 +1,11 @@
+// expect KLF-KIR-1002
+module @StructField lang "test" target "aarch64-apple-darwin" stage raw
+
+type %Pair = struct ridl { first: i64, second: i64 }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func private @build(%a: i64, %b: i32) -> i64 engine(runtime) {
+bb0(%a: i64, %b: i32):
+  %pair = struct.new %Pair(%a, %b)
+  return %a
+}

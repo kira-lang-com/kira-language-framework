@@ -1,0 +1,27 @@
+[package]
+name = "klf-kira-lower"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-args = { path = "../klf-args" }
+klf-core = { path = "../klf-core" }
+klf-source = { path = "../klf-source" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-target = { path = "../klf-target" }
+klf-services = { path = "../klf-services" }
+klf-shader = { path = "../klf-shader" }
+klf-facts = { path = "../klf-facts" }
+klf-kira-syntax = { path = "../klf-kira-syntax" }
+
+[dev-dependencies]
+klf-vm = { path = "../klf-vm" }
+klf-kir = { path = "../klf-kir" }
+klf-kir-passes = { path = "../klf-kir-passes" }
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-llvm = { path = "../klf-llvm" }
+
+[lints]
+workspace = true

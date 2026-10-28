@@ -1,0 +1,8 @@
+// expect KLF-KIR-1002
+module @VectorElementwise lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @widen(%v: vec<4 x i32>) -> vec<2 x i64> engine(runtime) {
+bb0(%v: vec<4 x i32>):
+  %wide = sext %v to vec<2 x i64>
+  return %wide
+}

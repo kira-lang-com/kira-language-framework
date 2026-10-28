@@ -1,0 +1,8 @@
+// expect KLF-KIR-1002
+module @VectorLane lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @lane(%v: vec<4 x i32>) -> i32 engine(runtime) {
+bb0(%v: vec<4 x i32>):
+  %lane = vec.extract %v, 9
+  return %lane
+}

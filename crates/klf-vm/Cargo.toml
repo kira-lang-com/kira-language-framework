@@ -1,0 +1,24 @@
+[package]
+name = "klf-vm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+execution-profile = []
+
+[dependencies]
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-layout = { path = "../klf-layout" }
+klf-host-files = { path = "../klf-host-files" }
+klf-host-crypto = { path = "../klf-host-crypto" }
+klf-host-net = { path = "../klf-host-net" }
+klf-host-process = { path = "../klf-host-process" }
+klf-ridl = { path = "../klf-ridl" }
+klf-rt = { path = "../klf-rt" }
+klf-target = { path = "../klf-target" }
+
+[lints]
+workspace = true

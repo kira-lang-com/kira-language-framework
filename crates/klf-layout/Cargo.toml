@@ -1,0 +1,12 @@
+[package]
+name = "klf-layout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-core = { path = "../klf-core" }
+klf-kir = { path = "../klf-kir" }
+
+[lints]
+workspace = true

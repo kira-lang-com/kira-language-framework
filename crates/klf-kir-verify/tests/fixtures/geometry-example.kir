@@ -1,0 +1,18 @@
+module @Geometry lang "kira" target "aarch64-linux" stage canonical
+
+type %Vec3 = struct ridl { x: f64, y: f64, z: f64 }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func exported @Geometry.length(%v: borrow %Vec3) -> f64 engine(any) {
+bb0(%v: borrow %Vec3):
+  %x = struct.extract %v, 0 !loc("geo.kira":4:12)
+  %y = struct.extract %v, 1
+  %z = struct.extract %v, 2
+  %xx = fmul %x, %x
+  %yy = fmul %y, %y
+  %zz = fmul %z, %z
+  %s0 = fadd %xx, %yy
+  %s1 = fadd %s0, %zz
+  %r = fsqrt %s1
+  return %r
+}

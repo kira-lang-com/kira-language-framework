@@ -1,0 +1,150 @@
+// Lines of `let x` and `use x` over one-letter names, for the editor corpus
+// runner of `KLF-EDITOR.md` Appendix A. A `let` declares its name, a `use`
+// refers to it, and a `use` of a name no earlier `let` declared is error
+// 3001. The formatter puts one space between a line's words.
+construct Names() extends Language<Tree, Program> {
+    let name: String = "names"
+    let driver: String = "names"
+    let version: String = "0.1.0"
+    let extensions: [String] = ["names"]
+    let memory: MemoryModel = .Unmanaged
+    let exclusivity: Exclusivity = .None
+    let convention: DefaultConvention = .Ridl
+    let stdRoot: String = "std"
+    let diagnostics: [DiagnosticSpec] = [
+        DiagnosticSpec {
+            code = 3001,
+            severity = .Error,
+            title = "undeclared name",
+            explanation = "No earlier `let` declares this name."
+        }
+    ]
+
+    function units(session: Session, inputs: [SourceFile]) -> [Unit] {
+        var result: [Unit] = []
+        for file in inputs {
+            result.append(definition_unit(session, file))
+        }
+        return result
+    }
+
+    function parse(session: Session, unit: Unit) -> Tree {
+        scan()
+        return definition_tree(session, unit, 0)
+    }
+
+    function elaborate(session: Session, unit: Unit, tree: Tree) -> Program {
+        return definition_program(session, unit, 0)
+    }
+
+    function lower(session: Session, unit: Unit, program: Program) -> KirModule {
+        let module = kir_module_new(session, unit, program)
+        return kir_module_finish(module)
+    }
+
+    function format(session: Session, unit: Unit, tree: Tree) -> Bool {
+        var at = 0
+        var started = false
+        while at < source_len() {
+            let end = line_end(at)
+            var word = skip_spaces(at)
+            var first = true
+            while word < end {
+                if first {
+                    if started {
+                        format_line(2)
+                    }
+                } else {
+                    format_line(3)
+                }
+                format_token(word, word_end(word))
+                first = false
+                started = true
+                word = skip_spaces(word_end(word))
+            }
+            at = end + 1
+        }
+        return true
+    }
+}
+
+function line_end(index: Int) -> Int {
+    var at = index
+    while at < source_len() {
+        if source_byte(at) == (10 as U8) {
+            return at
+        }
+        at = at + 1
+    }
+    return at
+}
+
+function skip_spaces(index: Int) -> Int {
+    var at = index
+    while at < source_len() {
+        if source_byte(at) != (32 as U8) {
+            return at
+        }
+        at = at + 1
+    }
+    return at
+}
+
+function word_end(index: Int) -> Int {
+    var at = index
+    while at < source_len() {
+        let byte = source_byte(at)
+        if byte == (32 as U8) {
+            return at
+        }
+        if byte == (10 as U8) {
+            return at
+        }
+        at = at + 1
+    }
+    return at
+}
+
+function scan() {
+    var at = 0
+    while at < source_len() {
+        let end = line_end(at)
+        let first = skip_spaces(at)
+        let first_end = word_end(first)
+        let second = skip_spaces(first_end)
+        let second_end = word_end(second)
+        if second_end - second == 1 {
+            let name = source_byte(second) as Int
+            editor_classify(-1, first, first_end, 7, 0)
+            if source_byte(first) == (108 as U8) {
+                editor_symbol(name, -1, first, second_end, second, second_end, 12, -1)
+                editorSymbolText(name, 2, "a name")
+                editor_classify(-1, second, second_end, 20, 1)
+            } else {
+                editor_reference(-1, second, second_end, name, 0)
+                editor_classify(-1, second, second_end, 20, 0)
+                if declared(name, at) == 0 {
+                    diag_error(3001, second, second_end)
+                }
+            }
+        }
+        at = end + 1
+    }
+}
+
+function declared(name: Int, before: Int) -> Int {
+    var at = 0
+    while at < before {
+        let first = skip_spaces(at)
+        let second = skip_spaces(word_end(first))
+        if second < source_len() {
+            if source_byte(first) == (108 as U8) {
+                if (source_byte(second) as Int) == name {
+                    return 1
+                }
+            }
+        }
+        at = line_end(at) + 1
+    }
+    return 0
+}

@@ -1,0 +1,22 @@
+[package]
+name = "klf-kernel-ide"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-source = { path = "../klf-source" }
+klf-facts = { path = "../klf-facts" }
+klf-ide = { path = "../klf-ide" }
+klf-kir = { path = "../klf-kir" }
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-ridl = { path = "../klf-ridl" }
+klf-kira-syntax = { path = "../klf-kira-syntax" }
+klf-services = { path = "../klf-services" }
+klf-target = { path = "../klf-target" }
+klf-driver = { path = "../klf-driver" }
+
+[lints]
+workspace = true

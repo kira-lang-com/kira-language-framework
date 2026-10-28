@@ -1,0 +1,9 @@
+// expect KLF-KIR-1001
+module @BranchArguments lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @jump(%a: i64) -> i64 engine(runtime) {
+bb0(%a: i64):
+  br bb1()
+bb1(%value: i64):
+  return %value
+}

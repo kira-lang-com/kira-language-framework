@@ -1,0 +1,26 @@
+[package]
+name = "klf-vm-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+# `<driver>-run`, built once per triple by `klf dist` and copied by every
+# sysroot. A language's entry convention is read at startup, so one binary
+# serves them all and no sysroot compiles anything to make a runner.
+[[bin]]
+name = "klfvm-run"
+path = "src/bin/klfvm-run.rs"
+
+[dependencies]
+klf-diag = { path = "../klf-diag" }
+klf-vm = { path = "../klf-vm" }
+klf-live = { path = "../klf-live" }
+klf-rt = { path = "../klf-rt" }
+klf-native-rt = { path = "../klf-native-rt" }
+klf-host-process = { path = "../klf-host-process" }
+
+[lints]
+workspace = true

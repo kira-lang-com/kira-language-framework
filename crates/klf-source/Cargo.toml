@@ -1,0 +1,12 @@
+[package]
+name = "klf-source"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+klf-core = { path = "../klf-core" }
+
+[lints]
+workspace = true

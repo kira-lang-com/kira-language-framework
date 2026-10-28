@@ -1,0 +1,86 @@
+name: Release
+
+# klf for every host it runs on: `cargo xtask release` lays out the
+# distribution with the RIDL LLVM and packs it as `klf-<version>-<host>.tar.gz`
+# beside a `.sha256`, the archive `klf setup` and `knvm klf install` fetch. A
+# tag `v<version>` publishes; a manual run builds, and publishes when asked.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, as `26.10.4`"
+        required: true
+        type: string
+      publish:
+        description: "Publish the release after the build succeeds"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.host }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { host: aarch64-macos, runner: macos-15 }
+          - { host: x86_64-linux-gnu, runner: ubuntu-24.04 }
+          - { host: aarch64-linux-gnu, runner: ubuntu-24.04-arm }
+          - { host: x86_64-windows-msvc, runner: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build and pack
+        shell: bash
+        run: cargo xtask release "$RUNNER_TEMP/out" "${TAG#v}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: klf-${{ matrix.host }}
+          path: |
+            ${{ runner.temp }}/out/*.tar.gz
+            ${{ runner.temp }}/out/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: build
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: klf-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "klf ${TAG#v}" \
+              --notes "Install or update with \`klf setup\`, or \`knvm klf install latest\`."
+          fi
+          gh release upload "$TAG" dist/* --clobber

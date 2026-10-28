@@ -1,0 +1,73 @@
+ksir 1
+module @Tri lang "ksl" capabilities()
+
+type %Camera = struct explicit size 64 align 16 {
+  view_projection: mat4x4<f32> offset 0 size 64 align 16
+}
+type %VertexIn = struct none {
+  vid: u32 @builtin(vertex_index)
+}
+type %VertexOut = struct none {
+  clip: vec4<f32> @builtin(position),
+  color: vec4<f32> @location(0)
+}
+type %FragmentOut = struct none {
+  color: vec4<f32> @location(0)
+}
+
+global @camera: %Camera space(uniform) binding(0, 0)
+
+shader @Tri graphics {
+  group @Frame class(frame) { @camera }
+  entries { @vertex_main, @fragment_main }
+}
+
+entry vertex @vertex_main(%input: %VertexIn) -> %VertexOut {
+  local $out: %VertexOut
+  local $x: f32
+  %0 = arg 0
+  %1 = local $out
+  %2 = local $x
+  %3 = global @camera
+  %4 = literal 1.0f32
+  %5 = literal 0.0f32
+  emit {
+    %6 = access_index %0, 0
+    %7 = convert %6, float
+    %8 = binary subtract %7, %4
+  }
+  store %2, %8
+  emit {
+    %9 = access_index %1, 0
+    %10 = access_index %3, 0
+    %11 = load %10
+    %12 = load %2
+    %13 = compose vec4<f32>, [%12, %5, %5, %4]
+    %14 = binary multiply %11, %13
+  }
+  store %9, %14
+  emit {
+    %15 = access_index %1, 1
+    %16 = compose vec4<f32>, [%4, %5, %5, %4]
+  }
+  store %15, %16
+  emit {
+    %17 = load %1
+  }
+  return %17
+}
+
+entry fragment @fragment_main(%input: %VertexOut) -> %FragmentOut {
+  local $out: %FragmentOut
+  %0 = arg 0
+  %1 = local $out
+  emit {
+    %2 = access_index %1, 0
+    %3 = access_index %0, 1
+  }
+  store %2, %3
+  emit {
+    %4 = load %1
+  }
+  return %4
+}

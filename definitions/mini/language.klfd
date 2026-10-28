@@ -1,0 +1,54 @@
+construct Mini() extends Language<Tree, Program> {
+    let name: String = "mini"
+    let driver: String = "mini"
+    let version: String = "0.1.0"
+    let extensions: [String] = ["mini", "minic"]
+    let memory: MemoryModel = .Unmanaged
+    let exclusivity: Exclusivity = .None
+    let convention: DefaultConvention = .Ridl
+    let stdRoot: String = "std"
+    let fileModes: [FileMode] = [FileMode {
+        name = "raw",
+        pragma = "mini raw",
+        flag = "-fmini-raw",
+        memory = .Some(.Unmanaged),
+        convention = .None
+    }, FileMode {
+        name = "counted",
+        pragma = "mini counted",
+        flag = "-fmini-counted",
+        extensions = ["minic"],
+        memory = .Some(.Counted),
+        convention = .Some(.Platform)
+    }]
+
+    function units(session: Session, inputs: [SourceFile]) -> [Unit] {
+        var result: [Unit] = []
+        for file in inputs {
+            result.append(definition_unit(session, file))
+        }
+        return result
+    }
+
+    function parse(session: Session, unit: Unit) -> Tree {
+        editor_symbol(1, -1, 0, source_len(), 0, name_end(), 11, -1)
+        editor_classify(-1, 0, name_end(), 17, 1)
+        return definition_tree(session, unit, literal_value())
+    }
+
+    function elaborate(session: Session, unit: Unit, tree: Tree) -> Program {
+        return definition_program(session, unit, definition_tree_payload(session, tree))
+    }
+
+    function lower(session: Session, unit: Unit, program: Program) -> KirModule {
+        let builder = kir_module_new(session, unit, program)
+        let word = kir_type_integer(64)
+        let entry = kir_signature_new(builder, 0, name_end(), word)
+        let main = kir_signature_define(entry)
+        let base = kir_value_integer(main, word, literal_value())
+        let bias = kir_value_integer(main, word, 2)
+        let total = kir_value_binary(main, 0, 0, 1, base, bias)
+        kir_function_result(main, total)
+        return kir_module_finish(builder)
+    }
+}

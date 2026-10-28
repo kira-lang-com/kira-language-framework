@@ -1,0 +1,11 @@
+// expect KLF-KIR-1002
+module @RawPointer lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @fill(%length: i64) -> unit engine(runtime) {
+bb0(%length: i64):
+  %slot = stack.alloc i64
+  %byte = const.int i8, 0
+  mem.set %slot, %byte, %length
+  stack.dealloc %slot
+  return
+}

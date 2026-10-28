@@ -1,0 +1,6 @@
+module @V11Neg lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @bad(%x: $T) -> $T engine(runtime) {
+bb0(%x: $T):
+  return %x
+}

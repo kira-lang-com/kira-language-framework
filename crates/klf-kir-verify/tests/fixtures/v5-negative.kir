@@ -1,0 +1,12 @@
+module @V5Neg lang "test" target "aarch64-apple-darwin" stage canonical
+
+func private @borrow_consumed() -> i64 engine(runtime) {
+bb0():
+  %r = heap.alloc.counted i64
+  %b = borrow.begin %r
+  borrow.end %b
+  destroy %b
+  destroy %r
+  %z = const.int i64, 0
+  return %z
+}

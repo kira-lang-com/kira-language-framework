@@ -1,0 +1,11 @@
+// expect KLF-KIR-1002
+module @EnumVariant lang "test" target "aarch64-apple-darwin" stage raw
+
+type %Shape = enum ridl { empty, point(i64) }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func private @build(%a: i64) -> i64 engine(runtime) {
+bb0(%a: i64):
+  %shape = enum.new %Shape, 7(%a)
+  return %a
+}

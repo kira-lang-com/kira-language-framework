@@ -1,0 +1,18 @@
+// Section 12.5: vector lanes and intrinsics.
+module @Vector lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @lanes(%v: vec<4 x i32>, %e: i32) -> i32 engine(runtime) {
+bb0(%v: vec<4 x i32>, %e: i32):
+  %splat = vec.splat vec<4 x i32>, %e
+  %lane = vec.extract %v, 2
+  %inserted = vec.insert %v, 1, %e
+  %mixed = vec.shuffle %v, %splat, [0, 1, 4, 7]
+  %counted = intrinsic "klf.popcount"(%e) -> i32
+  %sum = add [wrap] %v, %splat
+  %less = icmp slt %v, %splat
+  %least = select %less, %v, %splat
+  %wide = sext %least to vec<4 x i64>
+  %real = sitofp %wide to vec<4 x f64>
+  %halved = fdiv %real, %real
+  return %lane
+}

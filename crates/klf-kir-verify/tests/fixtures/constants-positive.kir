@@ -1,0 +1,23 @@
+module @Constants lang "test" target "aarch64-apple-darwin" stage raw
+
+type %Token = struct ridl { value: i64 }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func private @identity(%value: i64) -> i64 engine(runtime) {
+bb0(%value: i64):
+  return %value
+}
+
+func private @constants() -> unit engine(runtime) {
+bb0():
+  %float = const.float f64, 3.5
+  %zero = const.zero i128
+  (%text, %text_len) = const.string "KLF"
+  %function = func.ref @identity
+  %global = global.addr @counter
+  %tls = tls.addr @thread_counter
+  %descriptor = descriptor.ref %Token
+  %witness = witness.ref %Token, %Printable
+  %block = block.addr bb0
+  return
+}

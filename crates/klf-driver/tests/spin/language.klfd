@@ -1,0 +1,98 @@
+// A definition that misbehaves on purpose, for the cancellation suite of
+// `KLF-EDITOR.md` section 24.1. The first byte of the source picks what it
+// does: `s` spins in a loop, `r` recurses deeply over and over, `a`
+// allocates arrays in a loop, `t` traps. The second picks the phase: `1`
+// parse, `2` elaborate, `3` lower. Any other source compiles at once.
+construct Spin() extends Language<Tree, Program> {
+    let name: String = "spin"
+    let driver: String = "spin"
+    let version: String = "0.1.0"
+    let extensions: [String] = ["spin"]
+    let memory: MemoryModel = .Unmanaged
+    let exclusivity: Exclusivity = .None
+    let convention: DefaultConvention = .Ridl
+    let stdRoot: String = "std"
+
+    function units(session: Session, inputs: [SourceFile]) -> [Unit] {
+        var result: [Unit] = []
+        for file in inputs {
+            result.append(definition_unit(session, file))
+        }
+        return result
+    }
+
+    function parse(session: Session, unit: Unit) -> Tree {
+        editor_classify(-1, 0, 1, 17, 1)
+        return definition_tree(session, unit, misbehave(1))
+    }
+
+    function elaborate(session: Session, unit: Unit, tree: Tree) -> Program {
+        let payload = definition_tree_payload(session, tree) + misbehave(2)
+        return definition_program(session, unit, payload)
+    }
+
+    function lower(session: Session, unit: Unit, program: Program) -> KirModule {
+        misbehave(3)
+        let builder = kir_module_new(session, unit, program)
+        let word = kir_type_integer(64)
+        let entry = kir_signature_new(builder, 0, 1, word)
+        let main = kir_signature_define(entry)
+        kir_function_result(main, kir_value_integer(main, word, 0))
+        return kir_module_finish(builder)
+    }
+}
+
+function misbehave(phase: Int) -> Int {
+    if source_len() < 2 {
+        return 0
+    }
+    if (source_byte(1) as Int) - 48 != phase {
+        return 0
+    }
+    let what = source_byte(0)
+    if what == (115 as U8) {
+        spin()
+    } else if what == (114 as U8) {
+        recurse()
+    } else if what == (97 as U8) {
+        allocate()
+    } else if what == (116 as U8) {
+        return 1 / (source_len() - source_len())
+    }
+    return 0
+}
+
+function spin() {
+    var count = 0
+    while count >= 0 {
+        count = (count + 1) % 1000
+    }
+}
+
+function deep(depth: Int) -> Int {
+    if depth == 0 {
+        return 0
+    }
+    return deep(depth - 1) + 1
+}
+
+function recurse() {
+    var total = 0
+    while total >= 0 {
+        total = deep(1000) - 1000
+    }
+}
+
+function allocate() {
+    var rounds = 0
+    while rounds >= 0 {
+        rounds = (rounds + collect(rounds)) % 1000
+    }
+}
+
+function collect(round: Int) -> Int {
+    var items: [Int] = []
+    items.append(round)
+    items.append(round + 1)
+    return items.count
+}

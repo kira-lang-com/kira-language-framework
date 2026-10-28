@@ -1,0 +1,28 @@
+[package]
+name = "klf-defsvc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-args = { path = "../klf-args" }
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-klffi = { path = "../klf-klffi" }
+klf-layout = { path = "../klf-layout" }
+klf-ridl = { path = "../klf-ridl" }
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-rt = { path = "../klf-rt" }
+klf-services = { path = "../klf-services" }
+klf-shader = { path = "../klf-shader" }
+klf-shader-out = { path = "../klf-shader-out" }
+klf-source = { path = "../klf-source" }
+klf-target = { path = "../klf-target" }
+klf-facts = { path = "../klf-facts" }
+klf-format = { path = "../klf-format" }
+
+klf-vm = { path = "../klf-vm" }
+
+[lints]
+workspace = true

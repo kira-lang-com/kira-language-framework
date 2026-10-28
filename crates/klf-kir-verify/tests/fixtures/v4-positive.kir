@@ -1,0 +1,29 @@
+module @V4Pos lang "test" target "aarch64-apple-darwin" stage canonical
+
+func private @balanced() -> i64 engine(runtime) {
+bb0():
+  %r = heap.alloc.counted i64
+  destroy %r
+  %z = const.int i64, 0
+  return %z
+}
+
+func private @consumed_each_path(%c: i1) -> i64 engine(runtime) {
+bb0(%c: i1):
+  %r = heap.alloc.counted i64
+  cond.br %c, bb1(), bb2()
+bb1():
+  destroy %r
+  %a = const.int i64, 1
+  return %a
+bb2():
+  destroy %r
+  %b = const.int i64, 2
+  return %b
+}
+
+func private @trap_path_exempt() -> i64 engine(runtime) {
+bb0():
+  %r = heap.alloc.counted i64
+  trap KLF-RT-0001
+}

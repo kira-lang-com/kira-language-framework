@@ -1,0 +1,61 @@
+// Sections 12.14 through 12.16: atomics, variadics, hints and type queries.
+module @System lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @atomics(%pointer: ptr, %value: i64) -> i64 engine(runtime) {
+bb0(%pointer: ptr, %value: i64):
+  %loaded = atomic.load i64, %pointer seq_cst
+  atomic.store %value, %pointer release
+  %exchanged = atomic.rmw xchg %pointer, %value acq_rel
+  %added = atomic.rmw add %pointer, %value relaxed
+  %subtracted = atomic.rmw sub %pointer, %value relaxed
+  %masked = atomic.rmw and %pointer, %value relaxed
+  %merged = atomic.rmw or %pointer, %value relaxed
+  %flipped = atomic.rmw xor %pointer, %value relaxed
+  %inverted = atomic.rmw nand %pointer, %value relaxed
+  %largest = atomic.rmw max %pointer, %value relaxed
+  %smallest = atomic.rmw min %pointer, %value relaxed
+  %unsigned_max = atomic.rmw umax %pointer, %value relaxed
+  %unsigned_min = atomic.rmw umin %pointer, %value relaxed
+  (%previous, %succeeded) = atomic.cmpxchg %pointer, %value, %value seq_cst acquire
+  (%weak_previous, %weak_succeeded) = atomic.cmpxchg [weak] %pointer, %value, %value seq_cst relaxed
+  fence seq_cst
+  return %loaded
+}
+
+func private @variadics(%list: ptr) -> i64 engine(runtime) returns_twice {
+bb0(%list: ptr):
+  va.start %list
+  %argument = va.arg i64, %list
+  %copy = stack.alloc i64
+  %copy_pointer = addr.toptr %copy
+  va.copy %copy_pointer, %list
+  va.end %list
+  %buffer = stack.alloc i64
+  %jumped = setjmp %buffer
+  %code = const.int i64, 1
+  longjmp %buffer, %code
+  stack.dealloc %buffer
+  stack.dealloc %copy
+  return %argument
+}
+
+func private @hints(%value: i64, %flag: i1) -> i64 engine(runtime) {
+bb0(%value: i64, %flag: i1):
+  debug.value %value, !var("value", i64, "hints")
+  %slot = stack.alloc i64
+  debug.addr %slot, !var("slot", i64, "hints")
+  assume %flag
+  %likely = expect %value, 1
+  nop
+  %size = type.size i64
+  %align = type.align i64
+  %stride = type.stride i64
+  stack.dealloc %slot
+  return %size
+}
+
+func private @machine() -> unit engine(native) {
+bb0():
+  asm "nop"
+  return
+}

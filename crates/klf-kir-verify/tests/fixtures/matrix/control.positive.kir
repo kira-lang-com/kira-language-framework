@@ -1,0 +1,43 @@
+// Section 12.13: terminators.
+module @Control lang "test" target "aarch64-apple-darwin" stage raw
+
+type %Shape = enum ridl { empty, point(i64) }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func private @branches(%a: i64, %flag: i1) -> i64 engine(runtime) {
+bb0(%a: i64, %flag: i1):
+  cond.br %flag, bb1(%a), bb2()
+bb1(%value: i64):
+  switch.int %value, [0: bb2(), 1: bb3(%value)], default bb2()
+bb2():
+  %zero = const.int i64, 0
+  br bb3(%zero)
+bb3(%result: i64):
+  return %result
+}
+
+func private @enum_switch(%slot: *%Shape) -> i64 engine(runtime) {
+bb0(%slot: *%Shape):
+  switch.enum %slot, [0: bb1(), 1: bb2()]
+bb1():
+  %zero = const.int i64, 0
+  return %zero
+bb2():
+  %one = const.int i64, 1
+  return %one
+}
+
+func private @indirect(%selector: i64) -> unit engine(runtime) {
+bb0(%selector: i64):
+  %label = block.addr bb1
+  br.indirect %label, [bb1, bb2]
+bb1():
+  return
+bb2():
+  unreachable
+}
+
+func private @aborts() -> unit engine(runtime) {
+bb0():
+  trap 1
+}

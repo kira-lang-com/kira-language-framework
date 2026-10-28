@@ -1,0 +1,6 @@
+module @V3Negative lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @fallthrough() -> unit engine(runtime) {
+bb0():
+  %value = const.int i64, 1
+}

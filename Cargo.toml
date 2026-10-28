@@ -1,0 +1,77 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/klf-core",
+    "crates/klf-args",
+    "crates/klf-source",
+    "crates/klf-text",
+    "crates/klf-facts",
+    "crates/klf-format",
+    "crates/klf-ide",
+    "crates/klf-lsp",
+    "crates/klf-kernel-ide",
+    "crates/klf-editor-gen",
+    "crates/klf-diag",
+    "crates/klf-target",
+    "crates/klf-kir",
+    "crates/klf-vm",
+    "crates/klf-live",
+    "crates/klf-rt",
+    "crates/klf-host-files",
+    "crates/klf-host-process",
+    "crates/klf-host-net",
+    "crates/klf-host-crypto",
+    "crates/klf-llvm",
+    "crates/klf-cranelift",
+    "crates/klf-native-rt",
+    "crates/klf-frontend-rt",
+    "crates/klf-vm-rt",
+    "crates/klf-layout",
+    "crates/klf-shader",
+    "crates/klf-shader-valid",
+    "crates/klf-shader-passes",
+    "crates/klf-shader-bind",
+    "crates/klf-shader-reflect",
+    "crates/klf-shader-spirv",
+    "crates/klf-shader-ide",
+    "crates/klf-shader-out",
+    "crates/klf-shader-driver",
+    "crates/klf-kir-passes",
+    "crates/klf-ridl",
+    "crates/klf-ridl-wire",
+    "crates/klf-klffi",
+    "crates/klf-kira-syntax",
+    "crates/klf-services",
+    "crates/klf-defsvc",
+    "crates/klf-kira-lower",
+    "crates/klf-cli",
+    "crates/klf-toy-calc",
+    "crates/klf-driver",
+    "xtask",
+]
+
+[workspace.package]
+version = "26.10.4"
+edition = "2024"
+rust-version = "1.96"
+
+[workspace.lints.rust]
+# `deny`, not `forbid`, so the one spec-mandated unsafe region — the VM's
+# foreign-call trampoline (section 15.6) — can opt in with a narrow, documented
+# `#[allow(unsafe_code)]`. Everywhere else unsafe is still an error.
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# The RIDL calling convention of KLF-RIDL section 22 lives in a Cranelift fork:
+# `CallConv::Ridl`, its aarch64 and x86_64 lowering, and the `extra_clobbers`
+# hook that lets a call from a platform function into a RIDL one add only the
+# error register. It is pinned by tag so a checkout builds without a sibling
+# clone of the fork.
+[patch.crates-io]
+cranelift = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }
+cranelift-codegen = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }
+cranelift-module = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }
+cranelift-object = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }

@@ -1,0 +1,61 @@
+// Sections 12.7 through 12.9: addresses, raw memory and the heap.
+module @Memory lang "test" target "aarch64-apple-darwin" stage raw
+
+type %Pair = struct ridl { first: i64, second: i64 }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+func private @addresses(%value: i64) -> i64 engine(runtime) {
+bb0(%value: i64):
+  %pair = stack.alloc %Pair
+  %first = field.addr %pair, 0
+  store [init] %value to %first
+  %loaded = load [trivial] %first
+  %copy = stack.alloc %Pair
+  copy.addr %pair to [init] %copy
+  move.addr %copy to [assign] %pair
+  destroy.addr %pair
+  %array = stack.alloc [4 x i64]
+  %index = const.int i64, 2
+  %element = elem.addr %array, %index
+  %recast = addr.cast %first to i64
+  %raw = addr.toptr %first
+  stack.dealloc %array
+  stack.dealloc %copy
+  stack.dealloc %pair
+  return %loaded
+}
+
+func private @raw(%size: i64, %align: i64) -> i64 engine(runtime) {
+bb0(%size: i64, %align: i64):
+  %block = heap.alloc.raw %size, %align
+  %byte = const.int i8, 0
+  mem.set %block, %byte, %size
+  %next = ptr.offset %block, %size
+  mem.copy %next, %block, %size
+  mem.move %block, %next, %size
+  %distance = ptr.diff %next, %block
+  %word = const.int i64, 7
+  raw.store %word, %block align 8
+  %back = raw.load i64, %block align 8 volatile
+  heap.free.raw %block
+  return %back
+}
+
+func private @heap(%count: i64) -> i64 engine(runtime) {
+bb0(%count: i64):
+  %counted = heap.alloc.counted i64
+  %address = ref.addr %counted
+  %zero = const.int i64, 0
+  store [init] %zero to %address
+  %weak = weak.new %counted
+  %reloaded = weak.load %weak
+  %unowned = ref.unowned %counted
+  %unique_flag = ref.isunique %counted
+  %owned = heap.alloc.unique i64
+  %owned_address = uniq.addr %owned
+  %elements = heap.alloc.array i64, %count
+  %raw = into.raw %owned
+  %restored = from.raw i64, %raw
+  destroy %counted
+  return %zero
+}

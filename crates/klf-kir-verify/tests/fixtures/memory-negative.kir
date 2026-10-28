@@ -1,0 +1,9 @@
+module @MemoryNegative lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @bad_store(%v: i32) -> unit engine(runtime) {
+bb0(%v: i32):
+  %slot = stack.alloc i64
+  store [trivial] %v to %slot
+  stack.dealloc %slot
+  return
+}

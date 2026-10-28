@@ -1,0 +1,20 @@
+module @Memory lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @stack_roundtrip(%v: i64) -> i64 engine(runtime) {
+bb0(%v: i64):
+  %slot = stack.alloc i64
+  store [trivial] %v to %slot
+  %back = load [trivial] %slot
+  stack.dealloc %slot
+  return %back
+}
+
+func private @heap_counted() -> unit engine(runtime) {
+bb0():
+  %r = heap.alloc.counted i64
+  %addr = ref.addr %r
+  %zero = const.int i64, 0
+  store [trivial] %zero to %addr
+  destroy %r
+  return
+}

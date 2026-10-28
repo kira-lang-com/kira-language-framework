@@ -1,0 +1,8 @@
+module @V9Pos lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @ok() -> i64 engine(native) {
+bb0():
+  asm "nop"
+  %z = const.int i64, 0
+  return %z
+}

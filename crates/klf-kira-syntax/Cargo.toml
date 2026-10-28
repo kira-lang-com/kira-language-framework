@@ -1,0 +1,13 @@
+[package]
+name = "klf-kira-syntax"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-core = { path = "../klf-core" }
+klf-source = { path = "../klf-source" }
+klf-diag = { path = "../klf-diag" }
+
+[lints]
+workspace = true

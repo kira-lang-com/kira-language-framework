@@ -1,0 +1,14 @@
+[package]
+name = "klf-ide"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-facts = { path = "../klf-facts" }
+klf-text = { path = "../klf-text" }
+
+[lints]
+workspace = true

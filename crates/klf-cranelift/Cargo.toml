@@ -1,0 +1,37 @@
+[package]
+name = "klf-cranelift"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cranelift = "0.135.2"
+cranelift-codegen = { version = "0.135.2", features = ["x86", "arm64", "incremental-cache"] }
+cranelift-module = "0.135.2"
+cranelift-object = "0.135.2"
+gimli = { version = "0.33.0", default-features = false, features = ["write"] }
+object = { version = "0.39.1", default-features = false, features = ["write", "read_core", "macho"] }
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-layout = { path = "../klf-layout" }
+klf-target = { path = "../klf-target" }
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10.9"
+postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
+target-lexicon = "0.13.5"
+
+[dev-dependencies]
+klf-vm = { path = "../klf-vm" }
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-kir-passes = { path = "../klf-kir-passes" }
+
+
+# The code cache names each function by its SHA-256; this turns on the
+# hardware instructions for it on aarch64, which sha2 leaves off by default.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+sha2 = { version = "0.10.9", features = ["asm"] }
+
+[lints]
+workspace = true

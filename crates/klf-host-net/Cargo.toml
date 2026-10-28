@@ -1,0 +1,12 @@
+[package]
+name = "klf-host-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mio = { version = "1.2", features = ["net", "os-poll"] }
+socket2 = "0.6"
+
+[lints]
+workspace = true

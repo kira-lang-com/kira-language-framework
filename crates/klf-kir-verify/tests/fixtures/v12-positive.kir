@@ -1,0 +1,7 @@
+module @V12Pos lang "test" target "aarch64-apple-darwin" stage canonical
+
+func exported @api(%x: i64, %r: ref i64) -> i64 engine(runtime) {
+bb0(%x: i64, %r: ref i64):
+  destroy %r
+  return %x
+}

@@ -1,0 +1,8 @@
+// expect KLF-KIR-1002
+module @ConvertSaturating lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @narrow(%i: i64) -> i64 engine(runtime) {
+bb0(%i: i64):
+  %result = fptosi [sat] %i to i64
+  return %result
+}

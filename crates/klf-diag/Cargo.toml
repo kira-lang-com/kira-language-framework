@@ -1,0 +1,14 @@
+[package]
+name = "klf-diag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-source = { path = "../klf-source" }
+
+[dev-dependencies]
+klf-core = { path = "../klf-core" }
+
+[lints]
+workspace = true

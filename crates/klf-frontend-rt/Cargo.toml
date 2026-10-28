@@ -1,0 +1,46 @@
+[package]
+name = "klf-frontend-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+klf-args = { path = "../klf-args" }
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-cranelift = { path = "../klf-cranelift" }
+klf-defsvc = { path = "../klf-defsvc" }
+klf-facts = { path = "../klf-facts" }
+klf-format = { path = "../klf-format" }
+klf-ide = { path = "../klf-ide" }
+klf-lsp = { path = "../klf-lsp" }
+klf-kir = { path = "../klf-kir" }
+klf-kir-passes = { path = "../klf-kir-passes" }
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-live = { path = "../klf-live" }
+klf-native-rt = { path = "../klf-native-rt" }
+klf-ridl = { path = "../klf-ridl" }
+klf-services = { path = "../klf-services" }
+klf-shader = { path = "../klf-shader" }
+klf-shader-driver = { path = "../klf-shader-driver" }
+klf-shader-ide = { path = "../klf-shader-ide" }
+klf-shader-bind = { path = "../klf-shader-bind" }
+klf-shader-passes = { path = "../klf-shader-passes" }
+klf-shader-reflect = { path = "../klf-shader-reflect" }
+klf-shader-spirv = { path = "../klf-shader-spirv" }
+klf-shader-out = { path = "../klf-shader-out" }
+klf-target = { path = "../klf-target" }
+klf-vm = { path = "../klf-vm" }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+
+# The compiler's allocator: faster than the system's for the backend's many
+# short-lived allocations, and it hands freed pages back instead of keeping
+# them resident.
+[target.'cfg(any(unix, windows))'.dependencies]
+mimalloc = { version = "=0.1.52", default-features = false }
+libmimalloc-sys = { version = "=0.1.49", features = ["extended"] }

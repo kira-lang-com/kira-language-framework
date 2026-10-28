@@ -1,0 +1,111 @@
+// Section 12.2 and 12.3: integer and floating-point arithmetic.
+module @Arith lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @integer(%a: i64, %b: i64) -> i64 engine(runtime) {
+bb0(%a: i64, %b: i64):
+  %add = add [wrap] %a, %b
+  %sub = sub [trap] s %a, %b
+  %mul = mul [sat] u %a, %b
+  %sdiv = sdiv [wrap] %a, %b
+  %udiv = udiv [wrap] %a, %b
+  %srem = srem [wrap] %a, %b
+  %urem = urem [wrap] %a, %b
+  %and = and [wrap] %a, %b
+  %or = or [wrap] %a, %b
+  %xor = xor [wrap] %a, %b
+  %shl = shl [wrap] %a, %b
+  %lshr = lshr [wrap] %a, %b
+  %ashr = ashr [wrap] %a, %b
+  %rotl = rotl [wrap] %a, %b
+  %rotr = rotr [wrap] %a, %b
+  (%sum, %carry) = add.ovf s %a, %b
+  (%difference, %borrow) = sub.ovf u %a, %b
+  (%product, %wide) = mul.ovf s %a, %b
+  return %add
+}
+
+func private @bits(%a: i64) -> i64 engine(runtime) {
+bb0(%a: i64):
+  %not = not %a
+  %neg = neg %a
+  %ctlz = ctlz %a
+  %cttz = cttz %a
+  %ctpop = ctpop %a
+  %bswap = bswap %a
+  %bitreverse = bitreverse %a
+  return %not
+}
+
+func private @compare(%a: i64, %b: i64) -> i1 engine(runtime) {
+bb0(%a: i64, %b: i64):
+  %eq = icmp eq %a, %b
+  %ne = icmp ne %a, %b
+  %slt = icmp slt %a, %b
+  %sle = icmp sle %a, %b
+  %sgt = icmp sgt %a, %b
+  %sge = icmp sge %a, %b
+  %ult = icmp ult %a, %b
+  %ule = icmp ule %a, %b
+  %ugt = icmp ugt %a, %b
+  %uge = icmp uge %a, %b
+  %picked = select %eq, %a, %b
+  return %ne
+}
+
+func private @floating(%x: f64, %y: f64) -> f64 engine(runtime) {
+bb0(%x: f64, %y: f64):
+  %fadd = fadd %x, %y
+  %fsub = fsub %x, %y
+  %fmul = fmul %x, %y
+  %fdiv = fdiv %x, %y
+  %frem = frem %x, %y
+  %fmin = fmin %x, %y
+  %fmax = fmax %x, %y
+  %fneg = fneg %x
+  %fabs = fabs %x
+  %fsqrt = fsqrt %x
+  %ffloor = ffloor %x
+  %fceil = fceil %x
+  %ftrunc = ftrunc %x
+  %fround = fround %x
+  %fused = fma %x, %y, %x
+  return %fused
+}
+
+func private @float_compare(%x: f64, %y: f64) -> i1 engine(runtime) {
+bb0(%x: f64, %y: f64):
+  %oeq = fcmp oeq %x, %y
+  %one = fcmp one %x, %y
+  %olt = fcmp olt %x, %y
+  %ole = fcmp ole %x, %y
+  %ogt = fcmp ogt %x, %y
+  %oge = fcmp oge %x, %y
+  %ord = fcmp ord %x, %y
+  %uno = fcmp uno %x, %y
+  %ueq = fcmp ueq %x, %y
+  %une = fcmp une %x, %y
+  %ult = fcmp ult %x, %y
+  %ule = fcmp ule %x, %y
+  %ugt = fcmp ugt %x, %y
+  %uge = fcmp uge %x, %y
+  return %oeq
+}
+
+func private @conversions(%i: i64, %f: f64, %p: ptr) -> i32 engine(runtime) {
+bb0(%i: i64, %f: f64, %p: ptr):
+  %narrow = trunc %i to i32
+  %zero_extended = zext %narrow to i64
+  %sign_extended = sext %narrow to i64
+  %single = fptrunc %f to f32
+  %double = fpext %single to f64
+  %signed_float = sitofp %i to f64
+  %unsigned_float = uitofp %i to f64
+  %signed_int = fptosi %f to i64
+  %unsigned_int = fptoui %f to i64
+  %signed_saturating = fptosi [sat] %f to i64
+  %unsigned_saturating = fptoui [sat] %f to i64
+  %address_int = ptrtoint %p to i64
+  %int_address = inttoptr %i to ptr
+  %reinterpreted = bitcast %i to f64
+  return %narrow
+}

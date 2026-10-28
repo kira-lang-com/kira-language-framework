@@ -1,0 +1,19 @@
+[package]
+name = "klf-klffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-core = { path = "../klf-core" }
+klf-kir = { path = "../klf-kir" }
+klf-kira-syntax = { path = "../klf-kira-syntax" }
+klf-layout = { path = "../klf-layout" }
+klf-source = { path = "../klf-source" }
+klf-target = { path = "../klf-target" }
+
+[dev-dependencies]
+klf-kir-verify = { path = "../klf-kir-verify" }
+
+[lints]
+workspace = true

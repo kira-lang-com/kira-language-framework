@@ -1,0 +1,99 @@
+ksir 1
+module @B lang "ksl" capabilities(storage-image-read-write)
+
+type %Item = struct explicit size 32 align 16 {
+  weights: vec4<f32> offset 0 size 16 align 16,
+  scale: f32 offset 16 size 4 align 4
+}
+
+type %Q = struct explicit size 16 align 16 {
+  gid: vec3<u32> offset 0 size 16 align 16 @builtin(global_invocation_id)
+} !loc("B.ksl":15:5)
+
+global @data: array<f32, runtime, stride 4> space(storage<load store>) binding(0, 0)
+global @items: array<%Item, runtime, stride 32> space(storage<load>) binding(0, 1)
+global @target: image<2d, storage<rgba8unorm, load store>> space(handle) binding(0, 2)
+
+shader @B compute {
+  group @Dispatch class(dispatch) { @data, @items, @target }
+  entries { @compute_main }
+} !loc("B.ksl":25:13)
+
+entry compute @compute_main(%q: %Q) workgroup(8, 1, 1) { !loc("B.ksl":15:5)
+  local $i: u32 !loc("B.ksl":19:13)
+  local $lane: u32 !loc("B.ksl":20:13)
+  local $item: %Item !loc("B.ksl":21:13)
+  local $texel: vec4<f32> !loc("B.ksl":23:13)
+  %0 = arg 0 !loc("B.ksl":15:5)
+  %1 = local $i !loc("B.ksl":19:13)
+  emit {
+    %2 = access_index %0, 0 !loc("B.ksl":19:13)
+    %3 = access_index %2, 0 !loc("B.ksl":19:13)
+  }
+  store %1, %3 !loc("B.ksl":19:13)
+  %4 = local $lane !loc("B.ksl":20:13)
+  emit {
+    %5 = access_index %0, 0 !loc("B.ksl":20:13)
+    %6 = access_index %5, 1 !loc("B.ksl":20:13)
+  }
+  store %4, %6 !loc("B.ksl":20:13)
+  %7 = local $item !loc("B.ksl":21:13)
+  %8 = global @items !loc("B.ksl":21:13)
+  emit {
+    %9 = load %1 !loc("B.ksl":21:13)
+    %10 = access %8, %9 !loc("B.ksl":21:13)
+    %11 = load %10 !loc("B.ksl":21:13)
+  }
+  store %7, %11 !loc("B.ksl":21:13)
+  %12 = global @data !loc("B.ksl":22:13)
+  emit {
+    %13 = load %1 !loc("B.ksl":22:13)
+  }
+  %14 = literal 1i32 !loc("B.ksl":22:13)
+  emit {
+    %15 = convert %14, uint, 4 !loc("B.ksl":22:13)
+    %16 = binary add %13, %15 !loc("B.ksl":22:13)
+    %17 = access %12, %16 !loc("B.ksl":22:13)
+    %18 = load %17 !loc("B.ksl":22:13)
+    %19 = access_index %7, 0 !loc("B.ksl":22:13)
+    %20 = load %4 !loc("B.ksl":22:13)
+    %21 = access %19, %20 !loc("B.ksl":22:13)
+    %22 = load %21 !loc("B.ksl":22:13)
+    %23 = binary multiply %18, %22 !loc("B.ksl":22:13)
+  }
+  %24 = global @items !loc("B.ksl":22:13)
+  emit {
+    %25 = load %1 !loc("B.ksl":22:13)
+    %26 = access %24, %25 !loc("B.ksl":22:13)
+    %27 = access_index %26, 1 !loc("B.ksl":22:13)
+    %28 = load %27 !loc("B.ksl":22:13)
+    %29 = binary add %23, %28 !loc("B.ksl":22:13)
+  }
+  %30 = global @data !loc("B.ksl":22:13)
+  emit {
+    %31 = load %1 !loc("B.ksl":22:13)
+    %32 = access %30, %31 !loc("B.ksl":22:13)
+  }
+  store %32, %29 !loc("B.ksl":22:13)
+  %33 = local $texel !loc("B.ksl":23:13)
+  %34 = global @target !loc("B.ksl":23:13)
+  emit {
+    %35 = load %1 !loc("B.ksl":23:13)
+    %36 = load %4 !loc("B.ksl":23:13)
+    %37 = compose vec2<u32>, [%35, %36] !loc("B.ksl":23:13)
+  }
+  %38 = literal 0i32 !loc("B.ksl":23:13)
+  emit {
+    %39 = image_load %34, %37 !loc("B.ksl":23:13)
+  }
+  store %33, %39 !loc("B.ksl":23:13)
+  %40 = global @target !loc("B.ksl":24:13)
+  emit {
+    %41 = load %4 !loc("B.ksl":24:13)
+    %42 = load %1 !loc("B.ksl":24:13)
+    %43 = compose vec2<u32>, [%41, %42] !loc("B.ksl":24:13)
+    %44 = load %33 !loc("B.ksl":24:13)
+  }
+  image_store %40, %43, %44 !loc("B.ksl":24:13)
+  return !loc("B.ksl":25:13)
+}

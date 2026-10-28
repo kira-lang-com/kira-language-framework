@@ -1,0 +1,53 @@
+module @SmallCpp lang "smallcpp" target "aarch64-unknown-linux-gnu" stage raw
+
+func module @smallcpp_fibonacci(%p0: i32) -> i32 engine(any) nounwind {
+bb0(%p0: i32):
+  %s0 = stack.alloc i32
+  %s1 = stack.alloc i32
+  %s2 = stack.alloc i32
+  %s3 = stack.alloc i32
+  %s4 = stack.alloc i32
+  store [trivial] %p0 to %s0
+  %v0 = const.int i32, 0
+  store [trivial] %v0 to %s1
+  %v1 = const.int i32, 1
+  store [trivial] %v1 to %s2
+  %v2 = const.int i32, 0
+  store [trivial] %v2 to %s3
+  br bb1()
+bb1():
+  %v3 = load [trivial] %s3
+  %v4 = load [trivial] %s0
+  %v5 = icmp slt %v3, %v4
+  cond.br %v5, bb2(), bb3()
+bb2():
+  %v6 = load [trivial] %s1
+  %v7 = load [trivial] %s2
+  %v8 = add [trap] s %v6, %v7
+  store [trivial] %v8 to %s4
+  %v9 = load [trivial] %s2
+  store [trivial] %v9 to %s1
+  %v10 = load [trivial] %s4
+  store [trivial] %v10 to %s2
+  %v11 = load [trivial] %s3
+  %v12 = const.int i32, 1
+  %v13 = add [trap] s %v11, %v12
+  store [trivial] %v13 to %s3
+  br bb1()
+bb3():
+  %v14 = load [trivial] %s1
+  stack.dealloc %s4
+  stack.dealloc %s3
+  stack.dealloc %s2
+  stack.dealloc %s1
+  stack.dealloc %s0
+  return %v14
+}
+
+func module @smallcpp_main() -> i32 engine(any) nounwind {
+bb0():
+  %v0 = const.int i32, 10
+  %v1 = call @smallcpp_fibonacci(%v0)
+  return %v1
+}
+

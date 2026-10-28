@@ -1,0 +1,14 @@
+module @V4Cond lang "test" target "aarch64-apple-darwin" stage canonical
+
+func private @conditional(%c: i1) -> i64 engine(runtime) {
+bb0(%c: i1):
+  %r = heap.alloc.counted i64
+  cond.br %c, bb1(), bb2()
+bb1():
+  destroy %r
+  %a = const.int i64, 1
+  return %a
+bb2():
+  %b = const.int i64, 2
+  return %b
+}

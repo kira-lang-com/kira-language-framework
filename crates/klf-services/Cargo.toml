@@ -1,0 +1,18 @@
+[package]
+name = "klf-services"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-args = { path = "../klf-args" }
+klf-core = { path = "../klf-core" }
+klf-source = { path = "../klf-source" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-target = { path = "../klf-target" }
+klf-facts = { path = "../klf-facts" }
+klf-shader = { path = "../klf-shader" }
+
+[lints]
+workspace = true

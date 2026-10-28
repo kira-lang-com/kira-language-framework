@@ -1,0 +1,36 @@
+ksir 1
+module @Half lang "ksl" capabilities(float16)
+
+type %VertexOut = struct none {
+  clip: vec4<f32> @builtin(position),
+  color: vec4<f32> @location(0)
+}
+type %FragmentOut = struct none {
+  color: vec4<f16> @location(0)
+}
+
+shader @Half graphics {
+  entries { @fragment_main }
+}
+
+entry fragment @fragment_main(%input: %VertexOut) -> %FragmentOut {
+  local $out: %FragmentOut
+  %0 = arg 0
+  %1 = local $out
+  %2 = literal 0.5f16
+  emit {
+    %3 = access_index %1, 0
+    %4 = access_index %0, 1
+    %5 = convert %4, float, 2
+    %6 = binary multiply %5, %5
+  }
+  emit {
+    %7 = splat 4, %2
+    %8 = binary add %6, %7
+  }
+  store %3, %8
+  emit {
+    %9 = load %1
+  }
+  return %9
+}

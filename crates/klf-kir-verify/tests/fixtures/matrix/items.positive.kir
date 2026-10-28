@@ -1,0 +1,46 @@
+// Section 10.1 and appendix A.4: the module-level items.
+module @Items lang "test" target "aarch64-apple-darwin" stage raw
+
+attribute optimize = "size"
+attribute debug
+
+type %Pair<$T> = struct ridl { first: $T, second: $T }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+type %Header = explicit c { tag: i32 @0, length: i64 @8 } size 16 align 8
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+type %Shape = enum ridl { empty, point(i64) }
+policy { copy: trivial, destroy: trivial, relocate: bitwise, exclusivity: static, pairing: none }
+
+global module @counter : i64 = 0
+global private const @limit : i64 = 128
+global exported @scratch : i64 = zero tls
+global module @name : [4 x i8] = "klf"
+
+trait %Printable<$T> { associated: [$Output], methods: [describe : fn(i64) -> i64] }
+
+conformance i64 : %Printable witness @printable_i64 where $T: %Printable
+
+vtable @PrintableVtable : i64 for %Printable { @describe_i64 }
+
+witness i64 : %Printable { witnesses: [@describe_i64], associated: [i64] }
+
+import @host_clock : fn() -> i64 from "host"
+
+export @describe_i64 as "describe" : fn(i64) -> i64
+
+func exported @describe_i64(%value: i64) -> i64 engine(runtime) nounwind inline {
+bb0(%value: i64):
+  %global = global.addr @counter
+  %thread = tls.addr @scratch
+  %stored = load [trivial] %global
+  return %stored
+}
+
+func private @generic<$T: %Printable, $U>(%value: $T) -> unit engine(runtime) {
+bb0(%value: $T):
+  %descriptor = descriptor.ref $T
+  %witness = witness.ref $T, %Printable
+  return
+}

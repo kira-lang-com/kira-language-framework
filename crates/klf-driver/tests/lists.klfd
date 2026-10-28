@@ -1,0 +1,100 @@
+construct Lists() extends Language<Tree, Program> {
+    let name: String = "lists"
+    let driver: String = "lists"
+    let version: String = "0.1.0"
+    let extensions: [String] = ["lists"]
+    let memory: MemoryModel = .Counted
+    let exclusivity: Exclusivity = .None
+    let convention: DefaultConvention = .Ridl
+    let stdRoot: String = "std"
+
+    function units(session: Session, inputs: [SourceFile]) -> [Unit] {
+        var result: [Unit] = []
+        for file in inputs {
+            result.append(definition_unit(session, file))
+        }
+        return result
+    }
+
+    function parse(session: Session, unit: Unit) -> Tree {
+        return definition_tree(session, unit, 0)
+    }
+
+    function elaborate(session: Session, unit: Unit, tree: Tree) -> Program {
+        return definition_program(session, unit, 0)
+    }
+
+    function lower(session: Session, unit: Unit, program: Program) -> KirModule {
+        let module = kir_module_new(session, unit, program)
+        return kir_module_finish(module)
+    }
+
+    function format(session: Session, unit: Unit, tree: Tree) -> Bool {
+        var at = skip(0)
+        while at < source_len() {
+            at = skip(item(at))
+            if at < source_len() {
+                format_line(2)
+            }
+        }
+        return true
+    }
+}
+
+function skip(index: Int) -> Int {
+    var at = index
+    while at < source_len() {
+        let byte = source_byte(at)
+        if byte == (47 as U8) {
+            while at < source_len() {
+                if source_byte(at) == (10 as U8) {
+                    return skip(at)
+                }
+                at = at + 1
+            }
+        } else if byte > (32 as U8) {
+            return at
+        } else {
+            at = at + 1
+        }
+    }
+    return at
+}
+
+function item(index: Int) -> Int {
+    var at = skip(index)
+    if source_byte(at) == (91 as U8) {
+        format_text("[")
+        format_group()
+        format_indent()
+        format_line(0)
+        at = skip(at + 1)
+        while source_byte(at) != (93 as U8) {
+            at = skip(item(at))
+            if source_byte(at) == (44 as U8) {
+                format_text(",")
+                format_line(1)
+                at = skip(at + 1)
+            }
+        }
+        format_end()
+        format_line(0)
+        format_end()
+        format_text("]")
+        return at + 1
+    }
+    let start = at
+    while at < source_len() {
+        let byte = source_byte(at)
+        if byte < (48 as U8) {
+            format_token(start, at)
+            return at
+        } else if byte > (57 as U8) {
+            format_token(start, at)
+            return at
+        }
+        at = at + 1
+    }
+    format_token(start, at)
+    return at
+}

@@ -1,0 +1,4 @@
+# Arithmetic and calls.
+def add(a, b) = a + b
+def poly(x) = x * x + 2 * x + 1
+def main() = add(poly(3), 10)

@@ -1,0 +1,13 @@
+# Tests that link a native program shell out to `cargo build` for the kernel
+# archives and hand what it produces to the linker. Cargo rewrites an archive
+# in place when it is stale, which can unlink it under another test's link.
+# The setup script builds them once before any test runs, so those in-test
+# builds find them fresh and leave them alone, and the tests run in parallel.
+experimental = ["setup-scripts"]
+
+[scripts.setup.kernel-archives]
+command = { command-line = "sh -c 'cargo build --quiet -p klf-native-rt && cargo build --quiet --release -p klf-native-rt -p klf-vm-rt -p klf-frontend-rt'" }
+
+[[profile.default.scripts]]
+filter = 'package(klf-cranelift) or package(klf-llvm) or package(klf-toy-calc) or binary(ridl_e2e) or binary(ffi_conformance) or binary(native_frontend) or binary(definition_flags) or binary(compat_driver) or binary(sysroot) or binary(distribution) or binary(native_build)'
+setup = 'kernel-archives'

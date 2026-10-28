@@ -1,0 +1,32 @@
+[package]
+name = "klf-driver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-args = { path = "../klf-args" }
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-kir-passes = { path = "../klf-kir-passes" }
+klf-source = { path = "../klf-source" }
+klf-target = { path = "../klf-target" }
+klf-rt = { path = "../klf-rt" }
+klf-services = { path = "../klf-services" }
+klf-defsvc = { path = "../klf-defsvc" }
+klf-format = { path = "../klf-format" }
+klf-vm = { path = "../klf-vm" }
+klf-cranelift = { path = "../klf-cranelift" }
+klf-ridl = { path = "../klf-ridl" }
+klf-kira-syntax = { path = "../klf-kira-syntax" }
+klf-kira-lower = { path = "../klf-kira-lower" }
+serde_json = "1"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+klf-facts = { path = "../klf-facts" }
+klf-ide = { path = "../klf-ide" }

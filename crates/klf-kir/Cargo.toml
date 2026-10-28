@@ -1,0 +1,16 @@
+[package]
+name = "klf-kir"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+klf-core = { path = "../klf-core" }
+klf-source = { path = "../klf-source" }
+klf-target = { path = "../klf-target" }
+
+[lints]
+workspace = true

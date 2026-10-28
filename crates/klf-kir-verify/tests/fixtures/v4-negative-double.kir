@@ -1,0 +1,10 @@
+module @V4Double lang "test" target "aarch64-apple-darwin" stage canonical
+
+func private @double() -> i64 engine(runtime) {
+bb0():
+  %r = heap.alloc.counted i64
+  destroy %r
+  destroy %r
+  %z = const.int i64, 0
+  return %z
+}

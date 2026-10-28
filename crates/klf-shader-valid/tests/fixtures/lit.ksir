@@ -1,0 +1,131 @@
+ksir 1
+module @Lit lang "ksl" capabilities()
+
+type %Light = struct explicit size 32 align 16 {
+  position: vec3<f32> offset 0 size 12 align 16,
+  intensity: f32 offset 12 size 4 align 4,
+  color: vec4<f32> offset 16 size 16 align 16
+}
+type %Scene = struct explicit size 144 align 16 {
+  model: mat4x4<f32> offset 0 size 64 align 16,
+  lights: array<%Light, 2, stride 32> offset 64 size 64 align 16,
+  count: u32 offset 128 size 4 align 4
+}
+type %VOut = struct none {
+  clip: vec4<f32> @builtin(position),
+  normal: vec3<f32> @location(0),
+  tag: i32 @location(1) @interpolate(flat)
+}
+type %FOut = struct none {
+  color: vec4<f32> @location(0)
+}
+
+%g0 = literal 2.0f32
+global @scene: %Scene space(uniform) binding(0, 0)
+global @tiles: array<%Light, runtime, stride 32> space(storage<load>) binding(0, 1)
+global @shadow: image<2d, arrayed, depth> space(handle) binding(0, 2)
+global @shadowSmp: sampler<comparison> space(handle) binding(0, 3)
+global @gain: f32 space(private) = %g0
+
+shader @Lit graphics {
+  group @Frame class(frame) { @scene, @tiles, @shadow, @shadowSmp }
+  entries { @vertex_main, @fragment_main }
+}
+
+entry vertex @vertex_main(%vid: u32 @builtin(vertex_index)) -> %VOut {
+  local $out: %VOut
+  local $ls: array<%Light, 2, stride 32>
+  %0 = arg 0
+  %1 = local $out
+  %2 = local $ls
+  %3 = global @scene
+  %4 = global @tiles
+  %5 = literal 1.0f32
+  %6 = literal 0.0f32
+  %7 = literal 1u32
+  %8 = global @gain
+  emit {
+    %9 = access_index %3, 1
+    %10 = load %9
+  }
+  store %2, %10
+  emit {
+    %11 = binary and %0, %7
+    %12 = access %10, %11
+    %13 = access_index %12, 0
+    %14 = access_index %3, 0
+    %15 = load %14
+    %16 = compose vec4<f32>, [%13, %5]
+    %17 = binary multiply %15, %16
+    %18 = load %8
+    %19 = binary multiply %17, %18
+    %20 = access_index %1, 0
+  }
+  store %20, %19
+  emit {
+    %21 = access %4, %11
+    %22 = load %21
+    %23 = access_index %22, 2
+    %24 = swizzle %23, [x, y, z]
+    %25 = math normalize %24
+    %26 = access_index %1, 1
+  }
+  store %26, %25
+  emit {
+    %27 = array_length %4
+    %28 = convert %27, sint
+    %29 = access_index %1, 2
+  }
+  store %29, %28
+  emit {
+    %30 = load %1
+  }
+  return %30
+}
+
+entry fragment @fragment_main(%input: %VOut) -> %FOut {
+  local $out: %FOut
+  %0 = arg 0
+  %1 = local $out
+  %2 = global @shadow
+  %3 = global @shadowSmp
+  %4 = literal 0.5f32
+  %5 = literal 1i32
+  %6 = literal 0.0f32
+  %7 = literal 7u32
+  emit {
+    %8 = access_index %0, 1
+    %9 = swizzle %8, [x, y]
+    %10 = image_sample %2, %3, %9, array_index(%5), depth_ref(%4)
+    %11 = image_query %2, size
+    %12 = image_query %2, layers
+    %13 = image_query %2, levels
+    %14 = binary add %12, %13
+    %15 = math count_leading_zeros %14
+    %16 = math first_trailing_bit %7
+    %17 = binary add %15, %16
+    %18 = convert %17, float
+    %19 = math dot %8, %8
+    %20 = splat 3, %10
+    %21 = math mix %8, %8, %20
+    %22 = derivative x none %19
+    %23 = binary greater %19, %6
+    %24 = select %23, %21, %8
+    %25 = compose vec4<f32>, [%24, %18]
+    %26 = math pack4x8unorm %25
+    %27 = convert %26, float
+    %28 = binary add %22, %27
+    %29 = splat 4, %28
+    %30 = binary multiply %25, %29
+    %31 = access_index %11, 0
+    %32 = convert %31, float
+    %33 = splat 4, %32
+    %34 = binary add %30, %33
+    %35 = access_index %1, 0
+  }
+  store %35, %34
+  emit {
+    %36 = load %1
+  }
+  return %36
+}

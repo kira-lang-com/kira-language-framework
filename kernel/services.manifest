@@ -1,0 +1,636 @@
+# Kernel service ABI (section 8.12). Each line maps a service name (the name a
+# KLF Kira @Service wrapper exposes) to the platform-C linker symbol the running
+# KIR calls via call.foreign. The VM resolves the symbol against the
+# host-capability table (klf-vm::kernel_services); a native build links it from
+# klf-native-rt.
+#
+#   <service-name>   <symbol>        <signature>
+
+klf.io.put    klfsvc_io_put    (i32) -> i32     # write one byte, return it
+klf.io.puti   klfsvc_io_puti   (i64) -> void    # write a decimal integer + newline
+klf.io.write  klfsvc_io_write  (ptr, i64) -> i64 # write a byte buffer to the program output, return the count written
+klf.io.write_error  klfsvc_io_write_error  (ptr, i64) -> i64 # write a byte buffer to the program error output, return the count written
+klf.text.float  klfsvc_text_float  (i64, ptr, i64) -> i64 # f64 bits, destination, capacity -> shortest round-trip text length, copied only when it fits
+klf.math.unary  klfsvc_math_unary  (i64, i64) -> i64 # operation, f64 bits -> f64 bits of the result
+klf.math.binary  klfsvc_math_binary  (i64, i64, i64) -> i64 # operation, f64 bits of left and right -> result bits
+klf.number  klfsvc_number  (i64, i64, i64, i64, i64) -> i64 # operation, left mantissa and scale, right mantissa and scale -> first word: mantissa, ordering, Int or f64 bits
+klf.number.second  klfsvc_number_second  () -> i64 # second word of this thread's last klf.number answer: scale, or 32 + error code
+klf.fs.read  klfsvc_fs_read  (ptr, i64, i64, ptr, i64) -> i64 # path, path length, offset, destination, count -> bytes read
+klf.fs.write  klfsvc_fs_write  (ptr, i64, ptr, i64, i64) -> i64 # path, path length, bytes, count, append -> 1 when written
+klf.fs.list  klfsvc_fs_list  (ptr, i64, ptr, i64) -> i64 # path, path length, destination, capacity -> length of NUL-ended names, copied only when they fit
+klf.fs.file_exists  klfsvc_fs_file_exists  (ptr, i64) -> i64 # path, path length -> 1 for a regular file
+klf.fs.path_exists  klfsvc_fs_path_exists  (ptr, i64) -> i64 # path, path length -> 1 for any entry
+klf.fs.is_directory  klfsvc_fs_is_directory  (ptr, i64) -> i64 # path, path length -> 1 for a directory
+klf.fs.file_size  klfsvc_fs_file_size  (ptr, i64) -> i64 # path, path length -> size in bytes, 0 when missing
+klf.fs.make_directory  klfsvc_fs_make_directory  (ptr, i64) -> i64 # path, path length -> 1 when a directory is there afterwards
+klf.fs.remove_path  klfsvc_fs_remove_path  (ptr, i64) -> i64 # path, path length -> 1 when removed
+klf.fs.rename  klfsvc_fs_rename  (ptr, i64, ptr, i64) -> i64 # from, from length, to, to length -> 1 when renamed
+klf.fs.open  klfsvc_fs_open  (ptr, i64, i64) -> i64 # path, path length, access (0 read, 1 read-write creating, 2 create new) -> handle above 0, or a failure below 0
+klf.fs.close  klfsvc_fs_close  (i64) -> i64 # handle -> 1 when closed, or a failure below 0
+klf.fs.close_descriptor  klfsvc_fs_close_descriptor  (i64) -> i64 # OS descriptor a library handed the program -> 1 when closed, -4 when not open or not on this host, or a failure below 0
+klf.fs.read_at  klfsvc_fs_read_at  (i64, i64, ptr, i64) -> i64 # handle, offset, destination, count -> bytes read (fewer only at the end), or a failure below 0
+klf.fs.write_at  klfsvc_fs_write_at  (i64, i64, ptr, i64) -> i64 # handle, offset, bytes, count -> count when all written, or a failure below 0
+klf.fs.sync  klfsvc_fs_sync  (i64) -> i64 # handle -> 1 when the data is durable, or a failure below 0
+klf.fs.truncate  klfsvc_fs_truncate  (i64, i64) -> i64 # handle, size -> 1 when resized, or a failure below 0
+klf.fs.handle_size  klfsvc_fs_handle_size  (i64) -> i64 # handle -> size in bytes, or a failure below 0
+klf.fs.lock  klfsvc_fs_lock  (i64, i64) -> i64 # handle, wait (1 waits for it) -> 1 when this process holds the file's exclusive lock, 0 when another holds it and wait is 0, or a failure below 0
+klf.fs.sync_directory  klfsvc_fs_sync_directory  (ptr, i64) -> i64 # path, path length -> 1 when the entries are durable, or a failure below 0
+klf.fs.status  klfsvc_fs_status  (ptr, i64, i64, ptr) -> i64 # path, path length, follow links (1), record of 6 words: kind (1 file, 2 directory, 3 link, 4 other), size, permission bits, modification nanoseconds, device, inode -> 1, or a failure below 0
+klf.fs.set_mode  klfsvc_fs_set_mode  (ptr, i64, i64) -> i64 # path, path length, permission bits -> 1, or a failure below 0
+klf.fs.symbolic_link  klfsvc_fs_symbolic_link  (ptr, i64, ptr, i64) -> i64 # target, target length, path, path length -> 1, or a failure below 0
+klf.fs.read_link  klfsvc_fs_read_link  (ptr, i64, ptr, i64) -> i64 # path, path length, destination, capacity -> length of the target, copied only when it fits, or a failure below 0
+klf.fs.hard_link  klfsvc_fs_hard_link  (ptr, i64, ptr, i64) -> i64 # from, from length, to, to length -> 1, or a failure below 0
+klf.fs.copy  klfsvc_fs_copy  (ptr, i64, ptr, i64) -> i64 # from, from length, to, to length -> bytes copied with the permission bits, or a failure below 0
+klf.fs.set_length  klfsvc_fs_set_length  (ptr, i64, i64) -> i64 # path, path length, length -> 1 when the file has that length, created when missing, or a failure below 0
+klf.net.udp_bind  klfsvc_net_udp_bind  (ptr, i64) -> i64 # address text, length -> socket handle above 0, or a failure below 0 (D-384)
+klf.net.udp_send  klfsvc_net_udp_send  (i64, ptr, i64, ptr, i64) -> i64 # socket, peer address text, length, bytes, count -> bytes sent, or a failure below 0
+klf.net.udp_receive  klfsvc_net_udp_receive  (i64, ptr, i64, ptr, i64) -> i64 # socket, destination, capacity, peer destination, capacity -> bytes received, the peer written as NUL-ended text when it fits, or a failure below 0
+klf.net.tcp_connect  klfsvc_net_tcp_connect  (ptr, i64) -> i64 # address text, length -> stream handle at once, connecting goes on until the poller reports writable or error
+klf.net.unix_connect  klfsvc_net_unix_connect  (ptr, i64) -> i64 # socket path, length -> stream handle that sends, receives, shuts down and is watched as a TCP stream, or a failure below 0 (D-387)
+klf.net.tcp_listen  klfsvc_net_tcp_listen  (ptr, i64, i64) -> i64 # address text, length, backlog -> listener handle, or a failure below 0
+klf.net.tcp_accept  klfsvc_net_tcp_accept  (i64, ptr, i64) -> i64 # listener, peer destination, capacity -> stream handle, the peer written as NUL-ended text when it fits, or a failure below 0
+klf.net.tcp_send  klfsvc_net_tcp_send  (i64, ptr, i64) -> i64 # stream, bytes, count -> bytes the stream accepted, or a failure below 0
+klf.net.tcp_receive  klfsvc_net_tcp_receive  (i64, ptr, i64) -> i64 # stream, destination, capacity -> bytes read, 0 at the peer's end, or a failure below 0
+klf.net.tcp_shutdown  klfsvc_net_tcp_shutdown  (i64) -> i64 # stream -> 1 when its write side is closed, or a failure below 0
+klf.net.local_address  klfsvc_net_local_address  (i64, ptr, i64) -> i64 # socket, destination, capacity -> length of its bound address text, written NUL-ended when it fits
+klf.net.close  klfsvc_net_close  (i64) -> i64 # socket, poller or lookup -> 1 when released, or a failure below 0
+klf.net.poller_create  klfsvc_net_poller_create  () -> i64 # -> poller handle, or a failure below 0
+klf.net.poller_watch  klfsvc_net_poller_watch  (i64, i64, i64, i64) -> i64 # poller, socket, interest bits (1 readable, 2 writable, 0 none), token -> 1 when watched
+klf.net.poller_wait  klfsvc_net_poller_wait  (i64, i64, ptr, i64) -> i64 # poller, timeout ns (negative forever), destination, capacity in events -> events written, each token then bits (1 readable, 2 writable, 4 peer closed, 8 error, 16 resolved, 32 woken as token 0); readiness is reported when it changes
+klf.net.poller_wake  klfsvc_net_poller_wake  (i64) -> i64 # poller -> 1; ends a wait from any thread
+klf.net.resolve  klfsvc_net_resolve  (i64, ptr, i64, i64) -> i64 # poller, host name, length, token -> lookup handle; the poller reports the token resolved when it finishes
+klf.net.resolved  klfsvc_net_resolved  (i64, ptr, i64) -> i64 # lookup, destination, capacity -> length of its NUL-ended addresses without ports, copied only when they fit; -1 while running, -9 not found
+klf.crypto.random  klfsvc_crypto_random  (ptr, i64) -> i64 # destination, count -> 1 when filled from the OS generator (D-385)
+klf.crypto.digest  klfsvc_crypto_digest  (i64, ptr, i64, ptr, i64) -> i64 # hash (4 SHA-256, 5 SHA-384), data, count, destination, capacity -> digest length, or a failure below 0
+klf.crypto.hmac  klfsvc_crypto_hmac  (i64, ptr, i64, ptr, i64, ptr, i64) -> i64 # hash, key, length, data, count, destination, capacity -> tag length
+klf.crypto.hkdf_extract  klfsvc_crypto_hkdf_extract  (i64, ptr, i64, ptr, i64, ptr, i64) -> i64 # hash, salt, length, input keying material, length, destination, capacity -> pseudorandom key length (RFC 5869)
+klf.crypto.hkdf_expand  klfsvc_crypto_hkdf_expand  (i64, ptr, i64, ptr, i64, ptr, i64) -> i64 # hash, pseudorandom key, length, info, length, destination, length -> the length, all of it filled
+klf.crypto.aead_seal  klfsvc_crypto_aead_seal  (i64, ptr, i64, ptr, i64, ptr, i64, ptr, i64, i64) -> i64 # TLS cipher suite, key, length, nonce, length, associated data, length, buffer, plaintext count, capacity -> sealed length, the tag after the ciphertext in place
+klf.crypto.aead_open  klfsvc_crypto_aead_open  (i64, ptr, i64, ptr, i64, ptr, i64, ptr, i64) -> i64 # TLS cipher suite, key, length, nonce, length, associated data, length, buffer, sealed count -> plaintext length in place, -3 when the tag does not verify
+klf.crypto.header_mask  klfsvc_crypto_header_mask  (i64, ptr, i64, ptr, i64, ptr, i64) -> i64 # TLS cipher suite, header key, length, sample, length, destination, capacity -> 5, the QUIC header-protection mask (RFC 9001 5.4)
+klf.crypto.agreement_create  klfsvc_crypto_agreement_create  (i64, ptr, i64) -> i64 # TLS group (0x001d X25519, 0x0017 secp256r1), public key destination, capacity -> private key handle
+klf.crypto.agreement_finish  klfsvc_crypto_agreement_finish  (i64, ptr, i64, ptr, i64) -> i64 # private key handle, peer public key, length, destination, capacity -> shared secret length; the handle is released
+klf.crypto.verify  klfsvc_crypto_verify  (i64, ptr, i64, ptr, i64, ptr, i64) -> i64 # TLS signature scheme, DER certificate, length, message, length, signature, length -> 1 when its key made the signature, -3 when not
+klf.crypto.key_load  klfsvc_crypto_key_load  (ptr, i64) -> i64 # PKCS#8 DER private key, length -> signing key handle
+klf.crypto.sign  klfsvc_crypto_sign  (i64, i64, ptr, i64, ptr, i64) -> i64 # signing key handle, TLS signature scheme, message, length, destination, capacity -> signature length
+klf.crypto.certificate_verify  klfsvc_crypto_certificate_verify  (ptr, i64, ptr, i64, i64, ptr, i64) -> i64 # certificates each behind a 24-bit length, end entity first, length, server name, length, Unix seconds, extra trust anchors in the same form, length -> 1 when it chains to a bundled Mozilla root or an extra anchor and names the server
+klf.crypto.release  klfsvc_crypto_release  (i64) -> i64 # key handle -> 1 when released
+klf.crypto.digest_file  klfsvc_crypto_digest_file  (i64, ptr, i64, ptr, i64) -> i64 # hash, path, path length, destination, capacity -> digest length of the file's bytes, or a failure below 0
+klf.crypto.key_generate  klfsvc_crypto_key_generate  (i64, ptr, i64) -> i64 # scheme (0x0807 Ed25519), destination, capacity -> length of a new PKCS#8 DER key, or a failure below 0
+klf.crypto.key_public  klfsvc_crypto_key_public  (i64, ptr, i64) -> i64 # key handle, destination, capacity -> length of the raw public key, or a failure below 0
+klf.process.argument_count  klfsvc_process_argument_count  () -> i64 # argument count, executable path excluded
+klf.process.argument  klfsvc_process_argument  (i64, ptr, i64) -> i64 # index, destination, capacity -> byte length, -1 past end
+klf.process.invoked_as  klfsvc_process_invoked_as  (ptr, i64) -> i64 # destination, capacity -> byte length of the path the program was started as, copied only when it fits
+klf.process.command_push  klfsvc_process_command_push  (ptr, i64) -> i64 # append one command argument
+klf.process.command_run  klfsvc_process_command_run  (i64) -> i64 # 1 capture, 0 attached -> exit status, -1 no status, -2 failed to start
+klf.process.output  klfsvc_process_output  (i64, ptr, i64) -> i64 # stream 1/2, destination, capacity -> captured byte length
+klf.process.spawn_create  klfsvc_process_spawn_create  () -> i64 # -> handle of an empty command
+klf.process.spawn_argument  klfsvc_process_spawn_argument  (i64, ptr, i64) -> i64 # command, bytes, count -> 1, or a failure below 0; the first is the program
+klf.process.spawn_environment  klfsvc_process_spawn_environment  (i64, ptr, i64) -> i64 # command, NAME=value bytes, count -> 1, or a failure below 0
+klf.process.spawn_clear_environment  klfsvc_process_spawn_clear_environment  (i64) -> i64 # command -> 1; the child starts from an empty environment
+klf.process.spawn_directory  klfsvc_process_spawn_directory  (i64, ptr, i64) -> i64 # command, path, path length -> 1, or a failure below 0
+klf.process.spawn_stream  klfsvc_process_spawn_stream  (i64, i64, i64, ptr, i64) -> i64 # command, stream 0/1/2, mode (0 inherit, 1 null, 2 pipe, 3 file), path, path length -> 1, or a failure below 0
+klf.process.spawn_start  klfsvc_process_spawn_start  (i64) -> i64 # command -> child handle, or a failure below 0; the command is released
+klf.process.child_wait  klfsvc_process_child_wait  (i64, i64) -> i64 # child, timeout nanoseconds (negative waits forever) -> exit status, -200 minus the signal, -100 still running, or a failure
+klf.process.child_wait_any  klfsvc_process_child_wait_any  (i64) -> i64 # timeout nanoseconds -> a child that ended, each answered once, or 0
+klf.process.child_read  klfsvc_process_child_read  (i64, i64, ptr, i64, i64) -> i64 # child, stream 1/2, destination, capacity, timeout -> bytes read, 0 at the end, -101 none yet, or a failure
+klf.process.child_write  klfsvc_process_child_write  (i64, ptr, i64) -> i64 # child, bytes, count -> count written to its piped input, or a failure below 0
+klf.process.child_close_input  klfsvc_process_child_close_input  (i64) -> i64 # child -> 1 once its piped input is closed
+klf.process.child_signal  klfsvc_process_child_signal  (i64, i64) -> i64 # child, signal (1 interrupt, 2 terminate, 3 kill) -> 1, or a failure below 0
+klf.process.child_release  klfsvc_process_child_release  (i64) -> i64 # child -> 1 when forgotten
+klf.process.current_directory  klfsvc_process_current_directory  (ptr, i64) -> i64 # destination, capacity -> length of the working directory, copied only when it fits
+klf.process.processor_count  klfsvc_process_processor_count  () -> i64 # -> threads the host runs at once for this process, at least 1 (D-388)
+klf.process.exit  klfsvc_process_exit  (i64) -> void # status: runs the exit function with reason 0 and ends the process
+klf.time.monotonic  klfsvc_time_monotonic  () -> i64 # nanoseconds since the first clock read in this process, never decreasing
+klf.time.wall  klfsvc_time_wall  () -> i64 # nanoseconds since the Unix epoch
+klf.time.sleep  klfsvc_time_sleep  (i64) -> void # pause the calling thread for at least this many nanoseconds, none when not positive
+klf.thread.spawn  klfsvc_thread_spawn  (ptr, i64) -> i64 # entry void(*)(int64_t), argument -> handle above 0, or a failure below 0; the VM refuses
+klf.thread.join  klfsvc_thread_join  (i64) -> i64 # handle -> 1 once the thread ended, or a failure below 0
+klf.thread.detach  klfsvc_thread_detach  (i64) -> i64 # handle -> 1, the thread runs on unjoined, or a failure below 0
+klf.thread.current  klfsvc_thread_current  () -> i64 # the calling thread's number, above 0 and never reused
+klf.thread.park  klfsvc_thread_park  (i64) -> i64 # timeout ns (negative forever) -> 1 when unparked, timed out or woken spuriously
+klf.thread.unpark  klfsvc_thread_unpark  (i64) -> i64 # thread number -> 1, its park returns or its next one does, or a failure below 0
+klf.thread.yield  klfsvc_thread_yield  () -> void # offer the processor to another thread
+klf.thread.parallelism  klfsvc_thread_parallelism  () -> i64 # threads that can run at once, at least 1
+klf.host.key_length  klfsvc_host_key_length  () -> i64 # byte length of this host's key
+klf.host.key_copy  klfsvc_host_key_copy  (ptr, i64) -> i64 # destination, capacity -> the key's bytes, copied only when they fit
+klf.runtime.at_exit  klfsvc_runtime_at_exit  (i64) -> i64 # function (reason, detail) run once as the program ends, 0 for none -> the one it replaces
+klf.trap.operands  klfsvc_trap_operands  (i64, i64) -> void # the two values a failed check compared, which the report of the trap that follows names as {0} and {1}
+klf.trap.text  klfsvc_trap_text  (ptr, i64) -> void # text the report of the trap that follows names as {text}, such as the type an `Any` held
+klf.source.len   klfsvc_source_len   () -> i64       # length of the current source buffer
+klf.source.byte  klfsvc_source_byte  (i64) -> i64    # read a source byte, zero out of range
+klf.source.copy  klfsvc_source_copy  (ptr, i64) -> i64 # output buffer, byte length -> 1 when the whole source buffer was copied
+klf.source.file_len  klfsvc_source_file_len  (i64, i64) -> i64  # session, source file -> its length
+klf.source.file_byte klfsvc_source_file_byte (i64, i64, i64) -> i64 # session, source file, offset
+klf.source.file_copy klfsvc_source_file_copy (i64, i64, ptr, i64) -> i64 # session, source file, output buffer, byte length -> 1 when copied
+klf.source.file_name_len klfsvc_source_file_name_len (i64, i64) -> i64 # session, source file -> name length
+klf.source.file_name_byte klfsvc_source_file_name_byte (i64, i64, i64) -> i64 # session, source file, name offset
+klf.source.file_name_copy klfsvc_source_file_name_copy (i64, i64, ptr, i64) -> i64 # session, source file, output buffer, byte length -> 1 when copied
+klf.source.name_len klfsvc_source_name_len () -> i64 # current source name length
+klf.source.name_byte klfsvc_source_name_byte (i64) -> i64 # current source name byte
+klf.source.name_copy klfsvc_source_name_copy (ptr, i64) -> i64 # output buffer, byte length -> 1 when the current source name was copied
+klf.source.named_exists klfsvc_source_named_exists (ptr, i64) -> i64 # source name buffer, byte length -> present
+klf.source.named_len klfsvc_source_named_len (ptr, i64) -> i64 # source name buffer, byte length -> source length
+klf.source.named_byte klfsvc_source_named_byte (ptr, i64, i64) -> i64 # source name buffer, byte length, offset
+klf.source.named_copy klfsvc_source_named_copy (ptr, i64, ptr, i64) -> i64 # source name buffer, byte length, output buffer, byte length -> 1 when copied
+klf.source.path_exists klfsvc_source_path_exists (i64, ptr, i64) -> i64 # session, path buffer, byte length -> 1 when a file or directory is there, else 0 (D-327)
+klf.source.read klfsvc_source_read (i64, ptr, i64) -> i64 # session, path buffer, byte length -> source file or -1 (section 8.1 Session.read)
+klf.source.directory klfsvc_source_directory (i64, ptr, i64, ptr, i64) -> i64 # session, directory, length, extension, length -> files read or -1
+klf.source.directory_file klfsvc_source_directory_file (i64, i64) -> i64 # session, index -> source file of the last directory read
+klf.session.flag klfsvc_session_flag (i64, ptr, i64, ptr) -> i64 # session, name buffer, byte length, output [tag, value-or-length]
+klf.session.flag_string_copy klfsvc_session_flag_string_copy (i64, ptr, i64, ptr, i64) -> i64 # session, name buffer, byte length, output buffer, output byte length
+klf.session.std_root_len klfsvc_session_std_root_len (i64) -> i64 # session -> byte length of the std source directory, empty when unknown (D-327)
+klf.session.std_root_copy klfsvc_session_std_root_copy (i64, ptr, i64) -> i64 # session, output buffer, byte length -> 1 when copied (D-327)
+klf.session.target_len klfsvc_session_target_len (i64) -> i64 # session -> byte length of the target triple (D-327)
+klf.session.target_copy klfsvc_session_target_copy (i64, ptr, i64) -> i64 # session, output buffer, byte length -> 1 when copied (D-327)
+klf.session.file_mode klfsvc_session_file_mode (i64, i64) -> i64 # session, source file -> selected zero-based file mode or -1
+klf.session.file_memory klfsvc_session_file_memory (i64, i64) -> i64 # session, source file -> effective MemoryModel tag
+klf.session.file_convention klfsvc_session_file_convention (i64, i64) -> i64 # session, source file -> effective DefaultConvention tag
+klf.editor.mode klfsvc_editor_mode () -> i64 # 1 when the session serves an editor, 0 in a build (KLF-EDITOR 6.2)
+klf.editor.project_field klfsvc_editor_project_field (i64, ptr, i64) -> i64 # field (0 name, 1 root, 2 argument, 3 watch, 4 output), text, length -> 1 in a project hook call (KLF-EDITOR 5.3)
+klf.editor.classify klfsvc_editor_classify (i64, i64, i64, i64, i64) -> i64 # file or -1, start, end, TokenClass, TokenModifier bits -> 1 when recorded
+klf.editor.classify_many klfsvc_editor_classify_many (i64, ptr, i64) -> i64 # file or -1, tokens of four words (start, end, class, modifiers), count -> tokens recorded
+klf.editor.symbol klfsvc_editor_symbol (i64, i64, i64, i64, i64, i64, i64, i64) -> i64 # entity, file, start, end, name start, name end, SymbolKind, container or -1
+klf.editor.symbol_text klfsvc_editor_symbol_text (i64, i64, ptr, i64) -> i64 # entity, field (0 name, 1 signature, 2 documentation, 3 detail, 4 parameter), text, length
+klf.editor.symbol_flags klfsvc_editor_symbol_flags (i64, i64) -> i64 # entity, bits: 1 deprecated, 2 exported, 4 local
+klf.editor.declaration klfsvc_editor_declaration (i64, i64, i64, i64, i64, i64) -> i64 # entity, file, start, end, name start, name end
+klf.editor.reference klfsvc_editor_reference (i64, i64, i64, i64, i64) -> i64 # file, start, end, entity, ReferenceRole
+klf.editor.unresolved klfsvc_editor_unresolved (i64, i64, i64) -> i64 # file, start, end of a name that resolved to nothing
+klf.editor.scope klfsvc_editor_scope (i64, i64, i64, i64) -> i64 # file, start, end, scope key
+klf.editor.type_at klfsvc_editor_type_at (i64, i64, i64, i64, ptr, i64) -> i64 # file, start, end, type entity or -1, text, length
+klf.editor.value_at klfsvc_editor_value_at (i64, i64, i64, ptr, i64) -> i64 # file, start, end, text, length
+klf.editor.hint klfsvc_editor_hint (i64, i64, i64, i64, i64, ptr, i64) -> i64 # file, offset, HintKind, bits (1 pad left, 2 pad right), target or -1, label[NUL insert], length
+klf.editor.fold klfsvc_editor_fold (i64, i64, i64, i64) -> i64 # file, start, end, FoldKind
+klf.editor.node klfsvc_editor_node (i64, i64, i64) -> i64 # file, start, end of a syntax node
+klf.editor.link klfsvc_editor_link (i64, i64, i64, i64, i64, ptr, i64) -> i64 # file, start, end, kind (0 file, 1 url, 2 entity), entity, text, length
+klf.editor.runnable klfsvc_editor_runnable (i64, i64, i64, i64, ptr, i64) -> i64 # file, start, end, RunnableKind, label and driver arguments NUL-separated, length
+klf.editor.call_edge klfsvc_editor_call_edge (i64, i64, i64, i64, i64) -> i64 # caller, callee, file, start, end
+klf.editor.type_edge klfsvc_editor_type_edge (i64, i64) -> i64 # subtype, supertype
+klf.editor.inactive klfsvc_editor_inactive (i64, i64, i64) -> i64 # file, start, end of source a condition excluded
+klf.format.text klfsvc_format_text (ptr, i64) -> i64 # text, length of the next token -> 1 when it is next in the source (KLF-FORMAT 4)
+klf.format.token klfsvc_format_token (i64, i64) -> i64 # start, end of the next token in the file -> 1 when it is next
+klf.format.verbatim klfsvc_format_verbatim (i64, i64) -> i64 # start, end of a region kept as written -> 1 when it is next
+klf.format.line klfsvc_format_line (i64) -> i64 # 0 soft, 1 space or break, 2 hard, 3 space that never breaks -> 1 in a format call
+klf.format.group klfsvc_format_group () -> i64 # opens a group -> 1 in a format call
+klf.format.indent klfsvc_format_indent () -> i64 # opens an indentation -> 1 in a format call
+klf.format.end klfsvc_format_end () -> i64 # closes the innermost group or indentation -> 1 when one was open
+klf.driver.argument_len klfsvc_driver_argument_len (i64) -> i64 # compatDriver argument index -> byte length
+klf.driver.argument_copy klfsvc_driver_argument_copy (i64, ptr, i64) -> i64 # argument index, output buffer, byte length -> 1 on success
+klf.driver.request_push klfsvc_driver_request_push (ptr, i64) -> i64 # normalized argument buffer, byte length -> 1 on success
+klf.cli.count klfsvc_cli_count (i64) -> i64 # argument slot of the running command -> how many values it holds
+klf.cli.int klfsvc_cli_int (i64, i64) -> i64 # slot, value index -> the value as an integer (Bool 0/1, choice index, flag count)
+klf.cli.string_len klfsvc_cli_string_len (i64, i64) -> i64 # slot, value index -> byte length of the String value
+klf.cli.string_copy klfsvc_cli_string_copy (i64, i64, ptr, i64) -> i64 # slot, value index, output buffer, byte length -> 1 on success
+klf.test.expect klfsvc_test_expect (i64, ptr, i64, ptr, i64) -> void # passed, condition text, its file:line:column -> records an issue for the running test when not passed
+klf.test.source klfsvc_test_source (ptr, i64, ptr, i64) -> void # file name (empty for input.<extension>), source text -> adds a file to the next compilation
+klf.test.source_path klfsvc_test_source_path (ptr, i64) -> i64 # path relative to the package -> 1 when its file was added to the next compilation, under its own name
+klf.test.run klfsvc_test_run () -> i64 # compiles the added files with the language under test and runs main on the VM -> its result word; a rejection or trap records an issue
+klf.test.compile klfsvc_test_compile () -> i64 # compiles the added files -> 1 when accepted
+klf.test.formats klfsvc_test_formats (ptr, i64, ptr, i64) -> i64 # source, expected text -> 1 when the language formats the source to the expected text and leaves that text as it is
+klf.test.diagnosed klfsvc_test_diagnosed (i64, i64, i64) -> i64 # code, line, column (0 for any) -> 1 when the last compilation reported it there
+klf.test.reported klfsvc_test_reported (ptr, i64) -> i64 # text -> 1 when a diagnostic of the last compilation contains it
+klf.diag.error   klfsvc_diag_error   (i64, i64, i64) -> void # code, start, end
+klf.diag.error_in   klfsvc_diag_error_in   (i64, i64, i64, i64) -> void # source file, code, start, end
+klf.diag.error_origin   klfsvc_diag_error_origin   (i64, i64, i64, i64) -> void # source content hash, code, start, end
+klf.diag.error_subject   klfsvc_diag_error_subject   (i64, i64, i64, i64, i64, i64) -> void # source file, code, start, end, subject start, subject end
+klf.diag.detail   klfsvc_diag_detail   (i64, i64, i64, i64, ptr, i64) -> void # kind (0 note, 1 help, 2 label, 3 place), source file, start, end, text: attached to the diagnostic reported last
+klf.definition.unit   klfsvc_definition_unit   (i64, i64) -> i64 # session, one input source file
+klf.definition.tree   klfsvc_definition_tree   (i64, i64, i64) -> i64 # session, unit, parser payload
+klf.definition.program   klfsvc_definition_program   (i64, i64, i64) -> i64 # session, unit, elaborator payload
+klf.definition.input   klfsvc_definition_input   (i64, i64) -> i64 # session, input index -> source file
+klf.definition.tree_payload   klfsvc_definition_tree_payload   (i64, i64) -> i64 # session, tree -> the word parse gave it
+klf.definition.program_payload   klfsvc_definition_program_payload   (i64, i64) -> i64 # session, program -> the word elaborate gave it
+klf.definition.units_push   klfsvc_definition_units_push   (i64, i64) -> void # session, unit of the list being returned
+klf.definition.units_finish   klfsvc_definition_units_finish   (i64) -> i64 # session -> the unit list artifact
+klf.kir.module.new   klfsvc_kir_module_new   (i64, i64, i64) -> i64 # session, unit, program
+klf.kir.type.enum_new   klfsvc_kir_type_enum_new   (i64, i64, i64) -> i64 # module, name start, end
+klf.kir.type.enum_variant   klfsvc_kir_type_enum_variant   (i64, i64, i64) -> void # type, name start, end
+klf.kir.type.enum_variant_i64   klfsvc_kir_type_enum_variant_i64   (i64, i64, i64) -> void # type, name start, end
+klf.kir.type.enum_variant_i32   klfsvc_kir_type_enum_variant_i32   (i64, i64, i64) -> void # type, name start, end
+klf.kir.type.enum_variant_struct   klfsvc_kir_type_enum_variant_struct   (i64, i64, i64, i64) -> void # enum type, struct type, name start, end
+klf.kir.type.enum_variant_array_i64   klfsvc_kir_type_enum_variant_array_i64   (i64, i64, i64, i64) -> void # enum type, length, name start, end
+klf.kir.type.enum_variant_array_i32   klfsvc_kir_type_enum_variant_array_i32   (i64, i64, i64, i64) -> void # enum type, length, name start, end
+klf.kir.type.struct_new   klfsvc_kir_type_struct_new   (i64, i64, i64) -> i64 # module, name start, end
+klf.kir.type.struct_field_i64   klfsvc_kir_type_struct_field_i64   (i64, i64, i64) -> void # type, name start, end
+klf.kir.type.struct_field_i32   klfsvc_kir_type_struct_field_i32   (i64, i64, i64) -> void # type, name start, end
+klf.kir.type.struct_field_enum   klfsvc_kir_type_struct_field_enum   (i64, i64, i64, i64) -> void # struct type, enum type, name start, end
+klf.kir.type.struct_field_struct   klfsvc_kir_type_struct_field_struct   (i64, i64, i64, i64) -> void # outer struct type, inner struct type, name start, end
+klf.kir.type.struct_field_array_i64   klfsvc_kir_type_struct_field_array_i64   (i64, i64, i64, i64) -> void # struct type, length, name start, end
+klf.kir.type.struct_field_array_i32   klfsvc_kir_type_struct_field_array_i32   (i64, i64, i64, i64) -> void # struct type, length, name start, end
+klf.kir.function.new   klfsvc_kir_function_new   (i64, i64, i64) -> i64 # module, name start, end
+klf.kir.function.new_void   klfsvc_kir_function_new_void   (i64, i64, i64) -> i64 # module, name start, end
+klf.kir.function.new_void_i64   klfsvc_kir_function_new_void_i64   (i64, i64, i64, i64) -> i64 # module, name start, end, parameter count
+klf.kir.function.new_void_i32   klfsvc_kir_function_new_void_i32   (i64, i64, i64, i64) -> i64 # module, name start, end, parameter count
+klf.kir.function.new_void_array_i64   klfsvc_kir_function_new_void_array_i64   (i64, i64, i64, i64) -> i64 # module, length, name start, end
+klf.kir.function.new_void_array_i32   klfsvc_kir_function_new_void_array_i32   (i64, i64, i64, i64) -> i64 # module, length, name start, end
+klf.kir.function.return_int   klfsvc_kir_function_return_int   (i64, i64) -> void # function, value
+klf.kir.module.finish   klfsvc_kir_module_finish   (i64) -> i64 # module builder
+klf.kir.value.const_int   klfsvc_kir_value_const_int   (i64, i64) -> i64 # function, integer
+klf.kir.value.const_i32   klfsvc_kir_value_const_i32   (i64, i64) -> i64 # function, integer
+klf.kir.value.const_bool   klfsvc_kir_value_const_bool   (i64, i64) -> i64 # function, boolean
+klf.kir.value.add   klfsvc_kir_value_add   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.enum_new   klfsvc_kir_value_enum_new   (i64, i64, i64) -> i64 # function, type, variant
+klf.kir.value.enum_new_i64   klfsvc_kir_value_enum_new_i64   (i64, i64, i64, i64) -> i64 # function, type, variant, payload
+klf.kir.value.enum_new_i32   klfsvc_kir_value_enum_new_i32   (i64, i64, i64, i64) -> i64 # function, type, variant, payload
+klf.kir.value.enum_new_struct   klfsvc_kir_value_enum_new_struct   (i64, i64, i64, i64) -> i64 # function, enum type, variant, struct value
+klf.kir.value.enum_new_array_i64   klfsvc_kir_value_enum_new_array_i64   (i64, i64, i64, i64) -> i64 # function, enum type, variant, array
+klf.kir.value.enum_new_array_i32   klfsvc_kir_value_enum_new_array_i32   (i64, i64, i64, i64) -> i64 # function, enum type, variant, array
+klf.kir.value.enum_payload_i64   klfsvc_kir_value_enum_payload_i64   (i64, i64, i64) -> i64 # function, value, variant
+klf.kir.value.enum_payload_i32   klfsvc_kir_value_enum_payload_i32   (i64, i64, i64) -> i64 # function, value, variant
+klf.kir.value.enum_payload_struct   klfsvc_kir_value_enum_payload_struct   (i64, i64, i64) -> i64 # function, value, variant
+klf.kir.value.enum_payload_array_i64   klfsvc_kir_value_enum_payload_array_i64   (i64, i64, i64) -> i64 # function, value, variant
+klf.kir.value.enum_payload_array_i32   klfsvc_kir_value_enum_payload_array_i32   (i64, i64, i64) -> i64 # function, value, variant
+klf.kir.value.struct_new   klfsvc_kir_value_struct_new   (i64, i64) -> i64 # function, type
+klf.kir.value.struct_set_i64   klfsvc_kir_value_struct_set_i64   (i64, i64, i64, i64) -> void # function, struct, field, value
+klf.kir.value.struct_set_i32   klfsvc_kir_value_struct_set_i32   (i64, i64, i64, i64) -> void # function, struct, field, value
+klf.kir.value.struct_get_i64   klfsvc_kir_value_struct_get_i64   (i64, i64, i64) -> i64 # function, struct, field
+klf.kir.value.struct_get_i32   klfsvc_kir_value_struct_get_i32   (i64, i64, i64) -> i64 # function, struct, field
+klf.kir.value.struct_set_enum   klfsvc_kir_value_struct_set_enum   (i64, i64, i64, i64) -> void # function, struct, field, value
+klf.kir.value.struct_get_enum   klfsvc_kir_value_struct_get_enum   (i64, i64, i64) -> i64 # function, struct, field
+klf.kir.value.struct_set_struct   klfsvc_kir_value_struct_set_struct   (i64, i64, i64, i64) -> void # function, outer struct, field, inner struct
+klf.kir.value.struct_get_struct   klfsvc_kir_value_struct_get_struct   (i64, i64, i64) -> i64 # function, struct, field
+klf.kir.value.struct_set_array_i64   klfsvc_kir_value_struct_set_array_i64   (i64, i64, i64, i64) -> void # function, struct, field, array
+klf.kir.value.struct_set_array_i32   klfsvc_kir_value_struct_set_array_i32   (i64, i64, i64, i64) -> void # function, struct, field, array
+klf.kir.value.struct_get_array_i64   klfsvc_kir_value_struct_get_array_i64   (i64, i64, i64) -> i64 # function, struct, field
+klf.kir.value.struct_get_array_i32   klfsvc_kir_value_struct_get_array_i32   (i64, i64, i64) -> i64 # function, struct, field
+klf.kir.value.enum_tag_i64   klfsvc_kir_value_enum_tag_i64   (i64, i64) -> i64 # function, value
+klf.kir.value.enum_tag_i32   klfsvc_kir_value_enum_tag_i32   (i64, i64) -> i64 # function, value
+klf.kir.value.add_i32   klfsvc_kir_value_add_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.i32_to_i64   klfsvc_kir_value_i32_to_i64   (i64, i64) -> i64 # function, value
+klf.kir.value.i64_to_i32   klfsvc_kir_value_i64_to_i32   (i64, i64) -> i64 # function, value
+klf.kir.value.stack_alloc_i64   klfsvc_kir_value_stack_alloc_i64   (i64) -> i64 # function -> address
+klf.kir.value.store_i64   klfsvc_kir_value_store_i64   (i64, i64, i64) -> void # function, address, value
+klf.kir.value.assign_i64   klfsvc_kir_value_assign_i64   (i64, i64, i64) -> void # function, address, value
+klf.kir.value.stack_alloc_i32   klfsvc_kir_value_stack_alloc_i32   (i64) -> i64 # function -> address
+klf.kir.value.stack_dealloc_i64   klfsvc_kir_value_stack_dealloc_i64   (i64, i64) -> void # function, address
+klf.kir.value.stack_dealloc_i32   klfsvc_kir_value_stack_dealloc_i32   (i64, i64) -> void # function, address
+klf.kir.value.store_i32   klfsvc_kir_value_store_i32   (i64, i64, i64) -> void # function, address, value
+klf.kir.value.assign_i32   klfsvc_kir_value_assign_i32   (i64, i64, i64) -> void # function, address, value
+klf.kir.value.load_i64   klfsvc_kir_value_load_i64   (i64, i64) -> i64 # function, address
+klf.kir.value.load_i32   klfsvc_kir_value_load_i32   (i64, i64) -> i64 # function, address
+klf.kir.function.return   klfsvc_kir_function_return   (i64, i64) -> void # function, value
+klf.kir.function.return_void   klfsvc_kir_function_return_void   (i64) -> void # function
+klf.kir.function.trap   klfsvc_kir_function_trap   (i64, i64, i64) -> void # function, message start, end
+klf.kir.function.unreachable   klfsvc_kir_function_unreachable   (i64) -> void # function
+klf.kir.function.new_i64   klfsvc_kir_function_new_i64   (i64, i64, i64, i64) -> i64 # module, name start, end, parameter count
+klf.kir.function.new_i32   klfsvc_kir_function_new_i32   (i64, i64, i64, i64) -> i64 # module, name start, end, parameter count
+klf.kir.function.new_f64   klfsvc_kir_function_new_f64   (i64, i64, i64, i64) -> i64 # module, name start, end, parameter count
+klf.kir.function.param_f64   klfsvc_kir_function_param_f64   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.call_f64   klfsvc_kir_function_call_f64   (i64, i64, i64) -> i64 # caller, callee, argument
+klf.kir.function.new_pair_i64   klfsvc_kir_function_new_pair_i64   (i64, i64, i64, i64) -> i64 # module, name start, end, parameter count
+klf.kir.function.new_pair_i32   klfsvc_kir_function_new_pair_i32   (i64, i64, i64, i64) -> i64 # module, name start, end, parameter count
+klf.kir.function.new_struct_i64   klfsvc_kir_function_new_struct_i64   (i64, i64, i64, i64) -> i64 # module, struct type, name start, end
+klf.kir.function.new_enum_i64   klfsvc_kir_function_new_enum_i64   (i64, i64, i64, i64) -> i64 # module, enum type, name start, end
+klf.kir.function.new_array_i64   klfsvc_kir_function_new_array_i64   (i64, i64, i64, i64) -> i64 # module, length, name start, end
+klf.kir.function.new_array_i32   klfsvc_kir_function_new_array_i32   (i64, i64, i64, i64) -> i64 # module, length, name start, end
+klf.kir.function.param_i64   klfsvc_kir_function_param_i64   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.param_i32   klfsvc_kir_function_param_i32   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.param_pair_i64   klfsvc_kir_function_param_pair_i64   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.param_pair_i32   klfsvc_kir_function_param_pair_i32   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.param_struct   klfsvc_kir_function_param_struct   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.param_enum   klfsvc_kir_function_param_enum   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.param_array_i64   klfsvc_kir_function_param_array_i64   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.param_array_i32   klfsvc_kir_function_param_array_i32   (i64, i64) -> i64 # function, parameter index
+klf.kir.function.block_new   klfsvc_kir_function_block_new   (i64) -> i64 # function
+klf.kir.function.block_new_i64   klfsvc_kir_function_block_new_i64   (i64) -> i64 # function
+klf.kir.function.block_new_i32   klfsvc_kir_function_block_new_i32   (i64) -> i64 # function
+klf.kir.function.block_param_i64   klfsvc_kir_function_block_param_i64   (i64, i64, i64) -> i64 # function, block, index
+klf.kir.function.block_param_i32   klfsvc_kir_function_block_param_i32   (i64, i64, i64) -> i64 # function, block, index
+klf.kir.function.switch_block   klfsvc_kir_function_switch_block   (i64, i64) -> void # function, block
+klf.kir.function.branch   klfsvc_kir_function_branch   (i64, i64) -> void # function, block
+klf.kir.function.branch_i64   klfsvc_kir_function_branch_i64   (i64, i64, i64) -> void # function, block, value
+klf.kir.function.branch_i32   klfsvc_kir_function_branch_i32   (i64, i64, i64) -> void # function, block, value
+klf.kir.function.call_i64   klfsvc_kir_function_call_i64   (i64, i64, i64) -> i64 # caller, callee, value
+klf.kir.function.call_i32   klfsvc_kir_function_call_i32   (i64, i64, i64) -> i64 # caller, callee, value
+klf.kir.function.call_pair_i64   klfsvc_kir_function_call_pair_i64   (i64, i64, i64) -> i64 # caller, callee, pair
+klf.kir.function.call_pair_i32   klfsvc_kir_function_call_pair_i32   (i64, i64, i64) -> i64 # caller, callee, pair
+klf.kir.function.call_struct_i64   klfsvc_kir_function_call_struct_i64   (i64, i64, i64) -> i64 # caller, callee, struct
+klf.kir.function.call_enum_i64   klfsvc_kir_function_call_enum_i64   (i64, i64, i64) -> i64 # caller, callee, enum
+klf.kir.function.call_array_i64   klfsvc_kir_function_call_array_i64   (i64, i64, i64) -> i64 # caller, callee, array
+klf.kir.function.call_array_i32   klfsvc_kir_function_call_array_i32   (i64, i64, i64) -> i64 # caller, callee, array
+klf.kir.function.call_void   klfsvc_kir_function_call_void   (i64, i64) -> void # caller, callee
+klf.kir.function.call_void_i64   klfsvc_kir_function_call_void_i64   (i64, i64, i64) -> void # caller, callee, value
+klf.kir.function.call_void_i32   klfsvc_kir_function_call_void_i32   (i64, i64, i64) -> void # caller, callee, value
+klf.kir.function.call_void2_i64   klfsvc_kir_function_call_void2_i64   (i64, i64, i64, i64) -> void # caller, callee, lhs, rhs
+klf.kir.function.call_void2_i32   klfsvc_kir_function_call_void2_i32   (i64, i64, i64, i64) -> void # caller, callee, lhs, rhs
+klf.kir.function.call_void_array_i64   klfsvc_kir_function_call_void_array_i64   (i64, i64, i64) -> void # caller, callee, array
+klf.kir.function.call_void_array_i32   klfsvc_kir_function_call_void_array_i32   (i64, i64, i64) -> void # caller, callee, array
+klf.kir.function.call2_i64   klfsvc_kir_function_call2_i64   (i64, i64, i64, i64) -> i64 # caller, callee, lhs, rhs
+klf.kir.function.call2_i32   klfsvc_kir_function_call2_i32   (i64, i64, i64, i64) -> i64 # caller, callee, lhs, rhs
+klf.kir.function.switch_i64   klfsvc_kir_function_switch_i64   (i64, i64, i64, i64, i64) -> void # function, value, case, case block, default block
+klf.kir.function.switch_i32   klfsvc_kir_function_switch_i32   (i64, i64, i64, i64, i64) -> void # function, value, case, case block, default block
+klf.kir.function.switch_enum   klfsvc_kir_function_switch_enum   (i64, i64, i64, i64, i64) -> void # function, value, case, case block, default block
+klf.kir.function.switch_enum2   klfsvc_kir_function_switch_enum2   (i64, i64, i64, i64, i64, i64, i64) -> void # function, value, case1, block1, case2, block2, default block
+klf.kir.value.pair_i64   klfsvc_kir_value_pair_i64   (i64, i64, i64) -> i64 # function, left, right
+klf.kir.value.pair_i32   klfsvc_kir_value_pair_i32   (i64, i64, i64) -> i64 # function, left, right
+klf.kir.value.pair_get_i64   klfsvc_kir_value_pair_get_i64   (i64, i64, i64) -> i64 # function, pair, index
+klf.kir.value.pair_get_i32   klfsvc_kir_value_pair_get_i32   (i64, i64, i64) -> i64 # function, pair, index
+klf.kir.value.array_i64   klfsvc_kir_value_array_i64   (i64, i64) -> i64 # function, length
+klf.kir.value.array_set_i64   klfsvc_kir_value_array_set_i64   (i64, i64, i64, i64) -> void # function, array, index, value
+klf.kir.value.array_get_i64   klfsvc_kir_value_array_get_i64   (i64, i64, i64) -> i64 # function, array, index
+klf.kir.value.array_i32   klfsvc_kir_value_array_i32   (i64, i64) -> i64 # function, length
+klf.kir.value.array_set_i32   klfsvc_kir_value_array_set_i32   (i64, i64, i64, i64) -> void # function, array, index, value
+klf.kir.value.array_get_i32   klfsvc_kir_value_array_get_i32   (i64, i64, i64) -> i64 # function, array, index
+klf.kir.value.sub_i64   klfsvc_kir_value_sub_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.mul_i64   klfsvc_kir_value_mul_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.div_i64   klfsvc_kir_value_div_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.rem_i64   klfsvc_kir_value_rem_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.and_i64   klfsvc_kir_value_and_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.or_i64   klfsvc_kir_value_or_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.xor_i64   klfsvc_kir_value_xor_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.shl_i64   klfsvc_kir_value_shl_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.lshr_i64   klfsvc_kir_value_lshr_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ashr_i64   klfsvc_kir_value_ashr_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.eq_i64   klfsvc_kir_value_eq_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ne_i64   klfsvc_kir_value_ne_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.lt_i64   klfsvc_kir_value_lt_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.le_i64   klfsvc_kir_value_le_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.gt_i64   klfsvc_kir_value_gt_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ge_i64   klfsvc_kir_value_ge_i64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.function.conditional_branch   klfsvc_kir_function_conditional_branch   (i64, i64, i64, i64) -> void # function, condition, then block, else block
+klf.kir.function.conditional_branch_i64   klfsvc_kir_function_conditional_branch_i64   (i64, i64, i64, i64, i64, i64) -> void # function, condition, then block, then value, else block, else value
+klf.kir.function.conditional_branch_i32   klfsvc_kir_function_conditional_branch_i32   (i64, i64, i64, i64, i64, i64) -> void # function, condition, then block, then value, else block, else value
+klf.kir.value.sub_i32   klfsvc_kir_value_sub_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.mul_i32   klfsvc_kir_value_mul_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.div_i32   klfsvc_kir_value_div_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.rem_i32   klfsvc_kir_value_rem_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.and_i32   klfsvc_kir_value_and_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.or_i32   klfsvc_kir_value_or_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.xor_i32   klfsvc_kir_value_xor_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.shl_i32   klfsvc_kir_value_shl_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.lshr_i32   klfsvc_kir_value_lshr_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ashr_i32   klfsvc_kir_value_ashr_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.eq_i32   klfsvc_kir_value_eq_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ne_i32   klfsvc_kir_value_ne_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.lt_i32   klfsvc_kir_value_lt_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.le_i32   klfsvc_kir_value_le_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.gt_i32   klfsvc_kir_value_gt_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ge_i32   klfsvc_kir_value_ge_i32   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.call_service_i64   klfsvc_kir_value_call_service_i64   (i64, i64, i64) -> i64 # function, symbol start, end
+klf.kir.value.call_service_i64_1   klfsvc_kir_value_call_service_i64_1   (i64, i64, i64, i64) -> i64 # function, symbol start, end, argument value
+klf.kir.function.call_service_void_i64_1   klfsvc_kir_function_call_service_void_i64_1   (i64, i64, i64, i64) -> void # function, symbol start, end, argument value
+klf.kir.value.const_f64   klfsvc_kir_value_const_f64   (i64, i64) -> i64 # function, f64 bit pattern
+klf.kir.value.i64_to_f64   klfsvc_kir_value_i64_to_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.f64_to_i64   klfsvc_kir_value_f64_to_i64   (i64, i64) -> i64 # function, value
+klf.kir.value.add_f64   klfsvc_kir_value_add_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.sub_f64   klfsvc_kir_value_sub_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.mul_f64   klfsvc_kir_value_mul_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.div_f64   klfsvc_kir_value_div_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.neg_f64   klfsvc_kir_value_neg_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.abs_f64   klfsvc_kir_value_abs_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.sqrt_f64   klfsvc_kir_value_sqrt_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.floor_f64   klfsvc_kir_value_floor_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.ceil_f64   klfsvc_kir_value_ceil_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.trunc_f64   klfsvc_kir_value_trunc_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.round_f64   klfsvc_kir_value_round_f64   (i64, i64) -> i64 # function, value
+klf.kir.value.eq_f64   klfsvc_kir_value_eq_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ne_f64   klfsvc_kir_value_ne_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.lt_f64   klfsvc_kir_value_lt_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.le_f64   klfsvc_kir_value_le_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.gt_f64   klfsvc_kir_value_gt_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+klf.kir.value.ge_f64   klfsvc_kir_value_ge_f64   (i64, i64, i64) -> i64 # function, lhs, rhs
+
+# General low-level KIR builder (language-agnostic). A definition composes an
+# arbitrary KIR type through a handle, then builds typed values and memory
+# against it. No hosted language's type mapping is encoded here.
+klf.kir.type.integer   klfsvc_kir_type_integer   (i64) -> i64 # bits -> type
+klf.kir.type.float     klfsvc_kir_type_float     (i64) -> i64 # bits -> type
+klf.kir.type.address   klfsvc_kir_type_address   (i64) -> i64 # pointee type -> type
+klf.kir.type.reference   klfsvc_kir_type_reference   (i64) -> i64 # pointee type -> counted ref type
+klf.kir.type.unique   klfsvc_kir_type_unique   (i64) -> i64 # pointee type -> unique owning type
+klf.kir.type.array   klfsvc_kir_type_array   (i64, i64) -> i64 # length, element type -> type
+klf.kir.type.size   klfsvc_kir_type_size   (i64, i64) -> i64 # module, concrete type -> byte size from shared layout rules
+klf.kir.type.align   klfsvc_kir_type_align   (i64, i64) -> i64 # module, concrete type -> byte alignment from shared layout rules
+klf.kir.type.unit   klfsvc_kir_type_unit   () -> i64 # -> unit type
+klf.kir.function.define   klfsvc_kir_function_define   (i64, i64, i64, i64) -> i64 # module, name start, end, result type
+klf.kir.function.result   klfsvc_kir_function_result   (i64, i64) -> void # function, value
+klf.kir.value.integer   klfsvc_kir_value_integer   (i64, i64, i64) -> i64 # function, type, value
+klf.kir.value.zero   klfsvc_kir_value_zero   (i64, i64) -> i64 # function, type
+klf.kir.value.stack_alloc   klfsvc_kir_value_stack_alloc   (i64, i64) -> i64 # function, type -> address
+klf.kir.value.store   klfsvc_kir_value_store   (i64, i64, i64) -> void # function, value, address
+klf.kir.value.load   klfsvc_kir_value_load   (i64, i64) -> i64 # function, address -> value
+klf.kir.value.field_address   klfsvc_kir_value_field_address   (i64, i64, i64, i64) -> i64 # function, address, field, field type
+klf.kir.value.element_address   klfsvc_kir_value_element_address   (i64, i64, i64, i64) -> i64 # function, address, index value, element type
+klf.kir.value.convert   klfsvc_kir_value_convert   (i64, i64, i64, i64) -> i64 # function, kind, value, type
+klf.kir.value.binary   klfsvc_kir_value_binary   (i64, i64, i64, i64, i64, i64) -> i64 # function, operator, overflow, signed, lhs, rhs
+klf.kir.value.compare   klfsvc_kir_value_compare   (i64, i64, i64, i64) -> i64 # function, predicate, lhs, rhs
+klf.kir.signature.new   klfsvc_kir_signature_new   (i64, i64, i64, i64) -> i64 # module, name start, end, result type
+klf.kir.signature.new_named   klfsvc_kir_signature_new_named   (i64, i64, i64, i64, i64) -> i64 # module, name start, end, result type, name suffix
+klf.kir.signature.name_byte   klfsvc_kir_signature_name_byte   (i64, i64) -> void # signature, one UTF-8 name byte
+klf.kir.signature.parameter   klfsvc_kir_signature_parameter   (i64, i64) -> void # signature, parameter type
+klf.kir.signature.c_parameter   klfsvc_kir_signature_c_parameter   (i64, i64, i64) -> void # signature, C type code, type (D-326)
+klf.kir.signature.c_result   klfsvc_kir_signature_c_result   (i64, i64, i64) -> void # signature, C type code, type (D-326)
+klf.kir.signature.c_variadic   klfsvc_kir_signature_c_variadic   (i64) -> void # signature; the C parameters so far are the fixed ones (D-326)
+klf.kir.signature.c_syscall_byte   klfsvc_kir_signature_c_syscall_byte   (i64, i64) -> void # signature, one byte of the `man 2` system call name (D-326)
+klf.kir.signature.export   klfsvc_kir_signature_export   (i64) -> void # signature; the function is exported under its own name (D-328)
+klf.kir.module.attribute_byte   klfsvc_kir_module_attribute_byte   (i64, i64) -> void # module, one UTF-8 byte of the next attribute's value
+klf.kir.module.attribute   klfsvc_kir_module_attribute   (i64, i64) -> void # module, kind (0 link.library, 1 link.flag, 2 link.c_source: path then compile flags, tab-separated, 3 link.resource: path then where it is copied, tab-separated (D-329))
+klf.kir.signature.define   klfsvc_kir_signature_define   (i64) -> i64 # signature -> function
+klf.kir.function.parameter   klfsvc_kir_function_parameter   (i64, i64) -> i64 # function, index -> value
+klf.kir.function.result_void   klfsvc_kir_function_result_void   (i64) -> void # function
+klf.kir.value.argument   klfsvc_kir_value_argument   (i64, i64) -> void # function, next call argument
+klf.kir.value.call   klfsvc_kir_value_call   (i64, i64, i64) -> i64 # function, callee, result type
+klf.kir.value.call_void   klfsvc_kir_value_call_void   (i64, i64) -> void # function, callee
+klf.kir.value.stack_dealloc   klfsvc_kir_value_stack_dealloc   (i64, i64) -> void # function, address
+klf.kir.type.record   klfsvc_kir_type_record   (i64, i64, i64, i64) -> i64 # module, name start, end, layout rule
+klf.kir.type.record_named   klfsvc_kir_type_record_named   (i64, i64, i64, i64, i64) -> i64 # module, name start, end, layout rule, name suffix
+klf.kir.type.record_field   klfsvc_kir_type_record_field   (i64, i64, i64, i64) -> void # record, name start, end, field type
+klf.kir.type.record_union   klfsvc_kir_type_record_union   (i64) -> void # record; every field at offset 0, as a C union's (D-326)
+klf.kir.type.enum   klfsvc_kir_type_enum   (i64, i64, i64) -> i64 # module, name start, end -> enum type
+klf.kir.type.enum_open klfsvc_kir_type_enum_open (i64) -> void
+klf.kir.type.enum_named   klfsvc_kir_type_enum_named   (i64, i64, i64, i64) -> i64 # module, name start, end, specialization index -> enum type
+klf.kir.type.enum_case   klfsvc_kir_type_enum_case   (i64, i64, i64, i64) -> void # enum, name start, end, payload type (unit for none)
+klf.kir.value.enum_inject   klfsvc_kir_value_enum_inject   (i64, i64, i64) -> void # function, enum address, case
+klf.kir.value.enum_payload_address   klfsvc_kir_value_enum_payload_address   (i64, i64, i64, i64) -> i64 # function, enum address, case, payload type -> address
+klf.kir.value.enum_tag   klfsvc_kir_value_enum_tag   (i64, i64) -> i64 # function, enum address -> i64 case index
+klf.kir.value.null   klfsvc_kir_value_null   (i64, i64) -> i64 # function, pointer type
+klf.kir.value.heap_alloc_raw   klfsvc_kir_value_heap_alloc_raw   (i64, i64, i64) -> i64 # function, byte size, alignment -> unmanaged pointer
+klf.kir.value.heap_free_raw   klfsvc_kir_value_heap_free_raw   (i64, i64) -> void # function, unmanaged pointer
+klf.kir.value.mem_copy   klfsvc_kir_value_mem_copy   (i64, i64, i64, i64) -> void # function, destination pointer, source pointer, byte length
+klf.kir.value.mem_move   klfsvc_kir_value_mem_move   (i64, i64, i64, i64) -> void # function, destination pointer, source pointer, byte length; the ranges may overlap
+klf.kir.value.mem_set   klfsvc_kir_value_mem_set   (i64, i64, i64, i64) -> void # function, destination pointer, fill byte, byte length
+klf.kir.value.select   klfsvc_kir_value_select   (i64, i64, i64, i64) -> i64 # function, i1 condition, value if true, value if false -> value
+klf.kir.value.fma   klfsvc_kir_value_fma   (i64, i64, i64, i64) -> i64 # function, first, second, addend -> first * second + addend, rounded once
+klf.kir.value.raw_load   klfsvc_kir_value_raw_load   (i64, i64, i64, i64, i64) -> i64 # function, trivial type, pointer, alignment (0: the type's), volatile (0 or 1) -> value
+klf.kir.value.raw_store   klfsvc_kir_value_raw_store   (i64, i64, i64, i64, i64) -> void # function, value, pointer, alignment (0: the type's), volatile (0 or 1)
+klf.kir.value.pointer_offset   klfsvc_kir_value_pointer_offset   (i64, i64, i64) -> i64 # function, pointer, byte offset -> pointer
+klf.kir.value.pointer_diff   klfsvc_kir_value_pointer_diff   (i64, i64, i64) -> i64 # function, pointer, pointer -> i64 byte distance
+klf.kir.value.atomic_load   klfsvc_kir_value_atomic_load   (i64, i64, i64, i64) -> i64 # function, type, pointer, C11 memory_order (consume refused) -> value
+klf.kir.value.atomic_store   klfsvc_kir_value_atomic_store   (i64, i64, i64, i64) -> void # function, value, pointer, C11 memory_order
+klf.kir.value.atomic_rmw   klfsvc_kir_value_atomic_rmw   (i64, i64, i64, i64, i64) -> i64 # function, operator (0 xchg 1 add 2 sub 3 and 4 or 5 xor 6 nand 7 max 8 min 9 umax 10 umin), pointer, value, C11 memory_order -> value read
+klf.kir.value.compare_exchange   klfsvc_kir_value_compare_exchange   (i64, i64, i64, i64, i64, i64, i64) -> i64 # function, weak (0 or 1), pointer, expected, replacement, success and failure C11 memory_order -> value read
+klf.kir.value.compare_exchange_succeeded   klfsvc_kir_value_compare_exchange_succeeded   (i64, i64) -> i64 # function, value read by compare_exchange -> i1 whether it exchanged
+klf.kir.value.fence   klfsvc_kir_value_fence   (i64, i64) -> void # function, C11 memory_order
+klf.kir.value.size_of   klfsvc_kir_value_size_of   (i64, i64) -> i64 # function, type -> i64 size, read from the descriptor when the type is generic
+klf.kir.value.align_of   klfsvc_kir_value_align_of   (i64, i64) -> i64 # function, type -> i64 alignment
+klf.kir.value.stride_of   klfsvc_kir_value_stride_of   (i64, i64) -> i64 # function, type -> i64 stride
+klf.kir.type.vector   klfsvc_kir_type_vector   (i64, i64) -> i64 # lane count, element type -> vector type
+klf.kir.value.vector_splat   klfsvc_kir_value_vector_splat   (i64, i64, i64) -> i64 # function, vector type, element value -> vector with every lane that value
+klf.kir.value.vector_extract   klfsvc_kir_value_vector_extract   (i64, i64, i64) -> i64 # function, vector, lane -> element
+klf.kir.value.vector_insert   klfsvc_kir_value_vector_insert   (i64, i64, i64, i64) -> i64 # function, vector, lane, element -> vector
+klf.kir.value.vector_shuffle   klfsvc_kir_value_vector_shuffle   (i64, i64, i64, i64) -> i64 # function, vector, vector, first mask lane -> one-lane shuffle
+klf.kir.value.vector_shuffle_lane   klfsvc_kir_value_vector_shuffle_lane   (i64, i64, i64) -> void # function, shuffle just built, next mask lane
+klf.kir.value.const_string klfsvc_kir_value_const_string (i64, i64, i64) -> i64 # function, source start, end -> pointer value
+klf.kir.value.const_string_length klfsvc_kir_value_const_string_length (i64, i64) -> i64 # function, pointer value -> byte length value
+klf.kir.value.float_literal klfsvc_kir_value_float_literal (i64, i64, i64, i64) -> i64 # function, float type, source start, end -> value
+klf.kir.value.float_binary klfsvc_kir_value_float_binary (i64, i64, i64, i64) -> i64 # function, operation, lhs, rhs -> value
+klf.kir.value.float_compare klfsvc_kir_value_float_compare (i64, i64, i64, i64) -> i64 # function, predicate, lhs, rhs -> bool value
+klf.kir.value.float_negate klfsvc_kir_value_float_negate (i64, i64) -> i64 # function, operand -> negated float
+klf.kir.global.new   klfsvc_kir_global_new   (i64, i64, i64, i64, i64) -> i64 # module, name start, end, type, mutable (0 constant, 1 mutable, 2 mutable and thread-local)
+klf.kir.global.new_named   klfsvc_kir_global_new_named   (i64, i64, i64, i64, i64, i64) -> i64 # module, name start, end, type, mutable, name suffix
+klf.kir.global.byte   klfsvc_kir_global_byte   (i64, i64) -> void # global, next initializer byte
+klf.kir.global.integer   klfsvc_kir_global_integer   (i64, i64) -> void # global, integer initializer
+klf.kir.value.global_address   klfsvc_kir_value_global_address   (i64, i64) -> i64 # function, global -> address
+klf.kir.value.function_reference   klfsvc_kir_value_function_reference   (i64, i64) -> i64 # function, callee -> value
+klf.kir.value.indirect_parameter   klfsvc_kir_value_indirect_parameter   (i64, i64) -> void # function, next parameter type
+klf.kir.value.call_indirect   klfsvc_kir_value_call_indirect   (i64, i64, i64) -> i64 # function, target, result type
+klf.kir.value.call_indirect_void   klfsvc_kir_value_call_indirect_void   (i64, i64) -> void # function, target
+klf.kir.type.pointer   klfsvc_kir_type_pointer   () -> i64 # -> untyped pointer type
+klf.kir.type.parameter   klfsvc_kir_type_parameter   (i64) -> void # next parameter type of the function type being built
+klf.kir.type.function   klfsvc_kir_type_function   (i64) -> i64 # result type -> function type over the pushed parameters
+klf.kir.type.foreign_function   klfsvc_kir_type_foreign_function   (i64) -> i64 # result type -> platform-convention function type over the pushed parameters: a C function pointer (section 26.4)
+klf.kir.value.from_address   klfsvc_kir_value_from_address   (i64, i64) -> i64 # function, address -> the value that address is
+klf.kir.address.from_value   klfsvc_kir_address_from_value   (i64, i64, i64) -> i64 # function, value, element type -> address
+klf.kir.address.cast   klfsvc_kir_address_cast   (i64, i64, i64) -> i64 # function, address, type -> address
+klf.kir.global.anonymous   klfsvc_kir_global_anonymous   (i64, i64, i64) -> i64 # module, type, mutable -> global with a generated name
+
+# General control flow and declarations. Blocks, their parameters and the
+# edge arguments of every terminator accumulate through the same handles the
+# rest of the general builder uses.
+klf.kir.block.parameter   klfsvc_kir_block_parameter   (i64, i64) -> void # function, next block parameter type
+klf.kir.block.define   klfsvc_kir_block_define   (i64) -> i64 # function -> block
+klf.kir.block.entry   klfsvc_kir_block_entry   (i64) -> i64 # function -> entry block
+klf.kir.block.value   klfsvc_kir_block_value   (i64, i64, i64) -> i64 # function, block, parameter index -> value
+klf.kir.block.switch   klfsvc_kir_block_switch   (i64, i64) -> void # function, block
+klf.kir.block.else_argument   klfsvc_kir_block_else_argument   (i64, i64) -> void # function, next else-edge argument
+klf.kir.block.branch   klfsvc_kir_block_branch   (i64, i64) -> void # function, target block
+klf.kir.block.conditional_branch   klfsvc_kir_block_conditional_branch   (i64, i64, i64, i64) -> void # function, condition, then block, else block
+klf.kir.block.trap   klfsvc_kir_block_trap   (i64, i64, i64) -> void # function, message start, end
+klf.kir.block.trap_text_byte   klfsvc_kir_block_trap_text_byte   (i64, i64) -> void # function, one UTF-8 byte of the report the next trap of the function prints
+klf.kir.block.unreachable   klfsvc_kir_block_unreachable   (i64) -> void # function
+klf.kir.switch.case   klfsvc_kir_switch_case   (i64, i64, i64) -> void # function, case value, block
+klf.kir.switch.int   klfsvc_kir_switch_int   (i64, i64, i64) -> void # function, value, default block
+klf.kir.switch.enum   klfsvc_kir_switch_enum   (i64, i64) -> void # function, enum address; cases from switch.case
+klf.kir.signature.declare   klfsvc_kir_signature_declare   (i64) -> i64 # signature -> body-less function
+klf.kir.function.body   klfsvc_kir_function_body   (i64) -> void # function
+klf.kir.function.at   klfsvc_kir_function_at   (i64, i64, i64) -> void # function, span start, end: the source the instructions that follow come from (section 16.3)
+klf.kir.function.initializer   klfsvc_kir_function_initializer   (i64) -> void # function; runs before the entry
+
+klf.kir.function.referenced klfsvc_kir_function_referenced (i64) -> i64 # function builder -> 1 once a call or reference names it
+klf.kir.function.discard klfsvc_kir_function_discard (i64) -> void # function builder declared and never named
+klf.kir.function.comptime klfsvc_kir_function_comptime (i64) -> void # function builder
+klf.kir.function.comptime_buffer klfsvc_kir_function_comptime_buffer (i64, i64, i64, i64) -> void # function, allocator, data field, byte length field
+klf.kir.function.comptime_array klfsvc_kir_function_comptime_array (i64, i64, i64, i64, i64) -> void # function, allocator, data field, element count field, bytes per element
+klf.kir.function.comptime_record klfsvc_kir_function_comptime_record (i64) -> void # function whose record result is rebuilt field by field
+klf.kir.value.text_byte klfsvc_kir_value_text_byte (i64, i64) -> void # function builder, UTF-8 byte
+klf.kir.value.text klfsvc_kir_value_text (i64) -> i64 # consume UTF-8 text bytes
+klf.kir.module.detached klfsvc_kir_module_detached (i64, i64) -> i64 # session, unit -> isolated builder
+klf.kir.module.evaluate klfsvc_kir_module_evaluate (i64, i64, i64, i64) -> i64 # builder, entry, steps, memory -> evaluation result
+klf.kir.module.evaluate_buffer klfsvc_kir_module_evaluate_buffer (i64, i64, i64, i64, i64, i64) -> i64 # builder, entry, pointer field, length field, steps, memory
+klf.kir.module.evaluation_root klfsvc_kir_module_evaluation_root (i64, i64) -> void # builder, entry evaluated by its evaluator
+klf.kir.module.evaluator klfsvc_kir_module_evaluator (i64) -> i64 # builder -> evaluator lowered once for its entries
+klf.kir.evaluator.evaluate_buffer klfsvc_kir_evaluator_evaluate_buffer (i64, i64, i64, i64, i64, i64) -> i64 # evaluator, entry, pointer field, length field, steps, memory
+klf.kir.evaluator.release klfsvc_kir_evaluator_release (i64) -> void # evaluator
+klf.kir.evaluation.status klfsvc_kir_evaluation_status (i64) -> i64 # result -> success
+klf.kir.evaluation.value klfsvc_kir_evaluation_value (i64) -> i64 # result -> scalar bits
+klf.kir.evaluation.length klfsvc_kir_evaluation_length (i64) -> i64 # result -> buffer/error byte length
+klf.kir.evaluation.byte klfsvc_kir_evaluation_byte (i64, i64) -> i64 # result, byte index
+klf.source.virtual klfsvc_source_virtual (i64, i64, ptr, i64) -> i64 # session, origin source file, UTF-8, length -> virtual source file
+klf.source.expansion klfsvc_source_expansion (i64, i64, i64, i64, i64, ptr, i64) -> void # session, virtual source file, origin source file, start, end, macro name, length: the file holds what the macro invoked over that span expanded to
+klf.source.ffi_header klfsvc_source_ffi_header (i64, i64, ptr, i64, ptr, i64, ptr, i64, ptr, i64, ptr, i64) -> i64 # session, origin source file, header path, length, library, length, selected functions, length, include directories, length, shared pointer type names to withhold (newline-separated), length -> generated .klffi source file
+klf.source.ridl_module klfsvc_source_ridl_module (i64, i64, ptr, i64, ptr, i64) -> i64 # session, origin source file, contract directory, length, module, length -> generated Kira source file of the module's .ridl contract
+klf.kir.evaluation.source klfsvc_kir_evaluation_source (i64, i64, i64) -> i64 # session, origin file, result -> virtual source file
+klf.source.digest klfsvc_source_digest (i64, i64, i64) -> i64 # session, source file, word 0 to 3 -> those 64 bits of the SHA-256 of its text
+klf.subquery.recall klfsvc_subquery_recall (i64, i64, ptr, i64) -> i64 # session, origin source file, key, length -> virtual source file of the answer an earlier build kept under the key, or -1
+klf.subquery.keep klfsvc_subquery_keep (i64, ptr, i64, i64) -> void # session, key, length, source file: keeps its text as the answer under the key, when it can
+
+klf.diag.hold klfsvc_diag_hold () -> void
+klf.diag.release klfsvc_diag_release (i64) -> i64
+
+klf.kir.type.enum_case_numbered klfsvc_kir_type_enum_case_numbered (i64, i64, i64, i64, i64) -> void
+
+# The shader builder (KLF-KSL section 6). Handles are arena indices, -1 an absent
+# optional; a string is a pointer and a byte length.
+klf.shader.module.new klfsvc_shader_module_new (i64, i64, i64, ptr, i64) -> i64 # session, unit, program, module name -> shader module
+klf.shader.module.finish klfsvc_shader_module_finish (i64) -> i64 # shader module -> the ShaderModule artifact the lower phase returns
+klf.shader.span klfsvc_shader_span (i64, i64, i64, i64) -> void # module, file (-1 the phase's own), start, end: the span later nodes carry
+klf.shader.push klfsvc_shader_push (i64, i64) -> void # module, word: one operand of the next call that takes a list
+klf.shader.type klfsvc_shader_type (i64, ptr, i64) -> i64 # module, KSIR type text -> type
+klf.shader.type.array klfsvc_shader_type_array (i64, i64, i64, ptr, i64) -> i64 # module, base, count (-1 runtime), space -> array strided by the space's layout rule
+klf.shader.type.member klfsvc_shader_type_member (i64, ptr, i64, i64, ptr, i64, i64, i64, i64) -> void # module, name, type, binding, offset (-1 by rule), size, align: a member of the next struct
+klf.shader.type.struct klfsvc_shader_type_struct (i64, ptr, i64, ptr, i64) -> i64 # module, name, space -> struct of the pending members laid out by the space's rule
+klf.shader.type.struct_explicit klfsvc_shader_type_struct_explicit (i64, ptr, i64, i64, i64) -> i64 # module, name, size, align -> struct of the pending members at their offsets
+klf.shader.type.size klfsvc_shader_type_size (i64, i64, ptr, i64) -> i64 # module, type, layout rule -> size
+klf.shader.type.align klfsvc_shader_type_align (i64, i64, ptr, i64) -> i64 # module, type, layout rule -> alignment
+klf.shader.constant klfsvc_shader_constant (i64, ptr, i64, i64, i64) -> i64 # module, name, type, global expression -> constant
+klf.shader.override klfsvc_shader_override (i64, ptr, i64, i64, i64, i64) -> i64 # module, name, id (-1 none), type, default (-1 none) -> override
+klf.shader.global klfsvc_shader_global (i64, ptr, i64, ptr, i64, i64, i64, i64) -> i64 # module, name, space, type, group (-1 none), binding -> global
+klf.shader.slot klfsvc_shader_slot (i64, i64, ptr, i64) -> void # module, global, target slot text
+klf.shader.param klfsvc_shader_param (i64, ptr, i64, i64, ptr, i64) -> void # module, name, type, binding: a parameter of the next function
+klf.shader.function klfsvc_shader_function (i64, ptr, i64, i64, ptr, i64) -> i64 # module, name, result type (-1 none), result binding -> function builder
+klf.shader.entry klfsvc_shader_entry (i64, ptr, i64, ptr, i64, i64, ptr, i64) -> i64 # module, name, stage, result type (-1 none), result binding -> function builder
+klf.shader.entry.workgroup klfsvc_shader_entry_workgroup (i64, i64, i64, i64, i64) -> void # module, entry builder, x, y, z
+klf.shader.entry.workgroup_override klfsvc_shader_entry_workgroup_override (i64, i64, i64, i64) -> void # module, entry builder, axis, override expression
+klf.shader.function.finish klfsvc_shader_function_finish (i64, i64) -> i64 # module, function builder -> function, or entry point index
+klf.shader.group klfsvc_shader_group (i64, ptr, i64, ptr, i64) -> void # module, name, class: opens a resource group of the shader
+klf.shader.group.add klfsvc_shader_group_add (i64, i64) -> void # module, global: adds it to the open group
+klf.shader.option klfsvc_shader_option (i64, i64) -> void # module, override: one of the shader's options
+klf.shader.shader klfsvc_shader_shader (i64, ptr, i64, ptr, i64) -> void # module, name, kind: the shader of the pending entries, groups and options
+klf.shader.expr.literal klfsvc_shader_expr_literal (i64, i64, ptr, i64, ptr, i64) -> i64 # module, function (-1 global), scalar, text -> expression
+klf.shader.expr.zero klfsvc_shader_expr_zero (i64, i64, i64) -> i64 # module, function, type -> expression
+klf.shader.expr.compose klfsvc_shader_expr_compose (i64, i64, i64) -> i64 # module, function, type -> composite of the pending parts
+klf.shader.expr.splat klfsvc_shader_expr_splat (i64, i64, i64, i64) -> i64 # module, function, size, value -> expression
+klf.shader.expr.swizzle klfsvc_shader_expr_swizzle (i64, i64, i64, ptr, i64) -> i64 # module, function, vector, pattern -> expression
+klf.shader.expr.access klfsvc_shader_expr_access (i64, i64, i64, i64) -> i64 # module, function, base, index expression -> expression
+klf.shader.expr.access_index klfsvc_shader_expr_access_index (i64, i64, i64, i64) -> i64 # module, function, base, constant index -> expression
+klf.shader.expr.argument klfsvc_shader_expr_argument (i64, i64, i64) -> i64 # module, function, parameter index -> expression
+klf.shader.expr.global klfsvc_shader_expr_global (i64, i64, i64) -> i64 # module, function, global -> pointer expression
+klf.shader.expr.local klfsvc_shader_expr_local (i64, i64, i64) -> i64 # module, function, local -> pointer expression
+klf.shader.expr.constant klfsvc_shader_expr_constant (i64, i64, i64) -> i64 # module, function, constant -> expression
+klf.shader.expr.override klfsvc_shader_expr_override (i64, i64, i64) -> i64 # module, function, override -> expression
+klf.shader.expr.load klfsvc_shader_expr_load (i64, i64, i64) -> i64 # module, function, pointer -> expression
+klf.shader.expr.unary klfsvc_shader_expr_unary (i64, i64, ptr, i64, i64) -> i64 # module, function, operator, operand -> expression
+klf.shader.expr.binary klfsvc_shader_expr_binary (i64, i64, ptr, i64, i64, i64) -> i64 # module, function, operator, left, right -> expression
+klf.shader.expr.select klfsvc_shader_expr_select (i64, i64, i64, i64, i64) -> i64 # module, function, condition, accept, reject -> expression
+klf.shader.expr.convert klfsvc_shader_expr_convert (i64, i64, i64, ptr, i64) -> i64 # module, function, value, scalar -> expression
+klf.shader.expr.bitcast klfsvc_shader_expr_bitcast (i64, i64, i64, i64) -> i64 # module, function, value, type -> expression
+klf.shader.expr.math klfsvc_shader_expr_math (i64, i64, ptr, i64) -> i64 # module, function, math function -> call over the pending arguments
+klf.shader.expr.relational klfsvc_shader_expr_relational (i64, i64, ptr, i64, i64) -> i64 # module, function, relational function, value -> expression
+klf.shader.expr.derivative klfsvc_shader_expr_derivative (i64, i64, ptr, i64, ptr, i64, i64) -> i64 # module, function, axis, control, value -> expression
+klf.shader.expr.image_sample klfsvc_shader_expr_image_sample (i64, i64, ptr, i64) -> i64 # module, function, level kind -> sample of the nine pending operands
+klf.shader.expr.image_load klfsvc_shader_expr_image_load (i64, i64) -> i64 # module, function -> load of the five pending operands
+klf.shader.expr.image_query klfsvc_shader_expr_image_query (i64, i64, i64, ptr, i64, i64) -> i64 # module, function, image, query, level (-1 none) -> expression
+klf.shader.expr.array_length klfsvc_shader_expr_array_length (i64, i64, i64) -> i64 # module, function, pointer -> expression
+klf.shader.expr.name klfsvc_shader_expr_name (i64, i64, i64, ptr, i64) -> void # module, function, expression, name
+klf.shader.local klfsvc_shader_local (i64, i64, ptr, i64, i64, i64) -> i64 # module, function, name, type, init (-1 none) -> local
+klf.shader.stmt.store klfsvc_shader_stmt_store (i64, i64, i64, i64) -> void # module, function, pointer, value
+klf.shader.stmt.image_store klfsvc_shader_stmt_image_store (i64, i64) -> void # module, function: store of the four pending operands
+klf.shader.stmt.call klfsvc_shader_stmt_call (i64, i64, i64) -> i64 # module, function, callee -> result expression (-1 none) of a call over the pending arguments
+klf.shader.stmt.atomic klfsvc_shader_stmt_atomic (i64, i64, i64, ptr, i64, i64, i64, i64) -> i64 # module, function, pointer, atomic function, value, compare (-1 none), want result -> result (-1 none)
+klf.shader.stmt.barrier klfsvc_shader_stmt_barrier (i64, i64, ptr, i64, ptr, i64) -> void # module, function, kind, flags
+klf.shader.stmt.if klfsvc_shader_stmt_if (i64, i64, i64) -> void # module, function, condition: opens an if
+klf.shader.stmt.else klfsvc_shader_stmt_else (i64, i64) -> void # module, function: switches to the reject block
+klf.shader.stmt.end_if klfsvc_shader_stmt_end_if (i64, i64) -> void # module, function
+klf.shader.stmt.loop klfsvc_shader_stmt_loop (i64, i64) -> void # module, function: opens a loop
+klf.shader.stmt.continuing klfsvc_shader_stmt_continuing (i64, i64) -> void # module, function: switches to the continuing block
+klf.shader.stmt.end_loop klfsvc_shader_stmt_end_loop (i64, i64, i64) -> void # module, function, break-if (-1 none)
+klf.shader.stmt.switch klfsvc_shader_stmt_switch (i64, i64, i64) -> void # module, function, selector: opens a switch
+klf.shader.stmt.case klfsvc_shader_stmt_case (i64, i64, ptr, i64, i64) -> void # module, function, value, fall through: opens a case
+klf.shader.stmt.end_case klfsvc_shader_stmt_end_case (i64, i64) -> void # module, function
+klf.shader.stmt.end_switch klfsvc_shader_stmt_end_switch (i64, i64) -> void # module, function
+klf.shader.stmt.break klfsvc_shader_stmt_break (i64, i64) -> void # module, function
+klf.shader.stmt.continue klfsvc_shader_stmt_continue (i64, i64) -> void # module, function
+klf.shader.stmt.return klfsvc_shader_stmt_return (i64, i64, i64) -> void # module, function, value (-1 none)
+klf.shader.stmt.kill klfsvc_shader_stmt_kill (i64, i64) -> void # module, function
+
+# The reader and writer an out uses (KLF-KSL section 6.7). A unit is the one
+# the driver is emitting; a text answer is a text id, -1 for absent.
+klf.shader.read.count klfsvc_shader_read_count (i64, ptr, i64, i64) -> i64 # unit, table, owner -> how many records
+klf.shader.read.kind klfsvc_shader_read_kind (i64, ptr, i64, i64, i64) -> i64 # unit, table, owner, index -> the kind's text id
+klf.shader.read.int klfsvc_shader_read_int (i64, ptr, i64, i64, i64, ptr, i64, i64) -> i64 # unit, table, owner, index, field, item (-1 the count) -> the value, -1 absent
+klf.shader.read.text klfsvc_shader_read_text (i64, ptr, i64, i64, i64, ptr, i64, i64) -> i64 # unit, table, owner, index, field, item (-1 the count) -> a text id, -1 absent
+klf.shader.read.text_len klfsvc_shader_read_text_len (i64, i64) -> i64 # unit, text id -> its byte length
+klf.shader.read.text_copy klfsvc_shader_read_text_copy (i64, i64, ptr, i64) -> i64 # unit, text id, output buffer, byte length -> 1 when copied
+klf.shader.out.write klfsvc_shader_out_write (i64, ptr, i64) -> void # unit, text appended to the output
+klf.shader.out.refuse klfsvc_shader_out_refuse (i64, ptr, i64, i64, i64) -> void # unit, message, function number, expression (-1 for none)
+klf.shader.out.refuse_at klfsvc_shader_out_refuse_at (i64, ptr, i64, ptr, i64, i64, i64) -> void # unit, message, table, owner, index of the record the refusal is placed at

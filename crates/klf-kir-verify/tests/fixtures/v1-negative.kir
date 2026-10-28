@@ -1,0 +1,9 @@
+module @V1Negative lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @bad() -> i64 engine(runtime) {
+bb0():
+  return %late
+bb1():
+  %late = const.int i64, 7
+  return %late
+}

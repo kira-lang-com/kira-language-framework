@@ -1,0 +1,13 @@
+module @V10NegCall lang "test" target "aarch64-apple-darwin" stage canonical
+
+func private @mayfail(%x: i64) -> i64 fails i64 engine(runtime) {
+bb0(%x: i64):
+  return %x
+}
+
+func private @bad() -> i64 engine(runtime) {
+bb0():
+  %n = const.int i64, 1
+  %r = call @mayfail(%n)
+  return %r
+}

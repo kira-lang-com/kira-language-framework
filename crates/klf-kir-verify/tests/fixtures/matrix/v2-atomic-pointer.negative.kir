@@ -1,0 +1,8 @@
+// expect KLF-KIR-1002
+module @AtomicPointer lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @bump(%value: i64) -> i64 engine(runtime) {
+bb0(%value: i64):
+  %result = atomic.rmw add %value, %value seq_cst
+  return %result
+}

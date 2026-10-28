@@ -1,0 +1,15 @@
+module @V8Pos lang "test" target "aarch64-apple-darwin" stage canonical
+
+type %Big = struct ridl { a: i64 }
+policy { copy: trivial, destroy: trivial, relocate: fn(@reloc), exclusivity: static, pairing: none }
+
+func private @reloc(%dst: ptr, %src: ptr) -> unit engine(runtime) {
+bb0(%dst: ptr, %src: ptr):
+  return
+}
+
+func private @ok(%p: *%Big) -> i64 engine(runtime) {
+bb0(%p: *%Big):
+  %z = const.int i64, 0
+  return %z
+}

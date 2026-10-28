@@ -1,0 +1,7 @@
+module @V2Negative lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @bad(%number: i64, %flag: i1) -> i64 engine(runtime) {
+bb0(%number: i64, %flag: i1):
+  %sum = add [trap] %number, %flag
+  return %sum
+}

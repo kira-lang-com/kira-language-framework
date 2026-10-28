@@ -1,0 +1,16 @@
+module @V8Neg lang "test" target "aarch64-apple-darwin" stage canonical
+
+type %Big = struct ridl { a: i64 }
+policy { copy: trivial, destroy: trivial, relocate: fn(@reloc), exclusivity: static, pairing: none }
+
+func private @reloc(%dst: ptr, %src: ptr) -> unit engine(runtime) {
+bb0(%dst: ptr, %src: ptr):
+  return
+}
+
+func private @bad(%p: *%Big) -> i64 engine(runtime) {
+bb0(%p: *%Big):
+  %v = load [trivial] %p
+  %f = struct.extract %v, 0
+  return %f
+}

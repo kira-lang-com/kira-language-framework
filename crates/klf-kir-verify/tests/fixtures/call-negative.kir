@@ -1,0 +1,14 @@
+module @CallNegative lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @add(%a: i64, %b: i64) -> i64 engine(runtime) {
+bb0(%a: i64, %b: i64):
+  %sum = add %a, %b
+  return %sum
+}
+
+func private @caller() -> i64 engine(runtime) {
+bb0():
+  %x = const.int i64, 1
+  %r = call @add(%x)
+  return %r
+}

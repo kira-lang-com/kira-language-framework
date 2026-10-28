@@ -1,0 +1,22 @@
+[package]
+name = "klf-kir-passes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+klf-core = { path = "../klf-core" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-layout = { path = "../klf-layout" }
+klf-source = { path = "../klf-source" }
+
+[dev-dependencies]
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-vm = { path = "../klf-vm" }
+
+[lints]
+workspace = true

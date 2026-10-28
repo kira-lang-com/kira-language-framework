@@ -1,0 +1,8 @@
+// expect KLF-KIR-1002
+module @SelectCondition lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @pick(%a: i64, %b: i64) -> i64 engine(runtime) {
+bb0(%a: i64, %b: i64):
+  %picked = select %a, %a, %b
+  return %picked
+}

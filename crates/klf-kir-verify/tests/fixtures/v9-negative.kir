@@ -1,0 +1,8 @@
+module @V9Neg lang "test" target "aarch64-apple-darwin" stage raw
+
+func private @bad() -> i64 engine(runtime) {
+bb0():
+  asm "nop"
+  %z = const.int i64, 0
+  return %z
+}

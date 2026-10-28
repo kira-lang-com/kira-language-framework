@@ -1,0 +1,14 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Builds this workspace's release, as CI publishes it."
+
+[dependencies]
+klf-target = { path = "../crates/klf-target" }
+sha2 = "0.10.9"
+
+[lints]
+workspace = true

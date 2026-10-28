@@ -1,0 +1,11 @@
+module @BorrowPos lang "test" target "aarch64-apple-darwin" stage canonical
+
+func private @borrowed_ok() -> i64 engine(runtime) {
+bb0():
+  %r = heap.alloc.counted i64
+  %b = borrow.begin %r
+  borrow.end %b
+  destroy %r
+  %z = const.int i64, 0
+  return %z
+}

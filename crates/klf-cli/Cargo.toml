@@ -1,0 +1,40 @@
+[package]
+name = "klf-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "klf"
+path = "src/main.rs"
+
+[dependencies]
+klf-format = { path = "../klf-format" }
+klf-core = { path = "../klf-core" }
+klf-source = { path = "../klf-source" }
+klf-diag = { path = "../klf-diag" }
+klf-kir = { path = "../klf-kir" }
+klf-kir-verify = { path = "../klf-kir-verify" }
+klf-kir-passes = { path = "../klf-kir-passes" }
+klf-shader = { path = "../klf-shader" }
+klf-shader-valid = { path = "../klf-shader-valid" }
+klf-klffi = { path = "../klf-klffi" }
+klf-target = { path = "../klf-target" }
+klf-services = { path = "../klf-services" }
+klf-kira-lower = { path = "../klf-kira-lower" }
+klf-ridl = { path = "../klf-ridl" }
+klf-toy-calc = { path = "../klf-toy-calc" }
+klf-driver = { path = "../klf-driver" }
+klf-vm = { path = "../klf-vm" }
+klf-kernel-ide = { path = "../klf-kernel-ide" }
+klf-lsp = { path = "../klf-lsp" }
+klf-live = { path = "../klf-live" }
+klf-editor-gen = { path = "../klf-editor-gen" }
+serde_json = "1"
+
+[dev-dependencies]
+klf-cranelift = { path = "../klf-cranelift" }
+klf-llvm = { path = "../klf-llvm" }
+
+[lints]
+workspace = true
