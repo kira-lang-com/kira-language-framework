@@ -55,7 +55,9 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
 fn vscode_client(out: &Path) -> Result<(), String> {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../editors/vscode-client");
     let npm = |arguments: &[&str]| {
-        let status = Command::new("npm")
+        // On Windows npm is a `.cmd` script, which `Command` finds only by
+        // its full name.
+        let status = Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" })
             .args(arguments)
             .current_dir(&source)
             .status()

@@ -72,12 +72,13 @@ impl KernelArchive {
         }
     }
 
-    const fn cargo_file(self) -> &'static str {
-        match self {
-            Self::Driver => "libklf_frontend_rt.a",
-            Self::Runtime => "libklf_native_rt.a",
-            Self::Vm => "libklf_vm_rt.a",
-        }
+    fn cargo_file(self, target: &str) -> String {
+        let name = match self {
+            Self::Driver => "klf_frontend_rt",
+            Self::Runtime => "klf_native_rt",
+            Self::Vm => "klf_vm_rt",
+        };
+        klf_target::static_library(name, target)
     }
 }
 
@@ -98,7 +99,7 @@ pub fn runner(target: &str) -> Result<PathBuf, String> {
                 .to_owned(),
         );
     };
-    let path = home.join("platforms").join(target).join(RUNNER);
+    let path = home.join("platforms").join(target).join(runner_file(target));
     if path.exists() {
         Ok(path)
     } else {
@@ -112,6 +113,12 @@ pub fn runner(target: &str) -> Result<PathBuf, String> {
 
 /// The file name of the bytecode runner inside a platform.
 pub const RUNNER: &str = "klfvm-run";
+
+/// The runner's file for `target`: `klfvm-run`, or `klfvm-run.exe` for Windows.
+#[must_use]
+pub fn runner_file(target: &str) -> String {
+    if target.contains("-windows-") { format!("{RUNNER}.exe") } else { RUNNER.to_owned() }
+}
 
 /// The distribution `klf` runs from: the one `KLF_HOME` names, or the one
 /// this executable sits in. A `klf` built in the workspace sits in none, and
@@ -229,7 +236,7 @@ pub fn build_in_workspace(archive: KernelArchive, target: &str) -> Result<PathBu
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    let built = directory.join(archive.cargo_file());
+    let built = directory.join(archive.cargo_file(target));
     if !archive.linked_by_programs() {
         return Ok(built);
     }
@@ -457,8 +464,12 @@ pub fn link(
     for archive in archives {
         command.arg(archive);
     }
-    // The shader validator and constant folder call libm.
-    command.arg("-lm");
+    if klf_target::is_msvc(host_triple()) {
+        command.args(klf_target::MSVC_SYSTEM_LIBRARIES);
+    } else {
+        // The shader validator and constant folder call libm.
+        command.arg("-lm");
+    }
     let result = command
         .output()
         .map_err(|error| format!("ld.lld: {error}"))?;
@@ -515,8 +526,10 @@ pub fn build_distribution(out: &Path, targets: &[String]) -> Result<(), String> 
     // libraries beside it.
     // `ld64.lld` is the Mach-O linker clang runs for `-fuse-ld=lld` on macOS,
     // and `lld-link` the COFF one on Windows; lld reads which from its name.
-    for tool in ["clang", "clang++", "ld.lld", "ld64.lld", "lld-link", "llvm-strip", "llvm-ar"] {
-        if let Some(from) = find_llvm_tool(tool) {
+    for tool in ["clang", "clang++", "ld.lld", "ld64.lld", "lld-link", "llvm-strip", "llvm-ar", "llvm-nm"] {
+        // From the RIDL LLVM itself: an installed distribution may predate a
+        // tool this list has gained.
+        if let Some(from) = klf_target::llvm_tool(tool) {
             copy(&from, &out.join("bin").join(klf_target::executable(tool)))?;
         }
     }
@@ -548,7 +561,7 @@ pub fn build_distribution(out: &Path, targets: &[String]) -> Result<(), String> 
             copy(&built, &directory.join(archive.file_name()))?;
         }
         let runner = build_runner(target)?;
-        copy(&runner, &directory.join(RUNNER))?;
+        copy(&runner, &directory.join(runner_file(target)))?;
     }
     // A shader language is a language like any other: it lives where its own
     // repository keeps it, and whoever builds a shader frontend names the
@@ -570,7 +583,7 @@ fn build_runner(target: &str) -> Result<PathBuf, String> {
         "klf-vm-rt",
         target,
     );
-    let built = directory.join(RUNNER);
+    let built = directory.join(runner_file(target));
     if built.exists() {
         return Ok(built);
     }

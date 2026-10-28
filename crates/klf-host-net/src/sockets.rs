@@ -56,8 +56,10 @@ pub fn tcp_connect(address_text: &[u8]) -> i64 {
     word((|| {
         let stream = TcpStream::connect(address(address_text)?)?;
         // Requests and frames are written whole by the protocol above, so
-        // holding them back to coalesce only adds latency.
-        stream.set_nodelay(true)?;
+        // holding them back to coalesce only adds latency. Only a hint: a
+        // socket still connecting may refuse it, as Windows does, and that
+        // is no reason to fail the connection.
+        let _ = stream.set_nodelay(true);
         Ok(table::insert(Resource::Stream(Mutex::new(Connection::Tcp(stream)))))
     })())
 }

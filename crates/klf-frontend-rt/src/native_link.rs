@@ -261,6 +261,12 @@ pub(crate) fn search_path(library: &Path) -> Option<OsString> {
 pub(crate) fn image_library(image: &str, target: &str) -> Vec<OsString> {
     let image = std::path::absolute(image).unwrap_or_else(|_| image.into());
     let mut library = image.clone().into_os_string();
+    if klf_target::is_msvc(target) {
+        // A DLL links through its import library; the loader finds the DLL
+        // itself beside the program or on `PATH`.
+        library.push(".natives.lib");
+        return vec![library];
+    }
     library.push(if is_apple(target) {
         ".natives.dylib"
     } else {
@@ -274,6 +280,42 @@ pub(crate) fn image_library(image: &str, target: &str) -> Vec<OsString> {
     }
     arguments.push(library);
     arguments
+}
+
+/// Puts each `.klbc` image `module` links, with its native library, beside
+/// `binary` on Windows, which has no run-time search path: its loader looks
+/// for a DLL a binary needs in the binary's own directory, and the library
+/// runs the image it finds beside itself.
+pub(crate) fn place_image_libraries(module: &Module, target: &str, binary: &Path) -> Result<(), String> {
+    if !target.contains("windows") {
+        return Ok(());
+    }
+    let Some(directory) = binary.parent() else {
+        return Ok(());
+    };
+    for attribute in &module.attributes {
+        let Some(value) = attribute.value.as_ref().filter(|value| value.ends_with(".klbc")) else {
+            continue;
+        };
+        if attribute.name != LIBRARY_ATTRIBUTE {
+            continue;
+        }
+        let image = std::path::absolute(value).unwrap_or_else(|_| value.into());
+        let mut library = image.clone().into_os_string();
+        library.push(".natives.dll");
+        for file in [image, PathBuf::from(library)] {
+            let Some(name) = file.file_name() else {
+                continue;
+            };
+            let placed = directory.join(name);
+            if std::path::absolute(&placed).ok() == Some(file.clone()) {
+                continue;
+            }
+            std::fs::copy(&file, &placed)
+                .map_err(|error| format!("cannot copy {} beside {}: {error}", file.display(), binary.display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Copies each file `module` declares as a resource to where it says,

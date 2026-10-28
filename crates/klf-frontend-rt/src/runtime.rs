@@ -64,11 +64,12 @@ impl Runtime {
         }
     }
 
-    const fn cargo_file(self) -> &'static str {
-        match self {
-            Self::Native => "libklf_native_rt.a",
-            Self::Vm => "libklf_vm_rt.a",
-        }
+    fn cargo_file(self, target: &str) -> String {
+        let name = match self {
+            Self::Native => "klf_native_rt",
+            Self::Vm => "klf_vm_rt",
+        };
+        klf_target::static_library(name, target)
     }
 
     /// What the program's link adds for the runtime besides its archive: the
@@ -80,6 +81,12 @@ impl Runtime {
                 "-Wl,-u,_klfvm_invoke",
                 "-Wl,-u,_klfvm_attach",
                 "-Wl,-export_dynamic",
+            ],
+            Self::Vm if klf_target::is_msvc(target) => vec![
+                "-Wl,/INCLUDE:klfvm_invoke",
+                "-Wl,/INCLUDE:klfvm_attach",
+                "-Wl,/EXPORT:klfvm_invoke",
+                "-Wl,/EXPORT:klfvm_attach",
             ],
             Self::Vm if is_windows(target) => vec![
                 "-Wl,-u,klfvm_invoke",
@@ -165,7 +172,7 @@ impl Runtime {
             .ok_or_else(|| "no bundled llvm-strip to prepare the runtime archive".to_owned())?;
         klf_target::without_debug_info(
             &strip,
-            &directory.join(self.cargo_file()),
+            &directory.join(self.cargo_file(target)),
             &directory.join(self.file_name()),
         )
     }

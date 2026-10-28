@@ -1,4 +1,4 @@
-//! Native libraries on a Windows host: loaded with `LoadLibraryW`, searched
+//! Native libraries on a Windows host: loaded with `LoadLibraryExW`, searched
 //! with `GetProcAddress`, and named with `GetModuleFileNameW`.
 #![allow(unsafe_code)]
 
@@ -9,7 +9,7 @@ type Module = *mut c_void;
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
-    fn LoadLibraryW(path: *const u16) -> Module;
+    fn LoadLibraryExW(path: *const u16, file: *mut c_void, flags: u32) -> Module;
     fn GetProcAddress(module: Module, symbol: *const c_char) -> *mut c_void;
     fn GetModuleHandleExW(flags: u32, name: *const u16, module: *mut Module) -> i32;
     fn GetModuleFileNameW(module: Module, path: *mut u16, size: u32) -> u32;
@@ -26,6 +26,8 @@ unsafe extern "system" {
 /// and the module's reference count stays as it is.
 const FROM_ADDRESS: u32 = 0x4;
 const UNCHANGED_REFCOUNT: u32 = 0x2;
+/// Searches for the DLLs a library needs in the library's own directory.
+const ALTERED_SEARCH_PATH: u32 = 0x8;
 /// The longest path `GetModuleFileNameW` writes, in UTF-16 units.
 const LONGEST_PATH: usize = 32_768;
 
@@ -109,8 +111,11 @@ pub fn load(path: &str) -> Result<usize, String> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
+    // A library's own DLLs sit beside it, which only an absolute path lets
+    // the loader search.
+    let flags = if std::path::Path::new(path).is_absolute() { ALTERED_SEARCH_PATH } else { 0 };
     // SAFETY: `wide` is a NUL-terminated UTF-16 path.
-    let handle = unsafe { LoadLibraryW(wide.as_ptr()) };
+    let handle = unsafe { LoadLibraryExW(wide.as_ptr(), std::ptr::null_mut(), flags) };
     if handle.is_null() {
         let reason = std::io::Error::last_os_error();
         return Err(format!("cannot load {path}: {reason}"));

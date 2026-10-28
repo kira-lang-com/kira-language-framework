@@ -452,7 +452,8 @@ fn build_c_archive(source: &Path, scratch: &Path) -> Result<(), String> {
     let object = scratch.join(format!("{stem}.o"));
     let archive = source.with_file_name(format!("lib{stem}.a"));
     let _ = std::fs::remove_file(&archive);
-    let mut compile = vec!["-c".to_owned(), "-O2".to_owned(), "-fPIC".to_owned()];
+    let mut compile = vec!["-c".to_owned(), "-O2".to_owned()];
+    compile.extend(klf_target::pic_flags(crate::host_triple()).iter().map(|flag| (*flag).to_owned()));
     // The bundled clang carries no C library headers; on macOS they are the
     // SDK's, as the native link takes them (`kernel::link`).
     if let Some(sysroot) = crate::native::macos_sysroot() {
@@ -583,6 +584,12 @@ fn ran(build: &Output, program: &mut Command, root: &Path) -> Result<Observed, S
         })?;
         observed.stdout = String::from_utf8_lossy(&run.stdout).into_owned();
         observed.exit = i64::from(run.status.code().unwrap_or(-1));
+        // A Unix status keeps a program's result to its low eight bits, and
+        // the expectations are written so; Windows keeps all thirty-two. A
+        // negative one there is the system ending the program, kept whole.
+        if cfg!(windows) && observed.exit >= 0 {
+            observed.exit &= 0xff;
+        }
     }
     Ok(observed)
 }
@@ -591,8 +598,11 @@ fn ran(build: &Output, program: &mut Command, root: &Path) -> Result<Observed, S
 /// working directory's prefix removed from paths, and the whole trimmed, so a
 /// recorded expectation holds wherever the package is checked out.
 fn normalized(text: &str, root: &Path) -> String {
-    let prefix = format!("{}/", root.display());
-    text.replace(&prefix, "")
+    // Windows writes a path with `\`; the expectations are written with `/`.
+    let slashed = |text: String| if cfg!(windows) { text.replace('\\', "/") } else { text };
+    let prefix = slashed(format!("{}/", root.display()));
+    slashed(text.to_owned())
+        .replace(&prefix, "")
         .lines()
         .map(str::trim_end)
         .collect::<Vec<_>>()

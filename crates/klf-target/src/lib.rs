@@ -143,6 +143,19 @@ pub fn home_dir() -> Option<std::path::PathBuf> {
         .map(std::path::PathBuf::from)
 }
 
+/// `path` without the `\\?\` prefix Windows gives a canonical path, when a
+/// plain drive path is behind it. A verbatim path takes no `/`, and a path
+/// handed to a definition has its parts joined with one.
+#[must_use]
+pub fn plain_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    let plain = path
+        .to_str()
+        .and_then(|text| text.strip_prefix(r"\\?\"))
+        .filter(|rest| rest.as_bytes().get(1) == Some(&b':'))
+        .map(std::path::PathBuf::from);
+    plain.unwrap_or(path)
+}
+
 /// `name` as an executable is spelled on this host: `clang.exe` on Windows.
 #[must_use]
 pub fn executable(name: &str) -> String {
@@ -157,10 +170,40 @@ pub fn host_triple() -> &'static str {
         ("x86_64", "macos") => "x86_64-apple-darwin",
         ("aarch64", "linux") => "aarch64-unknown-linux-gnu",
         ("x86_64", "linux") => "x86_64-unknown-linux-gnu",
-        ("x86_64", "windows") => "x86_64-pc-windows-gnu",
+        ("x86_64", "windows") => "x86_64-pc-windows-msvc",
+        ("aarch64", "windows") => "aarch64-pc-windows-msvc",
         _ => "unknown",
     }
 }
+
+/// Whether `target` is Windows with the MSVC toolchain, whose linker is
+/// `lld-link` and whose static libraries are `name.lib`.
+#[must_use]
+pub fn is_msvc(target: &str) -> bool {
+    target.ends_with("-windows-msvc")
+}
+
+/// The flag that makes code position-independent for `target`: `-fPIC`, and
+/// none on MSVC, where every object is relocatable and clang refuses it.
+#[must_use]
+pub fn pic_flags(target: &str) -> &'static [&'static str] {
+    if is_msvc(target) { &[] } else { &["-fPIC"] }
+}
+
+/// `name`'s static library as Cargo builds it for `target`:
+/// `libname.a`, or `name.lib` on MSVC.
+#[must_use]
+pub fn static_library(name: &str, target: &str) -> String {
+    if is_msvc(target) { format!("{name}.lib") } else { format!("lib{name}.a") }
+}
+
+/// What a Rust static library needs from Windows when linked with MSVC, as
+/// `rustc --print native-static-libs` lists it, and the DLL C runtime it was
+/// compiled for in place of the static one clang would pick.
+pub const MSVC_SYSTEM_LIBRARIES: [&str; 12] = [
+    "-lpsapi", "-lshell32", "-luser32", "-ladvapi32", "-lbcrypt", "-lkernel32",
+    "-lntdll", "-luserenv", "-lws2_32", "-ldbghelp", "-lmsvcrt", "-Wl,/NODEFAULTLIB:libcmt",
+];
 
 /// The RIDL LLVM release this KLF links with, published by
 /// `kira-lang-com/llvm-ridl` as `v<version>`.

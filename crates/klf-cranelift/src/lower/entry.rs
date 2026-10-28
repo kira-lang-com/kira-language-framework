@@ -172,7 +172,30 @@ pub(crate) fn emit_library_init(
     }
     module
         .define_function(id, &mut context)
-        .map_err(|e| err(format!("define {symbol}: {e}")))
+        .map_err(|e| err(format!("define {symbol}: {e}")))?;
+    if kir.target.triple().ends_with("-msvc") {
+        run_at_startup(module, id, symbol)?;
+    }
+    Ok(())
+}
+
+/// Has the C runtime call `init` before `main`, from an entry of its own in
+/// `.CRT$XCU`. A COFF archive member is linked only when something names
+/// it, and nothing names a constructor kept in an object of its own, so on
+/// MSVC the entry lives in the library's object beside what it runs.
+fn run_at_startup(module: &mut ObjectModule, init: FuncId, symbol: &str) -> Result<(), EmitError> {
+    let id = module
+        .declare_anonymous_data(false, false)
+        .map_err(|e| err(format!("declare the startup entry of {symbol}: {e}")))?;
+    let mut description = DataDescription::new();
+    description.set_align(8);
+    description.set_custom_section(".CRT$XCU");
+    description.define_zeroinit(8);
+    let function = module.declare_func_in_data(init, &mut description);
+    description.write_function_addr(0, function);
+    module
+        .define_data(id, &description)
+        .map_err(|e| err(format!("define the startup entry of {symbol}: {e}")))
 }
 
 /// Calls the module's `initializer` functions in order, after its globals

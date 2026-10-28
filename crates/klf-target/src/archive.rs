@@ -37,6 +37,15 @@ pub fn without_debug_info(strip: &Path, built: &Path, linked: &Path) -> Result<P
         STAGED.fetch_add(1, Ordering::Relaxed)
     ));
     let staged = PathBuf::from(staged);
+    // `llvm-strip` reads no MSVC archive. Its debug information is CodeView,
+    // which `lld-link` leaves out of a program unless asked for a PDB, so the
+    // archive is linked as Cargo built it.
+    if built.extension().is_some_and(|extension| extension == "lib") {
+        std::fs::copy(built, &staged).map_err(|error| format!("cannot copy {}: {error}", built.display()))?;
+        std::fs::rename(&staged, linked)
+            .map_err(|error| format!("cannot write {}: {error}", linked.display()))?;
+        return Ok(linked.to_path_buf());
+    }
     let output = Command::new(strip)
         .arg("--strip-debug")
         .arg("-o")

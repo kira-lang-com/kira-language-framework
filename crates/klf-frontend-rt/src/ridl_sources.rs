@@ -69,6 +69,7 @@ pub(crate) fn mark(text: &str, module: &Module, session: &Session, output: &Path
 /// macOS meet; as given, made absolute, when it does not exist.
 fn absolute(path: &Path) -> PathBuf {
     path.canonicalize()
+        .map(klf_target::plain_path)
         .or_else(|_| std::path::absolute(path))
         .unwrap_or_else(|_| path.to_path_buf())
 }

@@ -242,7 +242,7 @@ unsafe fn process_main(
 /// calls it, so a program that links the library, natively or from
 /// bytecode, calls the module's entries and they run on its instance
 /// (section 17.3). The image is the library's path without its
-/// `.natives.so` or `.natives.dylib` suffix. The instance lives as long as
+/// `.natives.so`, `.natives.dylib` or `.natives.dll` suffix. The instance lives as long as
 /// the process; an image that cannot load or initialize ends it.
 ///
 /// # Safety
@@ -252,7 +252,7 @@ pub unsafe extern "C" fn klfvm_attach(anchor: *const c_void) {
     let attached = klf_vm::image_of(anchor as usize)
         .ok_or_else(|| "a library asked for its image from outside any image".to_owned())
         .and_then(|library| {
-            let image = [".natives.so", ".natives.dylib"]
+            let image = [".natives.so", ".natives.dylib", ".natives.dll"]
                 .iter()
                 .find_map(|suffix| library.strip_suffix(suffix))
                 .ok_or_else(|| format!("{library} is not the native library of an image"))?

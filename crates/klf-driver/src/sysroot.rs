@@ -185,6 +185,7 @@ fn assemble(
     // Canonical, as `std_sources` reads it: the sources then strip this prefix
     // exactly, so each one is copied to its own place under the sysroot.
     let std_root = std::fs::canonicalize(package.join(&descriptor.std_root))
+        .map(klf_target::plain_path)
         .unwrap_or_else(|_| package.join(&descriptor.std_root));
     let std_sources = std_sources(&std_root, &descriptor.extensions)?;
     install_headers(
@@ -261,7 +262,7 @@ fn assemble(
                 .is_some_and(|parent| parent.ends_with(host))
         })
         .cloned();
-    let runner = staging.join("bin").join(format!("{driver_name}-run"));
+    let runner = staging.join("bin").join(klf_target::executable(&format!("{driver_name}-run")));
     link_runner(&runner, host_std.as_deref(), descriptor.entry)?;
 
     let triples: Vec<&str> = targets.iter().map(Target::triple).collect();
@@ -354,7 +355,7 @@ fn install_surface(
 }
 
 fn std_sources(root: &Path, extensions: &[String]) -> Result<StdSources, String> {
-    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let root = std::fs::canonicalize(root).map(klf_target::plain_path).unwrap_or_else(|_| root.to_path_buf());
     let mut sources = Vec::new();
     let include = root.join("include");
     let mut headers = Vec::new();
@@ -406,6 +407,7 @@ fn unit_packages(root: &Path) -> Result<Option<Vec<PathBuf>>, String> {
         for relative in manifest_paths(&text) {
             let dependency = packages[next].join(relative);
             let dependency = std::fs::canonicalize(&dependency)
+                .map(klf_target::plain_path)
                 .map_err(|error| format!("cannot read {}: {error}", dependency.display()))?;
             if !packages.contains(&dependency) {
                 packages.push(dependency);

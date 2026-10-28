@@ -167,7 +167,7 @@ fn compile(
         });
     if !library.is_empty() {
         let std_root = root.join(library);
-        let std_root = std_root.canonicalize().unwrap_or(std_root);
+        let std_root = klf_target::plain_path(std_root.canonicalize().unwrap_or(std_root));
         metadata.std_root = std_root.to_string_lossy().into_owned();
     }
     for phase in [

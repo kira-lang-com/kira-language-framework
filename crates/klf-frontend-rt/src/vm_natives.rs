@@ -68,12 +68,13 @@ pub(crate) fn emit_natives(
     }
     let entries = entry_source(
         module,
+        klf_target::is_msvc(&target),
         if is_apple(&target) { "_" } else { "" },
         described,
         surface.is_some(),
     );
     let source = scratch.write("vm_entries.c", entries.as_bytes())?;
-    objects.push(compiled(&toolchain, &source)?);
+    objects.push(compiled(&toolchain, &target, &source)?);
     objects.extend(ridl_objects(
         surface.as_ref(),
         &imported,
@@ -90,7 +91,13 @@ pub(crate) fn emit_natives(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        if is_apple(&target) { "dylib" } else { "so" }
+        if is_apple(&target) {
+            "dylib"
+        } else if klf_target::is_msvc(&target) {
+            "dll"
+        } else {
+            "so"
+        }
     );
     let library = output.with_file_name(&name);
     if let Some(directory) = library
@@ -104,18 +111,34 @@ pub(crate) fn emit_natives(
     if is_apple(&target) {
         arguments.extend(["-dynamiclib", "-undefined", "dynamic_lookup"].map(OsString::from));
         arguments.push(format!("-Wl,-install_name,@rpath/{name}").into());
+    } else if klf_target::is_msvc(&target) {
+        // A DLL binds its own symbols already, and is found by its file name.
+        arguments.extend(["-shared", "-fuse-ld=lld"].map(OsString::from));
     } else {
         // Every program's library defines the same helper names; each binds
         // its own, so a library loaded beside another never calls into it.
         arguments.extend(["-shared", "-fPIC", "-Wl,-Bsymbolic"].map(OsString::from));
         arguments.push(format!("-Wl,-soname,{name}").into());
     }
+    let libraries = whole_libraries(module, &target);
+    if klf_target::is_msvc(&target) {
+        let definition = exports_definition(&objects, module, &scratch)?;
+        arguments.push(format!("-Wl,/DEF:{}", definition.display()).into());
+    }
     arguments.extend(objects.into_iter().map(OsString::from));
-    arguments.extend(whole_libraries(module, &target));
+    arguments.extend(libraries);
+    if klf_target::is_msvc(&target) {
+        // A Kira archive the library holds calls the native runtime, which
+        // a Unix library binds from the runner; a DLL cannot leave it
+        // unbound, so it links a copy of its own.
+        arguments.push(crate::runtime::Runtime::Native.archive(&target)?.into());
+        arguments.extend(crate::output::system_libraries(&target).into_iter().map(OsString::from));
+    }
     arguments.push("-o".into());
     arguments.push(library.clone().into());
     let arguments: Vec<&std::ffi::OsStr> = arguments.iter().map(OsString::as_os_str).collect();
     toolchain.run(&arguments)?;
+    crate::native_link::place_image_libraries(module, &target, &library)?;
     program.imports.push(Import {
         symbol: name,
         kind: ImportKind::Library { first: 0 },
@@ -144,23 +167,23 @@ fn ridl_objects(
     }
     sources
         .iter()
-        .map(|source| compiled(toolchain, source))
+        .map(|source| compiled(toolchain, target, source))
         .collect()
 }
 
 /// `source`, C or LLVM IR, compiled to a position-independent object beside
 /// it.
-fn compiled(toolchain: &CToolchain, source: &Path) -> Result<PathBuf, String> {
+fn compiled(toolchain: &CToolchain, target: &str, source: &Path) -> Result<PathBuf, String> {
     let object = source.with_extension("o");
-    toolchain.run(&[
-        "-c".as_ref(),
-        "-O2".as_ref(),
-        "-fPIC".as_ref(),
+    let mut arguments: Vec<&std::ffi::OsStr> = vec!["-c".as_ref(), "-O2".as_ref()];
+    arguments.extend(klf_target::pic_flags(target).iter().map(|flag| std::ffi::OsStr::new(*flag)));
+    arguments.extend([
         "-Wno-override-module".as_ref(),
         source.as_os_str(),
         "-o".as_ref(),
         object.as_os_str(),
-    ])?;
+    ]);
+    toolchain.run(&arguments)?;
     Ok(object)
 }
 
@@ -192,6 +215,46 @@ fn entry_symbol(function: &Function, described: Option<&str>) -> Option<String> 
 /// The libraries and flags `module` links, every static archive taken whole:
 /// the VM finds a symbol by name, so nothing in the library references the
 /// archive members a program calls.
+/// A module-definition file exporting every external symbol `objects` and
+/// the module's whole archives define. A shared object on Unix exports them
+/// all by default, and the VM finds a native function by its name; a DLL
+/// exports only what it is told to.
+fn exports_definition(objects: &[PathBuf], module: &Module, scratch: &Scratch) -> Result<PathBuf, String> {
+    let nm = crate::toolchain::find_tool("llvm-nm").ok_or_else(|| "no bundled llvm-nm to list the library's exports".to_owned())?;
+    let mut inputs: Vec<PathBuf> = objects.to_vec();
+    for attribute in &module.attributes {
+        if let Some(value) = &attribute.value
+            && attribute.name == LIBRARY_ATTRIBUTE
+            && value.ends_with(".a")
+        {
+            inputs.push(PathBuf::from(value));
+        }
+    }
+    let output = std::process::Command::new(&nm)
+        .args(["--extern-only", "--defined-only", "--just-symbol-name"])
+        .args(&inputs)
+        .output()
+        .map_err(|error| format!("llvm-nm: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("llvm-nm failed\n{}", String::from_utf8_lossy(&output.stderr)));
+    }
+    let mut names: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && !name.ends_with(':'))
+        .map(str::to_owned)
+        .collect();
+    names.sort();
+    names.dedup();
+    let mut text = String::from("EXPORTS\n");
+    for name in names {
+        text.push_str("    ");
+        text.push_str(&name);
+        text.push('\n');
+    }
+    scratch.write("exports.def", text.as_bytes())
+}
+
 fn whole_libraries(module: &Module, target: &str) -> Vec<OsString> {
     let mut arguments = Vec::new();
     for attribute in &module.attributes {
@@ -208,6 +271,8 @@ fn whole_libraries(module: &Module, target: &str) -> Vec<OsString> {
         if value.ends_with(".a") && !value.starts_with('-') {
             if is_apple(target) {
                 arguments.push(format!("-Wl,-force_load,{value}").into());
+            } else if klf_target::is_msvc(target) {
+                arguments.push(format!("-Wl,/WHOLEARCHIVE:{value}").into());
             } else {
                 arguments.push(format!("-Wl,--whole-archive,{value},--no-whole-archive").into());
             }
@@ -230,18 +295,19 @@ fn whole_libraries(module: &Module, target: &str) -> Vec<OsString> {
 /// words to `klfvm_invoke` with the instance and the function's index, and
 /// returns its result. A RIDL module's library also runs its image when it
 /// loads.
-fn entry_source(module: &Module, prefix: &str, described: Option<&str>, attaches: bool) -> String {
+fn entry_source(module: &Module, windows: bool, prefix: &str, described: Option<&str>, attaches: bool) -> String {
     let mut source = String::from(
-        "typedef __UINT64_TYPE__ uint64_t;\ntypedef __UINT32_TYPE__ uint32_t;\n\
-         extern void klfvm_invoke(const void *, uint32_t, const uint64_t *, uint64_t *);\n\
-         static const void *klf_vm_instance;\nstatic uint32_t klf_vm_first;\n\
-         void klf_vm_bind(const void *instance, uint32_t first) {\n\
+        "typedef __UINT64_TYPE__ uint64_t;\ntypedef __UINT32_TYPE__ uint32_t;\n",
+    );
+    source.push_str(if windows { WINDOWS_HOST_ENTRIES } else { HOST_ENTRIES });
+    source.push_str(
+        "static const void *klf_vm_instance;\nstatic uint32_t klf_vm_first;\n\
+         KLF_EXPORT void klf_vm_bind(const void *instance, uint32_t first) {\n\
          klf_vm_instance = instance;\nklf_vm_first = first;\n}\n",
     );
     if attaches {
         source.push_str(
-            "extern void klfvm_attach(const void *);\n\
-             __attribute__((constructor)) static void klf_vm_attach(void) { klfvm_attach((const void *)&klf_vm_attach); }\n",
+            "__attribute__((constructor)) static void klf_vm_attach(void) { klfvm_attach((const void *)&klf_vm_attach); }\n",
         );
     }
     for (index, function) in module.functions.iter().enumerate() {
@@ -251,6 +317,28 @@ fn entry_source(module: &Module, prefix: &str, described: Option<&str>, attaches
     }
     source
 }
+
+/// The VM's two entry points as the library reaches them: symbols the
+/// loading program defines, which the dynamic loader binds.
+const HOST_ENTRIES: &str = "#define KLF_EXPORT\n\
+     extern void klfvm_invoke(const void *, uint32_t, const uint64_t *, uint64_t *);\n\
+     extern void klfvm_attach(const void *);\n";
+
+/// The same on Windows, where a DLL resolves every symbol when it is linked
+/// and so cannot leave them to the program that loads it: each is looked up
+/// once in the loading executable, which exports both. A DLL also exports
+/// only what it names, so the VM's way in, `KLF_EXPORT`, is named there.
+const WINDOWS_HOST_ENTRIES: &str = "#define KLF_EXPORT __declspec(dllexport)\n\
+     __declspec(dllimport) void *__stdcall GetModuleHandleW(const unsigned short *);\n\
+     __declspec(dllimport) void *__stdcall GetProcAddress(void *, const char *);\n\
+     static void *klf_vm_host(const char *name) { return GetProcAddress(GetModuleHandleW(0), name); }\n\
+     static void klfvm_invoke(const void *instance, uint32_t index, const uint64_t *words, uint64_t *result) {\n\
+     static void (*entry)(const void *, uint32_t, const uint64_t *, uint64_t *);\n\
+     if (!entry) entry = (void (*)(const void *, uint32_t, const uint64_t *, uint64_t *))klf_vm_host(\"klfvm_invoke\");\n\
+     entry(instance, index, words, result);\n}\n\
+     static void klfvm_attach(const void *library) {\n\
+     void (*entry)(const void *) = (void (*)(const void *))klf_vm_host(\"klfvm_attach\");\n\
+     entry(library);\n}\n";
 
 fn write_entry(source: &mut String, index: usize, function: &Function, prefix: &str, symbol: &str) {
     let prototype = function.c_prototype.as_ref();
@@ -285,7 +373,7 @@ fn write_entry(source: &mut String, index: usize, function: &Function, prefix: &
     };
     let _ = writeln!(
         source,
-        "{returned} klf_vm_entry{index}({parameter_list}) __asm__(\"{prefix}{symbol}\");"
+        "KLF_EXPORT {returned} klf_vm_entry{index}({parameter_list}) __asm__(\"{prefix}{symbol}\");"
     );
     let _ = writeln!(
         source,

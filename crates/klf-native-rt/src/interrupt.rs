@@ -12,6 +12,7 @@
 //! did, so a command-line driver behaves exactly as before.
 
 use std::cell::{Cell, RefCell};
+#[cfg(not(target_env = "msvc"))]
 use std::ffi::c_int;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -168,16 +169,21 @@ pub fn catching<R>(body: impl FnOnce() -> R) -> Result<R, Interrupt> {
     })
 }
 
+#[cfg(not(target_env = "msvc"))]
 #[repr(C)]
 pub struct UnwindException {
     _private: [u8; 0],
 }
 
+#[cfg(not(target_env = "msvc"))]
 #[repr(C)]
 pub struct UnwindContext {
     _private: [u8; 0],
 }
 
+// The Itanium unwinder's interface, which an MSVC target does not have: it
+// unwinds with SEH, and gets no definition-code unwind tables (D-360).
+#[cfg(not(target_env = "msvc"))]
 unsafe extern "C" {
     fn _Unwind_GetLanguageSpecificData(context: *mut UnwindContext) -> *const u8;
     fn _Unwind_GetRegionStart(context: *mut UnwindContext) -> usize;
@@ -186,9 +192,13 @@ unsafe extern "C" {
     fn _Unwind_SetIP(context: *mut UnwindContext, value: usize);
 }
 
+#[cfg(not(target_env = "msvc"))]
 const SEARCH_PHASE: c_int = 1;
+#[cfg(not(target_env = "msvc"))]
 const FATAL_PHASE1_ERROR: c_int = 3;
+#[cfg(not(target_env = "msvc"))]
 const INSTALL_CONTEXT: c_int = 7;
+#[cfg(not(target_env = "msvc"))]
 const CONTINUE_UNWIND: c_int = 8;
 
 /// The personality of definition code. Its language-specific data is a
@@ -200,6 +210,7 @@ const CONTINUE_UNWIND: c_int = 8;
 ///
 /// # Safety
 /// Called by the system unwinder with its own context and exception.
+#[cfg(not(target_env = "msvc"))]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn klfrt_personality(
     version: c_int,
@@ -246,6 +257,7 @@ pub unsafe extern "C" fn klfrt_personality(
 
 /// # Safety
 /// `table` must point at a landing table as [`klfrt_personality`] describes.
+#[cfg(not(target_env = "msvc"))]
 unsafe fn landing_pad(table: *const u8, offset: usize) -> Option<usize> {
     // SAFETY: the table starts with its count, then the pairs, unaligned.
     let read = |index: usize| unsafe { table.add(index * 4).cast::<u32>().read_unaligned() };

@@ -171,10 +171,14 @@ fn link_binary(
     command.arg("-fuse-ld=lld");
     command.arg(if is_apple(target) {
         "-Wl,-dead_strip"
+    } else if klf_target::is_msvc(target) {
+        "-Wl,/OPT:REF"
     } else {
         "-Wl,--gc-sections"
     });
-    if is_windows(target) {
+    if klf_target::is_msvc(target) {
+        command.arg(format!("-Wl,/STACK:{WINDOWS_STACK_RESERVE}"));
+    } else if is_windows(target) {
         command.arg(format!("-Wl,--stack,{WINDOWS_STACK_RESERVE}"));
     }
     // A program exporting its functions is one that loads modules: they also
@@ -214,6 +218,7 @@ fn link_binary(
     if is_apple(target) {
         crate::native_link::gather_debug_information(output);
     }
+    crate::native_link::place_image_libraries(module, target, output)?;
     crate::native_link::stage_resources(module)
 }
 
@@ -227,7 +232,7 @@ pub(crate) fn emit_library(
     language: &str,
     export: Option<&str>,
 ) -> Result<(), String> {
-    let (_scratch, object) = library_object(module, output, language, export)?;
+    let (_scratch, objects) = library_object(module, output, language, export)?;
     if output.exists() {
         std::fs::remove_file(output)
             .map_err(|error| format!("cannot replace {}: {error}", output.display()))?;
@@ -236,7 +241,7 @@ pub(crate) fn emit_library(
     let result = Command::new(archiver)
         .arg("rcs")
         .arg(output)
-        .arg(&object)
+        .args(&objects)
         .output()
         .map_err(|error| format!("archiver failed: {error}"))?;
     if !result.status.success() {
@@ -256,7 +261,7 @@ pub(crate) fn emit_library(
 /// symbol when it is linked and so carries its own runtime.
 pub(crate) fn emit_shared(module: &Module, output: &Path, language: &str) -> Result<(), String> {
     let target = module.target.triple().to_owned();
-    let (_scratch, object) = library_object(module, output, language, None)?;
+    let (_scratch, objects) = library_object(module, output, language, None)?;
     let toolchain = CToolchain::for_target(&target)?;
     let mut command = toolchain.command();
     if is_apple(&target) {
@@ -272,7 +277,7 @@ pub(crate) fn emit_shared(module: &Module, output: &Path, language: &str) -> Res
     // The native libraries the module declares are the shared library's own
     // dependencies, recorded as it is linked so a loader finds them.
     let result = command
-        .arg(&object)
+        .args(&objects)
         .args(crate::native_link::link_arguments(module, &target))
         .arg("-o")
         .arg(output)
@@ -285,18 +290,20 @@ pub(crate) fn emit_shared(module: &Module, output: &Path, language: &str) -> Res
             String::from_utf8_lossy(&result.stderr)
         ));
     }
-    Ok(())
+    crate::native_link::place_image_libraries(module, &target, output)
 }
 
-/// The library's relocatable object: the lowered module, merged with a
-/// load-time constructor when the module has globals to initialize. The
-/// object lives in the returned scratch directory.
+/// The library's objects: the lowered module, merged into one relocatable
+/// object with a load-time constructor when the module has globals to
+/// initialize. MSVC's linker cannot merge objects, so there they stay apart
+/// and go into the archive side by side. They live in the returned scratch
+/// directory.
 fn library_object(
     module: &Module,
     output: &Path,
     language: &str,
     export: Option<&str>,
-) -> Result<(Scratch, PathBuf), String> {
+) -> Result<(Scratch, Vec<PathBuf>), String> {
     let target = module.target.triple().to_owned();
     check_target(&target)?;
     let mut module = instantiated(module.clone())?;
@@ -367,7 +374,7 @@ fn library_object(
         && entries.is_none()
         && imports.is_empty()
     {
-        return Ok((scratch, object_path));
+        return Ok((scratch, vec![object_path]));
     }
     let directory = scratch.0.clone();
     let mut parts = vec![object_path.clone()];
@@ -375,7 +382,9 @@ fn library_object(
     parts.extend(sources);
     parts.extend(entries);
     parts.extend(imports);
-    if let Some(init) = init {
+    // On MSVC the library's object runs `init` itself (`.CRT$XCU`), as
+    // an object holding only a constructor would never be linked.
+    if let Some(init) = init.filter(|_| !klf_target::is_msvc(&target)) {
         let constructor = format!(
             "extern void {init}(void);\n__attribute__((constructor)) static void klf_library_constructor(void) {{ {init}(); }}\n"
         );
@@ -388,6 +397,9 @@ fn library_object(
             &scratch,
         )?);
     }
+    if klf_target::is_msvc(&target) {
+        return Ok((scratch, parts));
+    }
     let merged = directory.join("merged.o");
     let mut arguments: Vec<&std::ffi::OsStr> = vec!["-r".as_ref(), "-nostdlib".as_ref()];
     if !is_apple(&target) {
@@ -396,7 +408,7 @@ fn library_object(
     arguments.extend(parts.iter().map(|part| part.as_os_str()));
     arguments.extend(["-o".as_ref(), merged.as_os_str()]);
     toolchain.run(&arguments)?;
-    Ok((scratch, merged))
+    Ok((scratch, vec![merged]))
 }
 
 /// The object holding the `ridlcc` entries, descriptors and metadata of a
@@ -476,9 +488,11 @@ fn init_symbol(output: &Path) -> String {
 /// Rust standard library imports (`rustc --print native-static-libs`), with the
 /// unwinder the target's own C library carries. Darwin's `libSystem` holds all
 /// of it.
-fn system_libraries(target: &str) -> Vec<&'static str> {
+pub(crate) fn system_libraries(target: &str) -> Vec<&'static str> {
     let mut libraries: Vec<&'static str> = if is_apple(target) {
         Vec::new()
+    } else if klf_target::is_msvc(target) {
+        klf_target::MSVC_SYSTEM_LIBRARIES.to_vec()
     } else if is_windows(target) {
         vec![
             "-lkernel32",

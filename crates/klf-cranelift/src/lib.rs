@@ -39,13 +39,15 @@ fn err(message: impl Into<String>) -> EmitError {
 }
 
 /// The targets this backend emits objects for.
-pub const SUPPORTED_TARGETS: [&str; 6] = [
+pub const SUPPORTED_TARGETS: [&str; 8] = [
     "aarch64-apple-darwin",
     "aarch64-apple-ios",
     "x86_64-apple-darwin",
     "aarch64-unknown-linux-gnu",
     "x86_64-unknown-linux-gnu",
     "x86_64-pc-windows-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
 ];
 
 /// The object module for `triple`, and the target its functions compile for.
