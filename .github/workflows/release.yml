@@ -26,6 +26,10 @@ on:
         default: none
         type: choice
         options: [none, macos, linux, windows]
+      from_run:
+        description: "Reuse artifacts from this completed run (the release tag must identify its commit)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -53,6 +57,7 @@ jobs:
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
   build:
     needs: select-hosts
+    if: ${{ !inputs.from_run }}
     name: Build ${{ matrix.host }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -82,24 +87,57 @@ jobs:
   publish:
     name: Publish
     needs: build
-    if: github.event_name == 'push' || inputs.publish
+    if: ${{ always() && !cancelled() && (needs.build.result == 'success' || (inputs.from_run != '' && needs.build.result == 'skipped')) && (github.event_name == 'push' || inputs.publish) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
+      - name: Verify reused artifacts
+        if: inputs.from_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_RUN: ${{ inputs.from_run }}
+          SKIP_PLATFORM: ${{ inputs.skip_platform }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          tag_sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq '.sha')
+          run=$(gh run view "$SOURCE_RUN" --json headSha,status,jobs)
+          [[ $(jq -r '.status' <<< "$run") == completed ]]
+          [[ $(jq -r '.headSha' <<< "$run") == "$tag_sha" ]]
+          for host in aarch64-macos x86_64-linux-gnu aarch64-linux-gnu x86_64-windows-msvc; do
+            case "$host:$SKIP_PLATFORM" in
+              *-macos:macos|*-linux-gnu:linux|*-windows-msvc:windows) continue ;;
+            esac
+            jq -e --arg name "Build $host" '.jobs | any(.name == $name and .conclusion == "success")' <<< "$run" >/dev/null
+          done
       - uses: actions/download-artifact@v4
         with:
           pattern: klf-*
           path: dist
           merge-multiple: true
+          run-id: ${{ inputs.from_run || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          SOURCE_RUN: ${{ inputs.from_run }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "klf ${TAG#v}" \
-              --notes "Install or update with \`klf setup\`, or \`knvm klf install latest\`."
+            if gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              if [ -z "$SOURCE_RUN" ]; then
+                test "$(gh api "repos/$GH_REPO/commits/$TAG" --jq '.sha')" = "$GITHUB_SHA"
+              fi
+              gh release create "$TAG" --verify-tag --title "klf ${TAG#v}" \
+                --notes "Install or update with \`klf setup\`, or \`knvm klf install latest\`."
+            else
+              gh release create "$TAG" --target "$GITHUB_SHA" --title "klf ${TAG#v}" \
+                --notes "Install or update with \`klf setup\`, or \`knvm klf install latest\`."
+            fi
           fi
           gh release upload "$TAG" dist/* --clobber
