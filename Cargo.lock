@@ -96,7 +96,7 @@ dependencies = [
 [[package]]
 name = "cranelift"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -106,7 +106,7 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "cranelift-assembler-x64-meta",
 ]
@@ -114,7 +114,7 @@ dependencies = [
 [[package]]
 name = "cranelift-assembler-x64-meta"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "cranelift-srcgen",
 ]
@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "cranelift-entity",
  "wasmtime-internal-core",
@@ -131,7 +131,7 @@ dependencies = [
 [[package]]
 name = "cranelift-bitset"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "serde",
  "serde_derive",
@@ -141,7 +141,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "bumpalo",
  "cranelift-assembler-x64",
@@ -170,7 +170,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "cranelift-assembler-x64-meta",
  "cranelift-codegen-shared",
@@ -181,12 +181,12 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 
 [[package]]
 name = "cranelift-control"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "arbitrary",
 ]
@@ -194,7 +194,7 @@ dependencies = [
 [[package]]
 name = "cranelift-entity"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "cranelift-bitset",
  "serde",
@@ -205,7 +205,7 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "cranelift-codegen",
  "hashbrown 0.17.1",
@@ -217,12 +217,12 @@ dependencies = [
 [[package]]
 name = "cranelift-isle"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 
 [[package]]
 name = "cranelift-module"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -232,7 +232,7 @@ dependencies = [
 [[package]]
 name = "cranelift-object"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -247,7 +247,7 @@ dependencies = [
 [[package]]
 name = "cranelift-srcgen"
 version = "0.135.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 
 [[package]]
 name = "crc32fast"
@@ -1580,7 +1580,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 [[package]]
 name = "wasmtime-internal-core"
 version = "48.0.2"
-source = "git+https://github.com/kira-lang-com/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
+source = "git+https://github.com/tessera-os/cranelift-ridl?tag=v48.0.2-ridl.1#8d26d296292e49d099f32c277fdc5e28238d4e30"
 dependencies = [
  "hashbrown 0.17.1",
  "libm",

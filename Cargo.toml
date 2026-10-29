@@ -71,7 +71,7 @@ pedantic = { level = "warn", priority = -1 }
 # error register. It is pinned by tag so a checkout builds without a sibling
 # clone of the fork.
 [patch.crates-io]
-cranelift = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }
-cranelift-codegen = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }
-cranelift-module = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }
-cranelift-object = { git = "https://github.com/kira-lang-com/cranelift-ridl", tag = "v48.0.2-ridl.1" }
+cranelift = { git = "https://github.com/tessera-os/cranelift-ridl", tag = "v48.0.2-ridl.1" }
+cranelift-codegen = { git = "https://github.com/tessera-os/cranelift-ridl", tag = "v48.0.2-ridl.1" }
+cranelift-module = { git = "https://github.com/tessera-os/cranelift-ridl", tag = "v48.0.2-ridl.1" }
+cranelift-object = { git = "https://github.com/tessera-os/cranelift-ridl", tag = "v48.0.2-ridl.1" }
