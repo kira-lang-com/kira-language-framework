@@ -20,6 +20,12 @@ on:
         required: false
         default: false
         type: boolean
+      skip_platform:
+        description: "Platform to omit from this run"
+        required: true
+        default: none
+        type: choice
+        options: [none, macos, linux, windows]
 
 permissions:
   contents: read
@@ -28,17 +34,30 @@ env:
   TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
 
 jobs:
+  select-hosts:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - id: select
+        env:
+          SKIP_PLATFORM: ${{ inputs.skip_platform || 'none' }}
+        run: |
+          matrix=$(jq -cn --arg skip "$SKIP_PLATFORM" '
+            {include: [
+              {host: "aarch64-macos", runner: "macos-15", platform: "macos"},
+              {host: "x86_64-linux-gnu", runner: "ubuntu-24.04", platform: "linux"},
+              {host: "aarch64-linux-gnu", runner: "ubuntu-24.04-arm", platform: "linux"},
+              {host: "x86_64-windows-msvc", runner: "windows-latest", platform: "windows"}
+            ] | map(select(.platform != $skip))}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
   build:
+    needs: select-hosts
     name: Build ${{ matrix.host }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { host: aarch64-macos, runner: macos-15 }
-          - { host: x86_64-linux-gnu, runner: ubuntu-24.04 }
-          - { host: aarch64-linux-gnu, runner: ubuntu-24.04-arm }
-          - { host: x86_64-windows-msvc, runner: windows-latest }
+      matrix: ${{ fromJSON(needs.select-hosts.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
