@@ -5,7 +5,7 @@ use super::FnEmitter;
 use crate::EmitError;
 use crate::lltype::llvm_type;
 use klf_core::Name;
-use klf_kir::Operation;
+use klf_kir::{Operation, RawAccess};
 
 impl FnEmitter<'_, '_> {
     pub(super) fn unmanaged(
@@ -24,10 +24,15 @@ impl FnEmitter<'_, '_> {
                 second,
                 addend,
             } => self.fma(results, [first, second, addend]),
-            Operation::RawLoad { pointer, .. } | Operation::LoadBorrow(pointer) => {
-                self.load(results, pointer)
-            }
-            Operation::RawStore { value, pointer, .. } => self.store(value, pointer),
+            Operation::RawLoad {
+                pointer, access, ..
+            } => self.raw_load(results, pointer, *access),
+            Operation::LoadBorrow(pointer) => self.load(results, pointer),
+            Operation::RawStore {
+                value,
+                pointer,
+                access,
+            } => self.raw_store(value, pointer, *access),
             Operation::AddrToPointer(value) | Operation::RefUnowned(value) => {
                 self.forward(results, value)
             }
@@ -47,6 +52,60 @@ impl FnEmitter<'_, '_> {
             }
             _ => return None,
         })
+    }
+
+    /// Unmanaged, explicitly qualified accesses must preserve the KIR flags.
+    /// Ordinary accesses use the existing bounds-checked runtime helper.
+    fn raw_load(
+        &mut self,
+        results: &[Name],
+        pointer: &Name,
+        access: RawAccess,
+    ) -> Result<(), EmitError> {
+        if access == RawAccess::default() {
+            return self.load(results, pointer);
+        }
+        let result = super::single(results)?.clone();
+        let ty = llvm_type(self.ty_of(&result)?)?;
+        let address = self.value(pointer)?;
+        let value = self.fresh();
+        let qualifier = if access.volatile { "volatile " } else { "" };
+        let align = access.align.unwrap_or(1);
+        if align == 0 || !align.is_power_of_two() {
+            return Err(EmitError(
+                "raw load alignment must be a power of two".into(),
+            ));
+        }
+        self.line(&format!(
+            "  {value} = load {qualifier}{ty}, ptr {address}, align {align}"
+        ));
+        self.record(&result, value);
+        Ok(())
+    }
+
+    fn raw_store(
+        &mut self,
+        value: &Name,
+        pointer: &Name,
+        access: RawAccess,
+    ) -> Result<(), EmitError> {
+        if access == RawAccess::default() {
+            return self.store(value, pointer);
+        }
+        let ty = llvm_type(self.ty_of(value)?)?;
+        let operand = self.value(value)?;
+        let address = self.value(pointer)?;
+        let qualifier = if access.volatile { "volatile " } else { "" };
+        let align = access.align.unwrap_or(1);
+        if align == 0 || !align.is_power_of_two() {
+            return Err(EmitError(
+                "raw store alignment must be a power of two".into(),
+            ));
+        }
+        self.line(&format!(
+            "  store {qualifier}{ty} {operand}, ptr {address}, align {align}"
+        ));
+        Ok(())
     }
 
     fn select(

@@ -45,8 +45,10 @@ Still open, by spec section:
   against the runtime heap, so a function C calls back cannot yet read a
   record C passed it, which lives in C's memory; it can only hand the
   record on (section 12.8 names no such check; to do).
-  The `volatile`
-  and `align` of `raw.load`/`raw.store` change nothing on any backend.
+  The LLVM backend now emits flagged `raw.load`/`raw.store` as direct LLVM
+  volatile/aligned operations. Unflagged operations still use the checked
+  runtime helper. Cranelift refuses flagged operations until it can preserve
+  their semantics; VM support and cross-backend parity are still pending.
   Aggregate values (section 12.6) are moved into memory before every
   backend, except across an exported or foreign signature, a function
   named by `func.ref` or with a failure type, and a copy or destroy of an

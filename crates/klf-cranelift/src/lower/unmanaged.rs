@@ -35,13 +35,31 @@ impl FnLowerer<'_> {
                 let addend = self.value(addend)?;
                 self.builder.ins().fma(first, second, addend)
             }
-            Operation::RawLoad { ty, pointer, .. } => {
+            Operation::RawLoad {
+                ty,
+                pointer,
+                access,
+            } => {
+                if access.volatile || access.align.is_some() {
+                    return Err(err(
+                        "raw.load volatile/alignment semantics are not yet implemented by Cranelift",
+                    ));
+                }
                 let address = self.value(pointer)?;
                 self.builder
                     .ins()
                     .load(cl_type(ty)?, MemFlagsData::new(), address, 0)
             }
-            Operation::RawStore { value, pointer, .. } => {
+            Operation::RawStore {
+                value,
+                pointer,
+                access,
+            } => {
+                if access.volatile || access.align.is_some() {
+                    return Err(err(
+                        "raw.store volatile/alignment semantics are not yet implemented by Cranelift",
+                    ));
+                }
                 let address = self.value(pointer)?;
                 let operand = self.value(value)?;
                 self.builder
