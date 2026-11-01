@@ -440,7 +440,7 @@ pub fn link(
     objects: &[PathBuf],
     archives: &[PathBuf],
     output: &Path,
-    _target: &str,
+    target: &str,
 ) -> Result<(), String> {
     // A compiler driver does more than hand the linker its arguments: it
     // knows the target's emulation, its C runtime and its unwind tables, and
@@ -453,7 +453,17 @@ pub fn link(
         return Err("no clang under ~/.klf/llvm-ridl to link with".to_owned());
     };
     let mut command = Command::new(&clang);
-    command.arg("-fuse-ld=lld");
+    // New Apple SDK TAPI targets can predate support in bundled ld64.lld.
+    // Opt in to the system linker on that host without changing Linux links.
+    command.arg(
+        if target.contains("-apple-darwin")
+            && std::env::var("KLF_USE_SYSTEM_LINKER").as_deref() == Ok("1")
+        {
+            "-fuse-ld=ld"
+        } else {
+            "-fuse-ld=lld"
+        },
+    );
     command.arg("-o").arg(output);
     if let Some(sysroot) = crate::native::macos_sysroot() {
         command.args(["-isysroot", &sysroot]);

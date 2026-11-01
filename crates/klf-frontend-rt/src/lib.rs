@@ -61,6 +61,7 @@ mod ridl_witnesses;
 mod run;
 mod session_inputs;
 mod runtime;
+mod scratch;
 mod shader;
 mod shader_editor;
 mod source_closure;

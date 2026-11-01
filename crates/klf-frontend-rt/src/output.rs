@@ -11,7 +11,8 @@ use klf_defsvc::FrontendMetadata;
 use klf_kir::Module;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub(crate) use crate::scratch::Scratch;
 
 /// The stack a Windows executable reserves for its main thread, in bytes:
 /// the 8 MiB Linux and macOS give a main thread is a quarter of it, and
@@ -166,9 +167,18 @@ fn link_binary(
     toolchain: &CToolchain,
 ) -> Result<(), String> {
     let mut command = toolchain.command();
-    // lld links the program and the std archive several times faster than
-    // the system's bfd linker.
-    command.arg("-fuse-ld=lld");
+    // Apple SDKs can introduce TAPI targets before the bundled lld supports
+    // them. Opt in to Apple's linker for native macOS builds in that case;
+    // keep lld as the default everywhere, including cross compilation.
+    command.arg(
+        if target.contains("-apple-darwin")
+            && std::env::var("KLF_USE_SYSTEM_LINKER").as_deref() == Ok("1")
+        {
+            "-fuse-ld=ld"
+        } else {
+            "-fuse-ld=lld"
+        },
+    );
     command.arg(if is_apple(target) {
         "-Wl,-dead_strip"
     } else if klf_target::is_msvc(target) {
@@ -376,7 +386,7 @@ fn library_object(
     {
         return Ok((scratch, vec![object_path]));
     }
-    let directory = scratch.0.clone();
+    let directory = scratch.path().to_path_buf();
     let mut parts = vec![object_path.clone()];
     parts.extend(shims);
     parts.extend(sources);
@@ -666,41 +676,6 @@ pub(crate) fn std_archive(root: &Path, language: &str, target: &str) -> PathBuf 
         .join(language)
         .join(target)
         .join("libstd.a")
-}
-
-/// A directory for one output's intermediate files, removed with it.
-pub(crate) struct Scratch(PathBuf);
-
-impl Scratch {
-    pub(crate) fn new() -> Result<Self, String> {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let directory = std::env::temp_dir().join(format!(
-            "klf-frontend-rt-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&directory)
-            .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
-        Ok(Self(directory))
-    }
-
-    /// The directory itself.
-    pub(crate) fn path(&self) -> &Path {
-        &self.0
-    }
-
-    pub(crate) fn write(&self, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-        let path = self.0.join(name);
-        std::fs::write(&path, bytes)
-            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-        Ok(path)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
 }
 
 #[cfg(test)]

@@ -20,3 +20,11 @@ Rust. CI builds each host's release with:
 ```sh
 cargo xtask release OUT VERSION
 ```
+
+## macOS SDK linker compatibility
+
+The bundled LLVM linker is the default. When a newer macOS SDK introduces
+TAPI targets the bundled `ld64.lld` cannot yet parse, set
+`KLF_USE_SYSTEM_LINKER=1` while building a native Apple executable or a Kira
+language driver. KLF then asks the bundled clang to use Apple's system linker
+instead. Linux and other targets keep their usual linker.
