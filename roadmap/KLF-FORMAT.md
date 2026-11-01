@@ -133,9 +133,17 @@ The language server advertises `documentFormattingProvider` and `documentRangeFo
 
 `klf-driver` exposes the same computation on the VM as `LanguageDefinition::format_source`, and `klf format <definition-package-dir> [files] [--check] [--width N]` runs it, formatting standard input when no file is given. It is for working on a formatter without building its toolchain.
 
+For a Kira-written frontend, `klf format` builds a temporary native frontend
+with Kira and invokes its format hook through the KLF driver. It removes the
+temporary driver afterwards and does not assemble a toolchain or sysroot.
+
 ## 7. The shared token layout
 
 `klf-kira/languages/format/layout.klfd` is one layout for C-like token streams, which the KSL, MSL and Kira hooks share through their packages' `include` files (Kira's names the directory beside it, `../format`). A hook lexes its file with its own lexer and passes the token spans and a `LayoutRules` value to `layoutTokens`. A hook may pass several lexer tokens the source writes as one piece as one span, as Kira does for `+=` and for a quote's `#{...}` holes; the span is then laid out as written.
+
+The KLF Kira library also provides this layout to Kira frontends. KArc uses
+source-preserving lexer spans, keeping preprocessing directives verbatim and
+literal operators and suffixes in their original source spelling.
 
 1. Line breaks between statements are the source's. Blank lines are kept by the kernel (5.3).
 2. `{` of a block ends its line, except that a closure's parameters, names and commas up to an `in` that ends their line, stay on the `{` line, as in `{ graphics in`. Its content is indented and `}` starts its own line. `;` outside parentheses ends a line. A line the source breaks after or before a binary operator or a comma is indented one more level.
@@ -188,12 +196,12 @@ Done:
 - `klf.format.*` on the VM and native paths; the `format` hook in the lowerer, with the trampoline entry.
 - `LanguageDefinition::format_source` on the VM; `<driver> format` in native frontends; formatting and range formatting in the language server.
 - KSL, MSL and Kira formatters on the shared layout of section 7.
+- The Kira KArc frontend formats C, C++, KRC and header files using the shared layout.
 - Proof: `crates/klf-format/src/tests.rs`; `crates/klf-driver/tests/format.rs`: a definition written in KLF Kira, and the KSL, MSL and Kira definitions, formatted on the VM, each result stable when formatted again.
 - `.Format` editor corpus checks: `the_editor_corpus_runs_against_the_drivers_language_server` in `crates/klf-driver/tests/native_frontend.rs`.
 - Native proof: `native_frontend_formats_as_the_vm_does` in `crates/klf-driver/tests/native_frontend.rs` builds a native frontend from the same KLF Kira definition (`tests/lists.klfd`) and gets the VM's results from `<driver> format --stdin`, in place, and under `--check`.
 
 Not done:
 
-- A formatter for KArc. KArc's one frontend covers `.c`, `.cpp` and `.krc`, so its formatter covers all three. It formats the tokens it can map back to the source after preprocessing, and keeps directives and macro-produced regions with `format_verbatim`.
 - On-type formatting.
 - Shader outs printing through the engine (section 8).

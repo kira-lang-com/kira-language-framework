@@ -12,10 +12,11 @@
 
 mod adapters;
 mod entries;
+mod entries_metadata;
 mod witnesses;
 
 pub use adapters::adapters;
-pub use entries::{Receiving, entries};
+pub use entries::{Receiving, entries, entries_requiring_runtime};
 pub use witnesses::{
     Conformance, ImportedTable, WitnessCall, WitnessDefault, WitnessSet, witnesses,
 };

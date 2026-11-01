@@ -203,8 +203,24 @@ fn named_entry<'a>(
     state
         .sources
         .iter()
-        .find(|(_, known, _)| known.ends_with(&suffix))
+        .find(|(_, known, _)| source_suffix_matches(known, &suffix, cfg!(windows)))
         .map(|(_, known, text)| (known.as_str(), text))
+}
+
+fn source_suffix_matches(known: &str, suffix: &str, windows: bool) -> bool {
+    known.ends_with(suffix) || (windows && known.replace('\\', "/").ends_with(suffix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_suffix_matches;
+
+    #[test]
+    fn registered_windows_headers_match_slash_separated_includes() {
+        assert!(source_suffix_matches(r"C:\sdk\include\sys\types.h", "/sys/types.h", true));
+        assert!(!source_suffix_matches(r"C:\sdk\include\sys\types.h", "/sys/types.h", false));
+        assert!(!source_suffix_matches(r"C:\sdk\include\other_types.h", "/types.h", true));
+    }
 }
 
 fn read_name(memory: &mut dyn ServiceMemory, arguments: &[u64]) -> Option<String> {

@@ -59,6 +59,7 @@ fn wrapper_spec(service_name: &str) -> Option<&'static str> {
         | "klf.kir.function.result_void"
         | "klf.kir.function.body"
         | "klf.kir.function.initializer"
+        | "klf.kir.function.ridl"
         | "klf.kir.block.unreachable" => "f->-",
         "klf.kir.function.parameter" => "fi->v",
         "klf.kir.value.integer" => "fTi->v",

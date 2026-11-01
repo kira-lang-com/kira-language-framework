@@ -334,7 +334,7 @@ fn derived_result_type(
 
 /// The type of a function value naming `function`.
 fn function_type(function: &Function) -> Type {
-    let abi = if function.foreign {
+    let abi = if function.foreign && function.abi != FunctionAbi::Ridl {
         FunctionAbi::Platform
     } else if function.abi == FunctionAbi::Ridl
         || matches!(function.linkage, Linkage::Exported)

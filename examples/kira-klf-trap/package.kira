@@ -1,0 +1,14 @@
+construct KLFTrap extends Package {
+    let dependencies: [Dependency] = [
+        Dependency { name: "KLF", path: "../../library/KLF" }
+    ]
+    let nativeLibraries: [NativeLibrary] = [
+        NativeLibrary {
+            name: "trap_probe", sources: ["native/trap.c"],
+            nativeTargets: [
+                NativeTarget { triple: "x86_64-windows-msvc" },
+                NativeTarget { triple: "aarch64-windows-msvc" }
+            ]
+        }
+    ]
+}

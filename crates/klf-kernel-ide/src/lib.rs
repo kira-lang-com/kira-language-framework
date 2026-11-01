@@ -2,9 +2,8 @@
 //! (`KLF-EDITOR.md` section 16): the same host as a generated driver's server,
 //! with native analyzers in place of a compiled definition.
 //!
-//! A project holding a `language.klfd` is a definition package and is
-//! compiled whole; every other open `.klfd`, `.kir` or `.ridl` file is
-//! analyzed on its own.
+//! A project holding `language.kcore` or `language.klfd` is compiled whole;
+//! other open KCore, KIR and RIDL files are analyzed on their own.
 
 mod kir;
 mod klfd;
@@ -39,7 +38,9 @@ impl Analyzer for KernelAnalyzer {
             return Analysis::failed("no file or directory to analyze");
         };
         let mut packaged = false;
-        if argument.is_dir() && argument.join(PACKAGE_MARKER).exists() {
+        if argument.is_dir()
+            && (argument.join(PACKAGE_MARKER).exists() || argument.join("language.kcore").exists())
+        {
             klfd::package(&mut builder, &argument);
             packaged = true;
         }
@@ -53,8 +54,8 @@ impl Analyzer for KernelAnalyzer {
                 return Analysis::interrupted(Interruption::Cancelled);
             }
             match path.extension().and_then(|extension| extension.to_str()) {
-                Some("klfd") if packaged => {}
-                Some("klfd") => klfd::loose(&mut builder, path),
+                Some("klfd" | "kcore") if packaged => {}
+                Some("klfd" | "kcore" | "klfk") => klfd::loose(&mut builder, path),
                 Some("kir") => kir::file(&mut builder, path),
                 Some("ridl" | "ridlsig") => ridl::file(&mut builder, path),
                 _ => {}

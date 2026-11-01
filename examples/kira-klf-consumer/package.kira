@@ -1,0 +1,5 @@
+construct KLFConsumer extends Package {
+    let dependencies: [Dependency] = [
+        Dependency { name: "KLF", path: "../../library/KLF" }
+    ]
+}

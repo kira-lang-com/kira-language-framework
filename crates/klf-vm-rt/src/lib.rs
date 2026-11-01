@@ -41,7 +41,7 @@ pub fn run_image_from(
     let index = program
         .function_index(entry)
         .ok_or_else(|| format!("no function named `{entry}`"))?;
-    let instance = Instance::load(program, base, capabilities())?;
+    let instance = Instance::load(program, base, capabilities(Some(false)))?;
     Ok(match instance.initialize() {
         Outcome::Return(_) => instance.run(index, arguments),
         ended => ended,
@@ -49,7 +49,7 @@ pub fn run_image_from(
 }
 
 /// The kernel services with output written as the native runtime writes it.
-fn capabilities() -> Capabilities {
+fn capabilities(process: Option<bool>) -> Capabilities {
     let (mut capabilities, _) = klf_vm::kernel_services();
     capabilities.register_with_memory("klfsvc_io_write", |arguments, memory| {
         let [address, length] = arguments else {
@@ -71,14 +71,21 @@ fn capabilities() -> Capabilities {
             Err(_) => u64::MAX,
         }
     });
-    capabilities.register("klfsvc_io_put", |arguments| {
+    capabilities.register("klfsvc_io_put", move |arguments| {
         let byte = arguments.first().copied().unwrap_or(0) & 0xff;
-        println!("IO {byte}");
+        if process.unwrap_or_else(|| klf_native_rt::klfrt_process_active() & 1 != 0) {
+            #[allow(clippy::cast_possible_truncation)]
+            let value = byte as u8;
+            let mut output = std::io::stdout().lock();
+            let _ = output.write_all(&[value]).and_then(|()| output.flush());
+        } else {
+            println!("IO {byte}");
+        }
         byte
     });
-    capabilities.register("klfsvc_io_puti", |arguments| {
+    capabilities.register("klfsvc_io_puti", move |arguments| {
         let value = i64::from_ne_bytes(arguments.first().copied().unwrap_or(0).to_ne_bytes());
-        println!("IO {value}");
+        if process.unwrap_or_else(|| klf_native_rt::klfrt_process_active() & 1 != 0) { println!("{value}"); } else { println!("IO {value}"); }
         0
     });
     capabilities
@@ -208,7 +215,7 @@ unsafe fn process_main(
             .map(|argument| argument.clone().into_bytes())
             .collect(),
     );
-    let instance = match Instance::load(program, base, capabilities()) {
+    let instance = match Instance::load(program, base, capabilities(Some(true))) {
         Ok(instance) => instance,
         Err(message) => {
             eprintln!("error: {message}");
@@ -265,7 +272,7 @@ pub unsafe extern "C" fn klfvm_attach(anchor: *const c_void) {
             let base = std::path::Path::new(&image)
                 .parent()
                 .unwrap_or(std::path::Path::new("."));
-            Instance::load(program, base, capabilities())
+            Instance::load(program, base, capabilities(None))
         });
     let instance = match attached {
         Ok(instance) => instance,

@@ -18,13 +18,12 @@ fn group(class: TokenClass, modifiers: Vec<TokenModifier>, list: &str) -> Keywor
     }
 }
 
-/// KLF Kira, the language of definitions (section 13.1 lists its keywords).
+/// KCore, the bootstrap language of definitions.
 #[must_use]
-pub fn klfd() -> EditorSpec {
-    let mut spec = EditorSpec::minimal("klfd");
-    "KLF Kira".clone_into(&mut spec.display_name);
-    "source.klfd".clone_into(&mut spec.scope);
-    spec.root_markers = vec![PACKAGE_MARKER.to_owned()];
+pub fn kcore() -> EditorSpec {
+    let mut spec = EditorSpec::minimal("kcore");
+    "KCore".clone_into(&mut spec.display_name);
+    spec.root_markers = vec!["language.kcore".to_owned(), PACKAGE_MARKER.to_owned()];
     spec.doc_comments = vec!["///".to_owned()];
     spec.annotation = Some("@[A-Za-z_][A-Za-z0-9_]*".to_owned());
     spec.keywords = vec![
@@ -47,6 +46,12 @@ pub fn klfd() -> EditorSpec {
     ];
     spec.operators = words("-> => == != <= >= && || + - * / % = < > ! . ? :");
     spec
+}
+
+/// The editor spec also used for legacy `.klfd` sources.
+#[must_use]
+pub fn klfd() -> EditorSpec {
+    kcore()
 }
 
 /// Textual KIR.
@@ -95,7 +100,10 @@ pub fn ridl() -> EditorSpec {
 /// Every kernel file type, by extension.
 #[must_use]
 pub fn languages() -> Languages {
-    Languages::single(klfd())
+    Languages::single(kcore())
+        .with("kcore", kcore())
+        .with("klfd", kcore())
+        .with("klfk", kcore())
         .with("kir", kir())
         .with("ridl", ridl())
         .with("ridlsig", ridl())

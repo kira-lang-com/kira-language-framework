@@ -112,6 +112,7 @@ pub struct FunctionBuilder {
     result: Type,
     failure: Option<Type>,
     engine: Engine,
+    abi: klf_kir::FunctionAbi,
     foreign: bool,
     c_prototype: Option<klf_kir::CPrototype>,
     attributes: Vec<klf_kir::FunctionAttribute>,
@@ -161,6 +162,7 @@ impl FunctionBuilder {
             result,
             failure: None,
             engine: Engine::Runtime,
+            abi: klf_kir::FunctionAbi::Platform,
             foreign: false,
             c_prototype: None,
             attributes: Vec::new(),
@@ -204,6 +206,11 @@ impl FunctionBuilder {
     /// it is foreign.
     pub fn set_foreign(&mut self, foreign: bool) {
         self.foreign = foreign;
+    }
+
+    /// Sets the convention of a declaration explicitly.
+    pub fn set_abi(&mut self, abi: klf_kir::FunctionAbi) {
+        self.abi = abi;
     }
 
     /// Gives the function a C signature (section 26.2): a foreign import's
@@ -779,7 +786,7 @@ impl FunctionBuilder {
         Function {
             name: self.name,
             linkage: self.linkage,
-            abi: klf_kir::FunctionAbi::Platform,
+            abi: self.abi,
             nounwind: true,
             foreign: self.foreign,
             c_prototype: self.c_prototype,

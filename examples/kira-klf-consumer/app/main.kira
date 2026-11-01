@@ -1,0 +1,10 @@
+import KLF
+
+@Main
+function main() -> Int {
+    if utf8Count("hé") != 3 || !driverPathExists(driverDirectory()) { return 1 }
+    if putc(321) != 65 { return 2 }
+    puti(-12)
+    if klfsvc_math_binary(20, 4611686018427387904, 4613937818241073152) != 4620693217682128896 { return 3 }
+    return 42
+}

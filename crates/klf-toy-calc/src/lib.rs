@@ -150,8 +150,8 @@ fn calc_language_descriptor() -> &'static LanguageDescriptor {
     DESCRIPTOR.get_or_init(|| {
         let target = "aarch64-apple-darwin".parse().expect("valid target");
         let mut session = Session::new(target);
-        let source = include_str!("../../../definitions/calc.klfd");
-        let file = SourceFile::new(FileId::from_u32(0), "definitions/calc.klfd", source);
+        let source = include_str!("../../../definitions/calc.kcore");
+        let file = SourceFile::new(FileId::from_u32(0), "definitions/calc.kcore", source);
         let parsed = parse(&file);
         assert!(
             parsed.diagnostics.is_empty(),

@@ -21,6 +21,7 @@ mod generics;
 mod lower;
 mod methods;
 mod session_types;
+mod service_surface;
 mod signatures;
 mod structs;
 pub mod testing;
@@ -49,6 +50,7 @@ pub use definition_metadata::{
     DefinitionEntrypoints, LanguageDefinitionMetadata, extract_language_descriptor,
     extract_language_metadata,
 };
+pub use service_surface::{KCoreService, KCoreServiceType, kcore_services};
 
 /// The KLF Kira frontend as a kernel [`Definition`].
 pub struct KiraDefinition;
@@ -59,7 +61,7 @@ impl Definition for KiraDefinition {
     }
 
     fn extensions(&self) -> Vec<String> {
-        vec!["klfk".to_owned(), "klfd".to_owned()]
+        vec!["kcore".to_owned(), "klfk".to_owned(), "klfd".to_owned()]
     }
 
     fn language(&self) -> LanguageDescriptor {
@@ -67,7 +69,7 @@ impl Definition for KiraDefinition {
             "klfkira",
             "klf",
             "1.0.0",
-            vec!["klfk".to_owned(), "klfd".to_owned()],
+            vec!["kcore".to_owned(), "klfk".to_owned(), "klfd".to_owned()],
             MemoryModel::Counted,
             Exclusivity::None,
             DefaultConvention::Ridl,

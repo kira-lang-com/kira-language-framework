@@ -6,7 +6,8 @@
 //! built, `<out>/lib/<lang>/<target>/libstd.a`.
 
 use crate::runtime::Runtime;
-use crate::toolchain::{CToolchain, check_target, find_tool, is_apple, is_windows, unwinder};
+use crate::toolchain::{CToolchain, check_target, find_tool, is_apple, is_windows};
+pub(crate) use crate::toolchain::system_libraries;
 use klf_defsvc::FrontendMetadata;
 use klf_kir::Module;
 use std::path::{Path, PathBuf};
@@ -492,31 +493,6 @@ fn init_symbol(output: &Path) -> String {
         })
         .collect();
     format!("__klf_init_{stem}")
-}
-
-/// The system libraries a program links after the runtime: what the runtime's
-/// Rust standard library imports (`rustc --print native-static-libs`), with the
-/// unwinder the target's own C library carries. Darwin's `libSystem` holds all
-/// of it.
-pub(crate) fn system_libraries(target: &str) -> Vec<&'static str> {
-    let mut libraries: Vec<&'static str> = if is_apple(target) {
-        Vec::new()
-    } else if klf_target::is_msvc(target) {
-        klf_target::MSVC_SYSTEM_LIBRARIES.to_vec()
-    } else if is_windows(target) {
-        vec![
-            "-lkernel32",
-            "-lntdll",
-            "-luserenv",
-            "-lws2_32",
-            "-ldbghelp",
-        ]
-    } else {
-        vec!["-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"]
-    };
-    libraries.push(unwinder(target));
-    libraries.retain(|library| !library.is_empty());
-    libraries
 }
 
 /// `module`, verified as the driver lowered it, with its generic functions

@@ -122,6 +122,34 @@ fn runtime_diagnostics_are_retained_as_typed_records() {
     );
 }
 
+#[test]
+fn diagnostic_services_preserve_signed_words() {
+    let source = r#"module @SignedDiagnostics lang "kira" target "aarch64-apple-darwin" stage canonical
+func private foreign @klfsvc_diag_error_origin(%origin: i64, %code: i64, %start: i64, %end: i64) -> unit engine(native)
+func private foreign @klfsvc_diag_error_subject(%file: i64, %code: i64, %start: i64, %end: i64, %subject_start: i64, %subject_end: i64) -> unit engine(native)
+func module @main() -> i64 engine(native) {
+entry():
+  %hash = const.int i64, -9223372036854775808
+  %none = const.int i64, -1
+  %code = const.int i64, 2001
+  %start = const.int i64, 2
+  %end = const.int i64, 5
+  call.foreign @klfsvc_diag_error_origin(%hash, %code, %start, %end)
+  call.foreign @klfsvc_diag_error_subject(%none, %code, %start, %end, %none, %end)
+  %ok = const.int i64, 0
+  return %ok
+}
+"#;
+    let module = klf_kir::parse_module(source).expect("module parses");
+    let (capabilities, _, diagnostics) = kernel_services_with_source_and_diagnostics("source");
+    let outcome = run_module_with_capabilities(&module, "main", &[], &capabilities).expect("module runs");
+    assert_eq!(outcome, Outcome::Return(Some(0)));
+    let records = diagnostics.lock().expect("diagnostics");
+    assert_eq!(records[0].origin, i64::MIN);
+    assert_eq!(records[1].file, -1);
+    assert_eq!(records[1].subject, Some((-1, 5)));
+}
+
 const HOST: &str = r#"module @HostDemo lang "c" target "aarch64-apple-darwin" stage canonical
 
 func private foreign @klfsvc_host_key_length() -> i64 engine(native)

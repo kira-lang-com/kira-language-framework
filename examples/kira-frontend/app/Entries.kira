@@ -1,0 +1,72 @@
+import KLF
+
+public function klfFrontendProject(sessionWord: Int, count: Int) -> Int {
+    let definition = Mini()
+    let arguments = driverArguments(0, count)
+    match definition.project(Session(sessionWord), copy arguments[0]) {
+        None -> return 0
+        Some(project) -> return submitProject(project)
+    }
+}
+
+public function klfFrontendCompatDriver(count: Int) -> Int {
+    let definition = Mini()
+    match definition.compatDriver(driverArguments(0, count)) {
+        None -> return 0
+        Some(request) -> return submitDriverRequest(request)
+    }
+}
+
+public function klfFrontendRunProgram(commandCount: Int, total: Int) -> Int {
+    let definition = Mini()
+    let command = driverArguments(0, commandCount)
+    let arguments = driverArguments(commandCount, total - commandCount)
+    return definition.runProgram(move command, move arguments)
+}
+
+public function klfFrontendBegin() -> Int {
+    beginFrontendArtifacts()
+    return 0
+}
+
+public function klfFrontendDispose() -> Int {
+    endFrontendArtifacts()
+    return 0
+}
+
+function frontendInputs(session: Session, count: Int) -> [SourceFile] {
+    var inputs: [SourceFile] = []
+    for index in 0..count { inputs.append(definition_input(session, index)) }
+    return inputs
+}
+
+public function klfFrontendUnits(sessionWord: Int, count: Int) -> Int {
+    let session = Session(sessionWord)
+    let inputs = frontendInputs(session, count)
+    let definition = Mini()
+    let units = definition.units(session, inputs)
+    for unit in units { klfsvc_definition_units_push(sessionWord, unit.raw) }
+    return klfsvc_definition_units_finish(sessionWord)
+}
+
+public function klfFrontendParse(sessionWord: Int, unitWord: Int, count: Int) -> Int {
+    let session = Session(sessionWord)
+    let definition = Mini()
+    return definition.parse(session, Unit(unitWord), frontendInputs(session, count)).raw
+}
+
+public function klfFrontendElaborate(sessionWord: Int, unitWord: Int, treeWord: Int) -> Int {
+    let definition = Mini()
+    return definition.elaborate(Session(sessionWord), Unit(unitWord), Tree(treeWord)).raw
+}
+
+public function klfFrontendLower(sessionWord: Int, unitWord: Int, programWord: Int) -> Int {
+    let definition = Mini()
+    return definition.lower(Session(sessionWord), Unit(unitWord), Program(programWord)).raw
+}
+
+public function klfFrontendFormat(sessionWord: Int, unitWord: Int, treeWord: Int) -> Int {
+    let definition = Mini()
+    if definition.format(Session(sessionWord), Unit(unitWord), Tree(treeWord)) { return 1 }
+    return 0
+}

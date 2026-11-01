@@ -66,8 +66,8 @@ fn main() -> ExitCode {
 /// a failure over a mistyped word.
 fn print_usage() {
     out!(
-        "usage:\n  klf run <file.klfk|.klfd|.calc|.kir> [--entry NAME] [--input TEXT] [--backend vm|native] [--target TRIPLE] [--timings] [-- ARGS...]\n  klf build <file.klfk|.klfd|.calc|.kir> [--emit kir|bin] [--backend native] [--target TRIPLE] [--profile debug|release] [--timings] [-o OUT]\n  klf build <definition-package-dir> [--target TRIPLE] [--profile debug|release] [-o NAME] [--timings]   (native frontend)
-  klf build <definition-package-dir> [--language PKG]...   (link other shader languages in)\n  klf build <definition-package-dir> --out DIR [--targets T1,T2] [--profile debug|release] [--timings]   (driver, std and sysroot)\n  klf check <definition-package-dir> [--timings]\n  klf format <definition-package-dir> [files] [--check] [--width N] [--timings]\n  klf test <definition-package-dir> [--corpus NAME] [--timings]\n  klf push <file> <host:port> [--entry NAME]   (hot module push, section 17.5)\n  klf clean\n  klf dist --out DIR [--targets T1,T2] [--timings]\n  klf setup [--llvm]   (install or update klf and its LLVM from their releases)\n  klf kir verify|dump <file.kir>\n  klf ksir verify|dump <file.ksir>\n  klf lsp   (language server for .klfd, .kir and .ridl files)\n  klf editor gen <definition-package-dir> --out DIR [--editor vscode,zed,neovim,helix,emacs|all] [--client FILE.js]\n  klf editor gen --kernel --out DIR [--editor ...]\n  klf ridl check|emit|layout|mangle <file.ridl>\n  klf ridl bindgen [--lang rust|swift] <file.ridl>\n  klf abi freeze|apply|retire <file.ridl> [uuid]\n  klf ffi gen <header.h> [--library NAME] [-o OUT.klffi]\n  klf ffi emit|decls <file.klffi>\n\nThe language is chosen by extension: .calc is the toy calculator, everything\nelse is KLF Kira. --input supplies the source buffer to a definition.\n\nA compiling command animates its phases on stderr and takes them down when it returns. --timings turns that off and pushes every phase to stdout as one line with the milliseconds it took. --profile release runs the KIR optimizer over what is built; debug, the default, runs only the mandatory passes. A check prints `Check: Ok` and a build prints `Built: Ok <artifact>`, or the word after the colon is `Failed`."
+        "usage:\n  klf run <file.kcore|.klfk|.klfd|.calc|.kir> [--entry NAME] [--input TEXT] [--backend vm|native] [--target TRIPLE] [--timings] [-- ARGS...]\n  klf build <file.kcore|.klfk|.klfd|.calc|.kir> [--emit kir|bin] [--backend native] [--target TRIPLE] [--profile debug|release] [--timings] [-o OUT]\n  klf build <definition-package-dir> [--target TRIPLE] [--profile debug|release] [-o NAME] [--timings]   (native frontend)
+  klf build <definition-package-dir> [--language PKG]...   (link other shader languages in)\n  klf build <definition-package-dir> --out DIR [--targets T1,T2] [--profile debug|release] [--timings]   (driver, std and sysroot)\n  klf check <definition-package-dir> [--timings]\n  klf format <definition-package-dir> [files] [--check] [--width N] [--timings]\n  klf test <definition-package-dir> [--corpus NAME] [--timings]\n  klf push <file> <host:port> [--entry NAME]   (hot module push, section 17.5)\n  klf clean\n  klf dist --out DIR [--targets T1,T2] [--timings]\n  klf setup [--llvm]   (install or update klf and its LLVM from their releases)\n  klf kir verify|dump <file.kir>\n  klf ksir verify|dump <file.ksir>\n  klf lsp   (language server for .kcore, .klfd, .kir and .ridl files)\n  klf editor gen <definition-package-dir> --out DIR [--editor vscode,zed,neovim,helix,emacs|all] [--client FILE.js]\n  klf editor gen --kernel --out DIR [--editor ...]\n  klf ridl check|emit|layout|mangle <file.ridl>\n  klf ridl bindgen [--lang rust|kira|swift] <file.ridl>\n  klf ridl kernel --contract | --kcore | --entries --target <triple>\n  klf abi freeze|apply|retire <file.ridl> [uuid]\n  klf ffi gen <header.h> [--library NAME] [-o OUT.klffi]\n  klf ffi emit|decls <file.klffi>\n\nThe language is chosen by extension: .calc is the toy calculator, everything\nelse is KCore. --input supplies the source buffer to a definition.\n\nA compiling command animates its phases on stderr and takes them down when it returns. --timings turns that off and pushes every phase to stdout as one line with the milliseconds it took. --profile release runs the KIR optimizer over what is built; debug, the default, runs only the mandatory passes. A check prints `Check: Ok` and a build prints `Built: Ok <artifact>`, or the word after the colon is `Failed`."
     );
 }
 
@@ -86,6 +86,18 @@ fn command_check(args: &[String]) -> ExitCode {
         Err(message) => return fail(&message),
     };
     let mut session = Session::new(target);
+    if klf_driver::is_kira_frontend(Path::new(root)) {
+        let target = session.target().clone();
+        let checked = klf_driver::check_kira_frontend(&mut session, Path::new(root), &target);
+        finish.end();
+        if session.error_count() > 0 {
+            raw_err!("{}", pipeline::render(&session));
+        }
+        return match checked {
+            Ok(()) => { out!("Check: Ok"); ExitCode::SUCCESS }
+            Err(message) => { out!("Check: Failed"); fail(&message) }
+        };
+    }
     let definition = LanguageDefinition::load(&mut session, Path::new(root), Backend::Vm);
     if session.error_count() > 0 {
         finish.end();

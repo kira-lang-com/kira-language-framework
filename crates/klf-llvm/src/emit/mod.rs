@@ -24,7 +24,9 @@ use std::fmt::Write as _;
 /// 26.3), or the C shim that makes its crossing when it has a C prototype,
 /// otherwise its name under the `kir.` prefix.
 pub(crate) fn symbol(function: &Function) -> String {
-    if function.foreign && function.c_prototype.is_some() {
+    if function.foreign && function.abi == klf_kir::FunctionAbi::Ridl {
+        format!("@\"{}\"", function.name)
+    } else if function.foreign && function.c_prototype.is_some() {
         format!("@\"{}\"", klf_kir::c_shim_symbol(function.name.as_str()))
     } else if function.foreign {
         format!("@\"{}\"", klf_kir::c_symbol(function.name.as_str()))

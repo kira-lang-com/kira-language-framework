@@ -32,6 +32,30 @@ pub(crate) fn is_windows(target: &str) -> bool {
     target.contains("-windows-")
 }
 
+/// The system libraries required by the runtime's Rust static library.
+pub(crate) fn system_libraries(target: &str) -> Vec<&'static str> {
+    let mut libraries = if is_apple(target) {
+        Vec::new()
+    } else if klf_target::is_msvc(target) {
+        klf_target::MSVC_SYSTEM_LIBRARIES.to_vec()
+    } else if is_windows(target) {
+        vec![
+            "-lkernel32",
+            "-lntdll",
+            "-luserenv",
+            "-lws2_32",
+            "-ldbghelp",
+            "-lbcrypt",
+            "-ladvapi32",
+        ]
+    } else {
+        vec!["-lutil", "-lrt", "-lpthread", "-lm", "-ldl", "-lc"]
+    };
+    libraries.push(unwinder(target));
+    libraries.retain(|library| !library.is_empty());
+    libraries
+}
+
 /// Where a tool of the bundled LLVM is: `$KLF_HOME/bin/<tool>` (or
 /// `$KLF_HOME/llvm/bin`), else the `bin` of the newest KLF distribution `knvm`
 /// installed, the same one the runtime archives come from, else the newest

@@ -21,7 +21,38 @@ fn package_loading_skips_std_and_corpus() {
         .iter()
         .map(|source| source.name.as_str())
         .collect();
-    assert_eq!(names, ["language.klfd", "reader.klfd"]);
+    assert_eq!(names, ["language.kcore", "reader.kcore"]);
+}
+
+#[test]
+fn kcore_and_klfd_sources_compile_together() {
+    let directory = std::env::temp_dir().join(format!("klf-kcore-package-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("create package");
+    std::fs::copy(
+        package_root().join("language.kcore"),
+        directory.join("language.kcore"),
+    )
+    .expect("copy language");
+    std::fs::copy(
+        package_root().join("reader.kcore"),
+        directory.join("reader.klfd"),
+    )
+    .expect("copy reader");
+
+    let mut session = session();
+    let language = LanguageDefinition::load(&mut session, &directory, Backend::Vm)
+        .unwrap_or_else(|| panic!("definition loads: {:?}", session.diagnostics()));
+    let module = language
+        .compile_sources(
+            &mut session,
+            &[DefinitionSource::new("input.mini", "answer 40")],
+        )
+        .unwrap_or_else(|| panic!("definition compiles: {:?}", session.diagnostics()));
+    assert_eq!(
+        run(&module, "answer", &[], Backend::Vm).expect("module runs"),
+        klf_vm::Outcome::Return(Some(42))
+    );
+    std::fs::remove_dir_all(directory).expect("remove package");
 }
 
 #[test]

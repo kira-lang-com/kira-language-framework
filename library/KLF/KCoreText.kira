@@ -1,0 +1,126 @@
+import Foundation
+import Heap
+
+public function utf8Count(text: borrow String) -> Int {
+    return text.count
+}
+
+public function utf8Byte(text: borrow String, offset: Int) -> Int {
+    return Int(text.byteAt(offset))
+}
+
+public function utf8Slice(text: borrow String, start: Int, end: Int) -> String {
+    return text.substring(start, end)
+}
+
+public function joinText(parts: borrow [String]) -> String {
+    var result = ""
+    for part in parts { result = result + part }
+    return result
+}
+
+public function decimalText(value: Int) -> String {
+    return String(value)
+}
+
+function klfTextBuffer(count: Int) -> String {
+    if count < 0 { runtimeTrap() }
+    let empty: String = ""
+    let data = makeArrayData(count)
+    return String { data: data, count: count, capacity: count, ops: empty.ops }
+}
+
+public function sourceText() -> String {
+    let count = klfsvc_source_len()
+    let result = klfTextBuffer(count)
+    if klfsvc_source_copy(result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function sourceName() -> String {
+    let count = klfsvc_source_name_len()
+    let result = klfTextBuffer(count)
+    if klfsvc_source_name_copy(result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function fileText(session: Session, file: SourceFile) -> String {
+    let count = klfsvc_source_file_len(session.raw, file.raw)
+    let result = klfTextBuffer(count)
+    if klfsvc_source_file_copy(session.raw, file.raw, result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function fileName(session: Session, file: SourceFile) -> String {
+    let count = klfsvc_source_file_name_len(session.raw, file.raw)
+    let result = klfTextBuffer(count)
+    if klfsvc_source_file_name_copy(session.raw, file.raw, result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function stdRoot(session: Session) -> String {
+    let count = klfsvc_session_std_root_len(session.raw)
+    let result = klfTextBuffer(count)
+    if klfsvc_session_std_root_copy(session.raw, result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function targetTriple(session: Session) -> String {
+    let count = klfsvc_session_target_len(session.raw)
+    let result = klfTextBuffer(count)
+    if klfsvc_session_target_copy(session.raw, result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function shaderText(unit: ShaderUnit, id: Int) -> String {
+    let count = klfsvc_shader_read_text_len(unit.raw, id)
+    let result = klfTextBuffer(count)
+    if klfsvc_shader_read_text_copy(unit.raw, id, result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function includeText(path: borrow String) -> String {
+    let count = klfsvc_source_named_len(path.data, path.count)
+    let result = klfTextBuffer(count)
+    if klfsvc_source_named_copy(path.data, path.count, result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+public function includeExists(path: borrow String) -> Bool {
+    return klfsvc_source_named_exists(path.data, path.count) == 1
+}
+
+public function driverDirectory() -> String {
+    let count = klfsvc_process_current_directory(RawPtr.null, 0)
+    let result = klfTextBuffer(count)
+    if klfsvc_process_current_directory(result.data, count) != count { runtimeTrap() }
+    return result
+}
+
+public function readFile(session: Session, path: borrow String) -> Int {
+    return klfsvc_source_read(session.raw, path.data, path.count)
+}
+
+public function pathExists(session: Session, path: borrow String) -> Bool {
+    return klfsvc_source_path_exists(session.raw, path.data, path.count) == 1
+}
+
+public function driverPathExists(path: borrow String) -> Bool {
+    return klfsvc_fs_path_exists(path.data, path.count) == 1
+}
+
+public function readDirectory(session: Session, directory: borrow String, extension: borrow String) -> Int {
+    return klfsvc_source_directory(session.raw, directory.data, directory.count, extension.data, extension.count)
+}
+
+public function addSource(session: Session, origin: SourceFile, text: borrow String) -> Int {
+    return klfsvc_source_virtual(session.raw, origin.raw, text.data, text.count)
+}
+
+public function readHeader(session: Session, origin: SourceFile, path: borrow String, library: borrow String, selection: borrow String, includes: borrow String, scalarAliases: borrow String) -> Int {
+    return klfsvc_source_ffi_header(session.raw, origin.raw, path.data, path.count, library.data, library.count, selection.data, selection.count, includes.data, includes.count, scalarAliases.data, scalarAliases.count)
+}
+
+public function readRidl(session: Session, origin: SourceFile, directory: borrow String, module: borrow String) -> Int {
+    return klfsvc_source_ridl_module(session.raw, origin.raw, directory.data, directory.count, module.data, module.count)
+}

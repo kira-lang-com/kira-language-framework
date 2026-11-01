@@ -13,12 +13,15 @@ use klf_ridl::{Type, bindgen, emit, parse};
 pub fn command(args: &[String]) -> ExitCode {
     let Some(sub) = args.first().map(String::as_str) else {
         klf_diag::err!(
-            "usage: klf ridl check|emit|layout|mangle <file.ridl> | adapters --target <triple> [-o out.ll] <file.ridl> | bindgen [--lang rust|kira|swift] <file.ridl>"
+            "usage: klf ridl check|emit|layout|mangle <file.ridl> | adapters --target <triple> [-o out.ll] <file.ridl> | bindgen [--lang rust|kira|swift] <file.ridl> | kernel --contract | kernel --entries --target <triple>"
         );
         return ExitCode::FAILURE;
     };
     if sub == "adapters" {
         return adapters(args);
+    }
+    if sub == "kernel" {
+        return kernel(&args[1..]);
     }
     let parsed = if sub == "bindgen" {
         bindgen_arguments(args)
@@ -56,6 +59,29 @@ pub fn command(args: &[String]) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+fn kernel(args: &[String]) -> ExitCode {
+    let output = match args {
+        [option] if option == "--contract" => {
+            klf_driver::kernel_ridl_module().map(|module| klf_ridl::emit(&module))
+        }
+        [option] if option == "--kcore" => klf_driver::kcore_service_bindings(),
+        [option, target_option, target] if option == "--entries" && target_option == "--target" => {
+            klf_driver::kernel_ridl_entries(target)
+        }
+        _ => Err("usage: klf ridl kernel --contract | --kcore | --entries --target <triple>".to_owned()),
+    };
+    match output {
+        Ok(output) => {
+            klf_diag::raw!("{output}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            klf_diag::err!("klf ridl kernel: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn bindgen_arguments(args: &[String]) -> Result<(String, String), String> {

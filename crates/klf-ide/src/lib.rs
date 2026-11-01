@@ -19,6 +19,6 @@ pub use assist::{CompletionItem, CompletionKind, HoverText, LinkDestination, Sig
 pub use cancel::Cancellation;
 pub use languages::Languages;
 pub use navigate::{Access, RenameEdit, SymbolItem};
-pub use project::Project;
+pub use project::{Project, ProjectDiagnostic, ProjectError, ProjectResolution};
 pub use snapshot::{FileSpan, Snapshot};
 pub use worker::{Analyzer, FormatRequest, Formatter, ProcessAnalyzer, ProcessFormatter};

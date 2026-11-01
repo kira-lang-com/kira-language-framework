@@ -1,0 +1,157 @@
+import KLF
+import Foundation
+
+struct MiniTree {
+    let value: Int
+    let source: String
+}
+
+construct Mini() extends Language {
+    let name: String = "mini"
+    let driver: String = "mini"
+    let version: String = "1.0.0"
+    let extensions: [String] = ["mini"]
+    let memory: MemoryModel = .Unmanaged
+    let exclusivity: Exclusivity = .None
+    let convention: DefaultConvention = .Ridl
+    let stdRoot: String = "std"
+    let editor: EditorSpec = EditorSpec {
+        displayName = "Mini", scope = "source.mini", rootMarkers = ["mini.manifest"],
+        lineComments = ["//"], blockComments = [], strings = [], numbers = ["[0-9]+"],
+        identifier = "[A-Za-z_][A-Za-z0-9_]*",
+        keywords = [KeywordGroup { tokenClass = .Keyword, modifiers = [], words = ["main"] }],
+        operators = [], brackets = [], autoClose = [],
+        indent = IndentRules { unit = "    ", increase = .None, decrease = .None }
+    }
+    let flags: [DriverFlag] = [
+        DriverFlag { name = "test-bool", default_value = .Boolean(true) },
+        DriverFlag { name = "test-int", default_value = .Integer(-17) },
+        DriverFlag { name = "test-text", default_value = .String("hé") }
+    ]
+    let diagnostics: [DiagnosticSpec] = [
+        DiagnosticSpec { code = 42, severity = .Error, title = "Invalid project", explanation = "The project manifest is invalid" },
+        DiagnosticSpec { code = 43, severity = .Warning, title = "Project warning", explanation = "The project has a warning" }
+    ]
+
+    function compatDriver(arguments: [String]) -> Optional<DriverRequest> {
+        var normalized: [String] = []
+        var changed = false
+        for argument in arguments {
+            if argument == "--mini-bytecode" {
+                normalized.append("--emit")
+                normalized.append("klbc")
+                changed = true
+            } else {
+                normalized.append(copy argument)
+            }
+        }
+        if !changed { return .None }
+        return .Some(DriverRequest { arguments = normalized })
+    }
+
+    function runProgram(command: [String], driverArguments: [String]) -> Int {
+        return runAttached(command)
+    }
+
+    function project(session: Session, file: String) -> Optional<Project> {
+        if file == "__mini_process_test__" {
+            let child = environmentValue("KLF_TEST_CHILD")
+            if runCommand([child, "--version"]) != 0 { runtimeTrap() }
+            if !commandOutput(1).contains("mini") || commandOutput(2) != "" { runtimeTrap() }
+            if runCommand([child, "--not-a-mini-option"]) == 0 { runtimeTrap() }
+            if !commandOutput(2).contains("unknown option") { runtimeTrap() }
+            if runCommand(["__klf_missing_command__"]) != -2 { runtimeTrap() }
+            if writeOutput("") != 0 || writeDriverOutput("") != 0 || writeError("") != 0 || writeDriverError("") != 0 { runtimeTrap() }
+            return .Some(Project { name = "process", root = ".", arguments = [], watch = [] })
+        }
+        if file == "__mini_project_warning__" {
+            klfsvc_diag_error(43, 1, 3)
+            return .None
+        }
+        if file == "__mini_manifest_error__" {
+            let manifest = readFile(session, "project.manifest")
+            klfsvc_diag_error_in(manifest, 42, 11, 18)
+            return .None
+        }
+        if file == "__mini_project_error__" {
+            klfsvc_diag_error(43, 1, 3)
+            klfsvc_diag_error(42, 9, 13)
+            return .None
+        }
+        if file != "__mini_project_test__" { return .None }
+        return .Some(Project { name = "mini", root = ".", arguments = ["input.mini"], watch = ["mini.manifest"] })
+    }
+
+    function units(session: Session, inputs: borrow [SourceFile]) -> [Unit] {
+        var result: [Unit] = []
+        for file in inputs { result.append(definition_unit(session, file)) }
+        return result
+    }
+
+    function parse(session: Session, unit: Unit, program: borrow [SourceFile]) -> Tree {
+        if environmentValue("KLF_TEST_EDITOR_FACTS") == "1" {
+            if editor_mode() == 0 {
+                if editorSymbolText(-1, 2, "hé") != 0 { runtimeTrap() }
+                if editorTypeAt(-1, 0, 0, -1, "hé") != 0 { runtimeTrap() }
+                if editorValueAt(-1, 0, 0, "hé") != 0 { runtimeTrap() }
+                if editorHint(-1, 0, 0, 0, -1, "hé") != 0 { runtimeTrap() }
+                if editorLink(-1, 0, 0, 0, -1, "hé") != 0 { runtimeTrap() }
+                if editorRunnable(-1, 0, 0, 0, "hé") != 0 { runtimeTrap() }
+            } else {
+                if editor_symbol(7, -1, 0, 4, 0, 4, 0, -1) != 1 { runtimeTrap() }
+                if editorSymbolText(7, 2, "symbol hé") != 1 { runtimeTrap() }
+                if editorTypeAt(-1, 0, 4, -1, "type hé") != 1 { runtimeTrap() }
+                if editorValueAt(-1, 0, 4, "value hé") != 1 { runtimeTrap() }
+                if editorHint(-1, 4, 0, 0, -1, "hint hé") != 1 { runtimeTrap() }
+                if editorLink(-1, 0, 4, 0, -1, "link hé") != 1 { runtimeTrap() }
+                if editorRunnable(-1, 0, 4, 0, "run hé") != 1 { runtimeTrap() }
+            }
+        }
+        match session.flag("emit") {
+            String(value) -> {}
+            Boolean(value) -> runtimeTrap()
+            Integer(value) -> runtimeTrap()
+        }
+        match session.flag("test-bool") {
+            Boolean(value) -> { if !value { runtimeTrap() } }
+            Integer(value) -> runtimeTrap()
+            String(value) -> runtimeTrap()
+        }
+        match session.flag("test-int") {
+            Integer(value) -> { if value != -17 { runtimeTrap() } }
+            Boolean(value) -> runtimeTrap()
+            String(value) -> runtimeTrap()
+        }
+        match session.flag("test-text") {
+            String(value) -> { if value != "hé" { runtimeTrap() } }
+            Boolean(value) -> runtimeTrap()
+            Integer(value) -> runtimeTrap()
+        }
+        if program.count > 0 && session.file_memory(program[0]) != .Unmanaged { runtimeTrap() }
+        let tree = MiniTree { value = literalValue(), source = sourceText() }
+        return definition_tree(session, unit, artifactHandle(move tree))
+    }
+
+    function elaborate(session: Session, unit: Unit, tree: Tree) -> Program {
+        let payload = definition_tree_payload(session, tree)
+        let parsed: MiniTree = artifactValue<MiniTree>(payload)
+        if parsed.source != sourceText() { runtimeTrap() }
+        return definition_program(session, unit, payload)
+    }
+
+    function lower(session: Session, unit: Unit, program: Program) -> KirModule {
+        let builder = kir_module_new(session, unit, program)
+        let word = kir_type_integer(64)
+        let entry = kir_signature_new(builder, 0, nameEnd(), word)
+        let main = kir_signature_define(entry)
+        let parsed: MiniTree = artifactValue<MiniTree>(definition_program_payload(session, program))
+        let value = kir_value_integer(main, word, parsed.value)
+        let two = kir_value_integer(main, word, 2)
+        kir_function_result(main, kir_value_binary(main, 0, 0, 1, value, two))
+        return kir_module_finish(builder)
+    }
+
+    function format(session: Session, unit: Unit, tree: Tree) -> Bool {
+        return format_verbatim(0, utf8Count(sourceText())) == 1
+    }
+}

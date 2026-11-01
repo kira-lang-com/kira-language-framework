@@ -59,7 +59,7 @@ pub struct CorpusManifest {
     pub cases: Vec<CorpusCase>,
 }
 
-/// The manifests under `<package>/corpus`, or only `<name>.klfd`.
+/// The manifests under `<package>/corpus`, or only `<name>.kcore` or `<name>.klfd`.
 ///
 /// # Errors
 /// Returns a message when a manifest cannot be read or does not follow the
@@ -72,7 +72,7 @@ pub fn read_corpora(package: &Path, only: Option<&str>) -> Result<Vec<CorpusMani
     if !directory.is_dir() {
         return match only {
             Some(name) => Err(format!(
-                "{}: no corpus manifest {name}.klfd",
+                "{}: no corpus manifest {name}.kcore or {name}.klfd",
                 directory.display()
             )),
             None => Ok(Vec::new()),
@@ -84,14 +84,14 @@ pub fn read_corpora(package: &Path, only: Option<&str>) -> Result<Vec<CorpusMani
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension()
-                .is_some_and(|extension| extension == "klfd")
+                .is_some_and(|extension| extension == "klfd" || extension == "kcore")
         })
         .filter(|path| only.is_none_or(|name| path.file_stem().is_some_and(|stem| stem == name)))
         .collect();
     paths.sort();
     if paths.is_empty() {
         return Err(match only {
-            Some(name) => format!("no corpus manifest {}/{name}.klfd", directory.display()),
+            Some(name) => format!("no corpus manifest {}/{name}.kcore or {name}.klfd", directory.display()),
             None => format!("{} holds no corpus manifests", directory.display()),
         });
     }

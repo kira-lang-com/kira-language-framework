@@ -1,0 +1,11 @@
+import KLF
+import Foundation
+
+@FFI.Extern { library: trap_probe, symbol: klf_test_trap, abi: c }
+function testTrap() -> Int
+
+@Main
+function main() -> Int {
+    if !driverPathExists(driverDirectory()) { return 2 }
+    return testTrap()
+}

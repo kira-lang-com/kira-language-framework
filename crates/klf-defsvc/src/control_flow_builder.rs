@@ -113,6 +113,7 @@ pub(super) fn register(
         "klfsvc_kir_function_body",
         ll_function_body
     );
+    service!(state, capabilities, "klfsvc_kir_function_ridl", ll_function_ridl);
     service!(
         state,
         capabilities,
@@ -443,6 +444,13 @@ impl DefinitionServiceState {
         function
             .builder
             .add_attribute(klf_kir::FunctionAttribute::Initializer);
+        0
+    }
+
+    fn ll_function_ridl(&mut self, arguments: &[u64]) -> u64 {
+        let Some(function_id) = arguments.first().copied() else { return u64::MAX; };
+        let Some(function) = self.kir_function_mut(function_id) else { return u64::MAX; };
+        function.builder.set_abi(klf_kir::FunctionAbi::Ridl);
         0
     }
 

@@ -22,6 +22,7 @@ pub mod interrupt;
 mod names;
 mod net;
 mod process;
+mod process_host;
 mod ridl;
 mod service_abi;
 pub mod services;
@@ -101,7 +102,13 @@ static PROCESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 static TRAP_EXITS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn is_process() -> bool {
-    PROCESS.load(std::sync::atomic::Ordering::Relaxed)
+    process_host::klfrt_process_mode() & 1 != 0
+}
+
+/// Reports the executable runtime's process entry state to attached libraries.
+#[unsafe(no_mangle)]
+pub extern "C" fn klfrt_process_active() -> i32 {
+    i32::from(PROCESS.load(std::sync::atomic::Ordering::Relaxed)) | (i32::from(TRAP_EXITS.load(std::sync::atomic::Ordering::Relaxed)) << 1)
 }
 
 /// Called first by a process-convention `main`; `trap_exits` is nonzero when
@@ -129,21 +136,29 @@ pub extern "C" fn klfrt_exit(status: i32) -> ! {
     std::process::exit(status)
 }
 
-/// Kernel service `klf.io.put` (section 8.12): write one byte to stdout, prefixed
-/// with `IO ` so the native outcome parser can tell service output from the
-/// final `RET`/`TRAP` line. Returns the byte.
+/// Kernel service `klf.io.put` (section 8.12): write one byte and return it.
 #[unsafe(no_mangle)]
 pub extern "C" fn klfsvc_io_put(byte: i32) -> i32 {
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let value = byte as u8;
-    println!("IO {value}");
-    byte
+    if is_process() {
+        let mut output = std::io::stdout().lock();
+        let _ = std::io::Write::write_all(&mut output, &[value])
+            .and_then(|()| std::io::Write::flush(&mut output));
+    } else {
+        println!("IO {value}");
+    }
+    i32::from(value)
 }
 
 /// Kernel service `klf.io.puti`: write a decimal integer and return void.
 #[unsafe(no_mangle)]
 pub extern "C" fn klfsvc_io_puti(value: i64) {
-    println!("IO {value}");
+    if is_process() {
+        println!("{value}");
+    } else {
+        println!("IO {value}");
+    }
 }
 
 /// Kernel service `klf.io.write`: writes `length` bytes to standard output

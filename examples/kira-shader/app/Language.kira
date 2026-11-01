@@ -1,0 +1,57 @@
+import KLF
+
+construct TestShader() extends ShaderLanguage {
+    let name: String = "wgsl"
+    let driver: String = "test-shader"
+    let version: String = "1.0.0"
+    let extensions: [String] = ["tshader"]
+    let layouts: LayoutDefaults = LayoutDefaults { uniform = .Std140, storage = .Std430, immediate = .Std430 }
+    let keys: [DiagnosticKey] = [
+        DiagnosticKey { key = "shader.uniformity", code = 1 },
+        DiagnosticKey { key = "shader.const-not-finite", code = 2 },
+        DiagnosticKey { key = "shader.const-index", code = 3 },
+        DiagnosticKey { key = "shader.interface-mismatch", code = 4 },
+        DiagnosticKey { key = "shader.override-missing", code = 5 },
+        DiagnosticKey { key = "shader.override-unsupported", code = 6 },
+        DiagnosticKey { key = "shader.target-unsupported", code = 7 },
+        DiagnosticKey { key = "shader.capability", code = 8 },
+        DiagnosticKey { key = "shader.slot-collision", code = 9 }
+    ]
+    let diagnostics: [DiagnosticSpec] = [
+        DiagnosticSpec { code = 1, severity = .Warning, title = "uniformity", explanation = "uniformity" },
+        DiagnosticSpec { code = 2, severity = .Error, title = "constant", explanation = "constant" },
+        DiagnosticSpec { code = 3, severity = .Error, title = "index", explanation = "index" },
+        DiagnosticSpec { code = 4, severity = .Error, title = "interface", explanation = "interface" },
+        DiagnosticSpec { code = 5, severity = .Error, title = "override missing", explanation = "override missing" },
+        DiagnosticSpec { code = 6, severity = .Error, title = "override unsupported", explanation = "override unsupported" },
+        DiagnosticSpec { code = 7, severity = .Error, title = "target", explanation = "target" },
+        DiagnosticSpec { code = 8, severity = .Error, title = "capability", explanation = "capability" },
+        DiagnosticSpec { code = 9, severity = .Error, title = "slot", explanation = "slot" }
+    ]
+
+    function units(session: Session, inputs: borrow [SourceFile]) -> [Unit] {
+        var result: [Unit] = []
+        for input in inputs { result.append(definition_unit(session, input)) }
+        return result
+    }
+    function parse(session: Session, unit: Unit, program: borrow [SourceFile]) -> Tree {
+        return definition_tree(session, unit, 0)
+    }
+    function elaborate(session: Session, unit: Unit, tree: Tree) -> Program {
+        return definition_program(session, unit, 0)
+    }
+    function lower(session: Session, unit: Unit, program: Program) -> ShaderModule {
+        let module = shader_module_new(session, unit, program, "wgsl")
+        let entry = shader_entry(module, "main", "compute", -1, "")
+        shader_entry_workgroup(module, entry, 1, 1, 1)
+        shader_stmt_return(module, entry, -1)
+        let finished = shader_function_finish(module, entry)
+        shader_push(module, finished)
+        shader_shader(module, "main", "compute")
+        return shader_module_finish(module)
+    }
+    function emit(unit: ShaderUnit) -> Bool {
+        shader_out_write(unit, "// emitted by Kira\n")
+        return true
+    }
+}

@@ -92,6 +92,20 @@ fn session_resolves_runtime_diagnostics_through_registered_specs() {
 }
 
 #[test]
+fn diagnostic_origin_resolves_to_registered_source() {
+    let mut session = Session::new(target());
+    let main = session.add_file("main.kira", "main source");
+    let header = session.add_file("header.kira", "included source");
+    session.register_diagnostic(DiagnosticSpec::new(
+        2001, klf_diag::Severity::Error, "invalid token", "invalid source",
+    ));
+    let mut record = klf_diag::RuntimeDiagnostic::new(2001, 1, 4);
+    record.origin = i64::try_from(klf_source::source_hash("included source")).unwrap();
+    assert!(session.report_runtime_diagnostic(main, record));
+    assert_eq!(session.runtime_diagnostics()[0].span, Span::new(header, 1, 4));
+}
+
+#[test]
 fn session_caches_and_invalidates_phase_artifacts() {
     let mut session = Session::new(target());
     let unit = DefinitionUnit::new(session.add_file("input.kira", "body"));

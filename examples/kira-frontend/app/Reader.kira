@@ -1,0 +1,18 @@
+import KLF
+
+function nameEnd() -> Int {
+    for index in 0..source_len() {
+        if source_byte(index) == U8(32) { return index }
+    }
+    return source_len()
+}
+
+function literalValue() -> Int {
+    var value = 0
+    for index in (nameEnd() + 1)..source_len() {
+        let byte = source_byte(index)
+        if byte < U8(48) || byte > U8(57) { return value }
+        value = value * 10 + Int(byte) - 48
+    }
+    return value
+}

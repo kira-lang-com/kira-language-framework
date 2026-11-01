@@ -128,6 +128,9 @@ fn agree(params: &InitializeParams) -> server::Agreement {
         encoding: Encoding::negotiate(&offered),
         multiline_tokens,
         folders,
+        dynamic_watch: params.capabilities.workspace.as_ref()
+            .and_then(|workspace| workspace.did_change_watched_files.as_ref())
+            .and_then(|watch| watch.dynamic_registration).unwrap_or(false),
     }
 }
 

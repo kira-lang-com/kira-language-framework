@@ -26,11 +26,34 @@ pub(crate) struct Client {
 }
 
 pub(crate) fn uri(path: &Path) -> String {
-    let text = path
-        .to_string_lossy()
-        .replace('%', "%25")
-        .replace(' ', "%20");
-    format!("file://{text}")
+    let mut text = String::from("file://");
+    let path = path.to_string_lossy();
+    #[cfg(windows)]
+    let path = path.replace('\\', "/");
+    #[cfg(windows)]
+    if !path.starts_with('/') { text.push('/'); }
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/:-._~".contains(&byte) {
+            text.push(char::from(byte));
+        } else {
+            text.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_uri_encodes_reserved_and_non_ascii_characters() {
+        #[cfg(windows)]
+        let (path, expected) = (r"C:\work\é #%.c", "file:///C:/work/%C3%A9%20%23%25.c");
+        #[cfg(not(windows))]
+        let (path, expected) = ("/work/é #%.c", "file:///work/%C3%A9%20%23%25.c");
+        assert_eq!(uri(Path::new(path)), expected);
+    }
 }
 
 impl Client {

@@ -9,5 +9,5 @@ experimental = ["setup-scripts"]
 command = { command-line = "sh -c 'cargo build --quiet -p klf-native-rt && cargo build --quiet --release -p klf-native-rt -p klf-vm-rt -p klf-frontend-rt'" }
 
 [[profile.default.scripts]]
-filter = 'package(klf-cranelift) or package(klf-llvm) or package(klf-toy-calc) or binary(ridl_e2e) or binary(ffi_conformance) or binary(native_frontend) or binary(definition_flags) or binary(compat_driver) or binary(sysroot) or binary(distribution) or binary(native_build)'
+filter = 'package(klf-cranelift) or package(klf-llvm) or package(klf-toy-calc) or binary(ridl_e2e) or binary(ffi_conformance) or binary(native_frontend) or binary(definition_flags) or binary(compat_driver) or binary(sysroot) or binary(distribution) or binary(native_build) or binary(kira_frontend_e2e)'
 setup = 'kernel-archives'

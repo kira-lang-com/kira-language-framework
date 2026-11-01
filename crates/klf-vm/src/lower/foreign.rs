@@ -117,7 +117,9 @@ impl Lowerer<'_> {
         let import = match self.functions.get(symbol.as_str()) {
             Some(function) if function.foreign => {
                 let name = function.name.as_str();
-                let native = if function.c_prototype.is_some() {
+                let native = if function.abi == klf_kir::FunctionAbi::Ridl {
+                    name.to_owned()
+                } else if function.c_prototype.is_some() {
                     klf_kir::c_shim_symbol(name)
                 } else {
                     klf_kir::c_symbol(name).to_owned()

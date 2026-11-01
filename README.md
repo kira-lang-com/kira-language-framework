@@ -3,8 +3,19 @@
 KLF is the Rust kernel, intermediate representation, runtime, and toolchain
 framework specified by [`roadmap/KLF-RIDL.md`](roadmap/KLF-RIDL.md).
 
-The implementation is built milestone by milestone. M0 covers the KIR data
-model, textual representation, and raw verifier rules V1 through V3.
+KCore is the definition language used to build Kira; `.klfd` remains accepted
+as a compatibility extension for `.kcore` definitions. The KLF driver also
+supports language frontends written in Kira. Kira frontends use the installed
+KLF library and RIDL kernel interface, while the KLF driver continues to run
+the frontend and provide its services. KCore and Kira shader languages can be
+linked into the same driver.
+
+`klf dist --out DIR` installs the KLF Kira library and its RIDL interface as
+part of a distribution. `KLF_HOME` selects that distribution, and `KLF_KIRA`
+can select the Kira compiler used to build Kira frontends. The
+[`examples/kira-klf-consumer`](examples/kira-klf-consumer) and
+[`examples/kira-shader`](examples/kira-shader) packages demonstrate the
+library and frontend integration.
 
 Run the current conformance gates with:
 

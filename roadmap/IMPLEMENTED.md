@@ -3316,3 +3316,24 @@ or moved: only top-level declarations are. Item 3 asks servers to pass
 emits `.ridl` today, so there is nothing to pass it to. Moving binding
 declarations to the `.ridl` goes by name, since the bindings record no
 mapping back to the `.ridl` text.
+
+### KLF process state across Windows native libraries
+
+An attached bytecode native library has its own copy of the native runtime.
+It now reads the executable's process-entry and trap-exit policy dynamically,
+including when the library loaded before process startup. The scoped
+`klf-native-rt` `process_host` test loads a separate DLL before startup and
+checks both states, then triggers a trap in the DLL and verifies its diagnostic
+and exit status 1. An earlier probe ran the runtime without the trap policy
+handoff and aborted; the Windows just-in-time debugger held that process, which
+looked like a termination hang. The Kira frontend end-to-end test exercises
+native and VM process output through the KLF library, and on Windows compiles
+a Kira KLF consumer to bytecode, invokes a native-library trap through the VM,
+and checks its diagnostic and exit status.
+
+VM diagnostic service arguments now retain their signed 64-bit bit patterns,
+matching the native service boundary. In particular, a negative file sentinel
+stays negative instead of becoming `i64::MAX`. The scoped VM service test runs
+KIR calls with negative arguments, and the session test checks that a source
+content hash resolves a diagnostic to its registered file. Source hashes are
+31-bit positive values; they do not depend on negative hash representations.

@@ -1,6 +1,6 @@
 //! Corpus manifests and the `klf test` runner (section 31.1).
 //!
-//! A manifest is `corpus/<name>.klfd` in the definition package, holding one
+//! A manifest is `corpus/<name>.kcore` or `corpus/<name>.klfd`, holding one
 //! `construct <Name>() extends Corpus`:
 //!
 //! ```text
@@ -33,7 +33,7 @@
 //! klbc` and runs the image with the language's runner. A case whose `hosts`
 //! does not name this operating system (`std::env::consts::OS`) is skipped.
 //!
-//! An editor corpus, `corpus/editor/<name>.klfd` (`KLF-EDITOR.md`
+//! An editor corpus, `corpus/editor/<name>.kcore` or `<name>.klfd` (`KLF-EDITOR.md`
 //! Appendix A), runs against the same driver's `<driver> lsp`; see
 //! `editor.rs`.
 //!
@@ -46,6 +46,7 @@ mod editor_manifest;
 mod editor_markers;
 mod lsp_client;
 mod manifest;
+mod selection;
 
 pub use editor::run_editor_corpus;
 pub use editor_manifest::{
@@ -87,12 +88,7 @@ pub fn test_package(
     target: &klf_target::Target,
     languages: &[&std::path::Path],
 ) -> Result<Vec<CaseResult>, String> {
-    let editor = read_editor_corpora(package, only)?;
-    let manifests = if editor.is_empty() || has_program_corpus(package) {
-        read_corpora(package, only)?
-    } else {
-        Vec::new()
-    };
+    let (manifests, editor) = selection::read(package, only)?;
     let scratch = std::env::temp_dir().join(format!("klf-test-{}", std::process::id()));
     let linked = linked_languages(package, &manifests, languages);
     let linked: Vec<&Path> = linked.iter().map(PathBuf::as_path).collect();
@@ -135,18 +131,7 @@ pub fn test_package(
 /// `corpus/` or editor manifests in `corpus/editor/`.
 #[must_use]
 pub fn has_corpus(package: &Path) -> bool {
-    has_program_corpus(package) || package.join("corpus").join("editor").is_dir()
-}
-
-fn has_program_corpus(package: &Path) -> bool {
-    std::fs::read_dir(package.join("corpus")).is_ok_and(|entries| {
-        entries.filter_map(Result::ok).any(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "klfd")
-        })
-    })
+    selection::has_corpus(package)
 }
 
 /// Runs every case of `manifest` with `driver`, building into `scratch`;

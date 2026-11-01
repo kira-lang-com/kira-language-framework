@@ -10,6 +10,7 @@ mod editor;
 mod emit;
 mod expansion;
 mod flags;
+mod runtime_diagnostics;
 mod scope;
 
 pub use editor::{overlay_key, read_through};
@@ -493,96 +494,6 @@ impl Session {
 
     pub fn report_error(&mut self, code: &'static str, span: Span, message: impl Into<String>) {
         self.report(Diagnostic::error_at(code, span, message));
-    }
-
-    /// Resolves and retains one runtime diagnostic through the registered
-    /// definition specification.
-    pub fn report_runtime_diagnostic(&mut self, file: FileId, record: RuntimeDiagnostic) -> bool {
-        self.report_runtime_diagnostics(file, &[record]).is_ok()
-    }
-
-    /// Resolves and retains runtime diagnostics atomically through the
-    /// registered definition specifications.
-    ///
-    /// # Errors
-    /// Returns the first record whose code is not registered or whose span is
-    /// outside the session's source file. No records are appended on failure.
-    pub fn report_runtime_diagnostics(
-        &mut self,
-        file: FileId,
-        records: &[RuntimeDiagnostic],
-    ) -> Result<(), RuntimeDiagnostic> {
-        let mut resolved = Vec::with_capacity(records.len());
-        for record in records {
-            let Some(report) = self.resolve_runtime_diagnostic(file, record.clone()) else {
-                return Err(record.clone());
-            };
-            resolved.push(report);
-        }
-        self.runtime_diagnostics.extend(resolved);
-        Ok(())
-    }
-
-    fn resolve_runtime_diagnostic(
-        &self,
-        file: FileId,
-        record: RuntimeDiagnostic,
-    ) -> Option<ResolvedRuntimeDiagnostic> {
-        let file = if record.origin > 0 {
-            self.files
-                .iter()
-                .find(|source| {
-                    i64::try_from(klf_source::source_hash(source.text())) == Ok(record.origin)
-                })?
-                .id()
-        } else {
-            match u32::try_from(record.file) {
-                Ok(id) => FileId::from_u32(id),
-                Err(_) => file,
-            }
-        };
-        let source = self.files.get(file.index())?;
-        let end = usize::try_from(record.end).ok()?;
-        if end > source.text().len() {
-            return None;
-        }
-        let spec = self.diagnostic_specs.get(&record.code)?;
-        spec.resolve(record, file)
-    }
-
-    /// A runtime diagnostic the session could not place, described as far as
-    /// it can be: its title when the code is registered, and the file its
-    /// origin hash or file id names with why the range does not fit there.
-    #[must_use]
-    pub fn describe_unresolved(&self, record: RuntimeDiagnostic) -> String {
-        let title = self
-            .diagnostic_specs
-            .get(&record.code)
-            .map_or_else(|| "unregistered diagnostic".to_owned(), |spec| spec.title.clone());
-        let file = if record.origin > 0 {
-            self.files
-                .iter()
-                .find(|source| i64::try_from(klf_source::source_hash(source.text())) == Ok(record.origin))
-        } else {
-            u32::try_from(record.file)
-                .ok()
-                .and_then(|id| self.files.get(FileId::from_u32(id).index()))
-        };
-        let place = match file {
-            Some(source) => format!(
-                "{} (bytes {}..{} of {})",
-                source.name().as_str(),
-                record.start,
-                record.end,
-                source.text().len()
-            ),
-            None if record.origin > 0 => format!(
-                "a source the session does not hold (content hash {}), bytes {}..{}",
-                record.origin, record.start, record.end
-            ),
-            None => format!("bytes {}..{}", record.start, record.end),
-        };
-        format!("error[{}]: {title}, at {place}", record.code)
     }
 
     /// Registers a numeric runtime diagnostic specification.

@@ -1,0 +1,30 @@
+import KLF
+
+public function klfFrontendBegin() -> Int { beginFrontendArtifacts() return 0 }
+public function klfFrontendDispose() -> Int { endFrontendArtifacts() return 0 }
+
+function inputs(session: Session, count: Int) -> [SourceFile] {
+    var files: [SourceFile] = []
+    for index in 0..count { files.append(definition_input(session, index)) }
+    return files
+}
+
+public function klfFrontendUnits(session: Int, count: Int) -> Int {
+    for unit in TestShader().units(Session(session), inputs(Session(session), count)) {
+        klfsvc_definition_units_push(session, unit.raw)
+    }
+    return klfsvc_definition_units_finish(session)
+}
+public function klfFrontendParse(session: Int, unit: Int, count: Int) -> Int {
+    return TestShader().parse(Session(session), Unit(unit), inputs(Session(session), count)).raw
+}
+public function klfFrontendElaborate(session: Int, unit: Int, tree: Int) -> Int {
+    return TestShader().elaborate(Session(session), Unit(unit), Tree(tree)).raw
+}
+public function klfFrontendLower(session: Int, unit: Int, program: Int) -> Int {
+    return TestShader().lower(Session(session), Unit(unit), Program(program)).raw
+}
+public function klfFrontendEmit(unit: Int) -> Int {
+    if TestShader().emit(ShaderUnit(unit)) { return 1 }
+    return 0
+}

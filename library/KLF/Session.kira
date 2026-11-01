@@ -1,0 +1,46 @@
+import Foundation
+
+extend Session {
+    function flag(borrow self, name: borrow String) -> DriverFlagValue {
+        let storage = heapAllocateRaw(16, 8)
+        let ok = klfsvc_session_flag(self.raw, name.data, name.count, storage)
+        if ok != 1 {
+            heapFreeRaw(storage)
+            runtimeTrap()
+        }
+        let tag: Int = heapLoad<Int>(storage, 0)
+        let payload: Int = heapLoad<Int>(storage, 8)
+        heapFreeRaw(storage)
+        match tag {
+            0 -> return .Boolean(payload != 0)
+            1 -> return .Integer(payload)
+            2 -> {
+                let value = klfTextBuffer(payload)
+                if klfsvc_session_flag_string_copy(self.raw, name.data, name.count, value.data, payload) != 1 { runtimeTrap() }
+                return .String(move value)
+            }
+            else -> runtimeTrap()
+        }
+    }
+
+    function file_mode(borrow self, file: SourceFile) -> Int {
+        return klfsvc_session_file_mode(self.raw, file.raw)
+    }
+
+    function file_memory(borrow self, file: SourceFile) -> MemoryModel {
+        match klfsvc_session_file_memory(self.raw, file.raw) {
+            0 -> return .Unmanaged
+            1 -> return .Counted
+            2 -> return .Affine
+            else -> runtimeTrap()
+        }
+    }
+
+    function file_convention(borrow self, file: SourceFile) -> DefaultConvention {
+        match klfsvc_session_file_convention(self.raw, file.raw) {
+            0 -> return .Ridl
+            1 -> return .Platform
+            else -> runtimeTrap()
+        }
+    }
+}

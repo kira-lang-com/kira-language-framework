@@ -133,7 +133,7 @@ fn validate_phase_signature(
     }
     let expected = match phase {
         0 => (&["Session", "[SourceFile]"][..], "[Unit]"),
-        // A parse takes the program's files too (`docs/conformers.md`).
+        1 if function.params.len() == 2 => (&["Session", "Unit"][..], "Tree"),
         1 => (&["Session", "Unit", "[SourceFile]"][..], "Tree"),
         2 => (&["Session", "Unit", "Tree"][..], "Program"),
         3 if shader => (&["Session", "Unit", "Program"][..], "ShaderModule"),

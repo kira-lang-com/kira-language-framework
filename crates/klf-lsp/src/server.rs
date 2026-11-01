@@ -6,7 +6,7 @@ use crate::convert;
 use crate::handlers;
 use crate::schedule::{Finished, Scheduler, asked_again, interactive};
 use crate::views::Views;
-use klf_ide::{Analysis, Analyzer, Formatter, Interruption, Languages, Project, Snapshot};
+use klf_ide::{Analysis, Analyzer, Formatter, Interruption, Languages, Project, ProjectDiagnostic, ProjectError, ProjectResolution, Snapshot};
 use klf_text::{Document, Encoding};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
@@ -32,6 +32,8 @@ pub struct ServerConfig {
     pub analyzer: Arc<dyn Analyzer>,
     /// Serves formatting when present (`KLF-FORMAT.md` section 6).
     pub formatter: Option<Arc<dyn Formatter>>,
+    /// Resolves a file through the language's project hook, when present.
+    pub project_resolver: Option<Arc<dyn Fn(&Path) -> Result<ProjectResolution, ProjectError> + Send + Sync>>,
 }
 
 /// What the client and server agreed on at `initialize`.
@@ -39,6 +41,7 @@ pub(crate) struct Agreement {
     pub encoding: Encoding,
     pub multiline_tokens: bool,
     pub folders: Vec<PathBuf>,
+    pub dynamic_watch: bool,
 }
 
 #[derive(Default)]
@@ -63,6 +66,7 @@ pub(crate) struct Server<'c> {
     pub agreement: Agreement,
     documents: HashMap<PathBuf, (i32, Document)>,
     projects: HashMap<Project, ProjectState>,
+    project_errors: HashMap<PathBuf, Vec<ProjectDiagnostic>>,
     scheduler: Scheduler,
     waiting: Vec<(Project, Request)>,
     /// The `KLF-LSP-9001` keys already shown (section 25).
@@ -74,6 +78,7 @@ pub(crate) struct Server<'c> {
     /// The projects someone asked for KIR of (section 13.7); only their
     /// analyses lower to KIR text.
     kir: HashSet<Project>,
+    watched: HashSet<String>,
 }
 
 impl<'c> Server<'c> {
@@ -88,12 +93,14 @@ impl<'c> Server<'c> {
             agreement,
             documents: HashMap::new(),
             projects: HashMap::new(),
+            project_errors: HashMap::new(),
             scheduler: Scheduler::new(Arc::clone(&config.analyzer)),
             waiting: Vec::new(),
             shown: HashSet::new(),
             views: Views::default(),
             reported: None,
             kir: HashSet::new(),
+            watched: HashSet::new(),
             config,
         }
     }
@@ -260,11 +267,7 @@ impl<'c> Server<'c> {
                 if let Ok(params) =
                     serde_json::from_value::<DidChangeWatchedFilesParams>(notification.params)
                 {
-                    for change in params.changes {
-                        if let Some(path) = convert::path(&change.uri) {
-                            self.changed(&path);
-                        }
-                    }
+                    if !params.changes.is_empty() { self.reload_projects(); }
                 }
             }
             "$/cancelRequest" => {
@@ -305,6 +308,7 @@ impl<'c> Server<'c> {
     /// Diagnostics already published are withdrawn, and the requests
     /// waiting on a forgotten project are answered `ContentModified`.
     pub(crate) fn reload_projects(&mut self) {
+        self.project_errors.clear();
         let forgotten = std::mem::take(&mut self.projects);
         for (project, state) in forgotten {
             self.scheduler.cancel(&project);
@@ -335,11 +339,39 @@ impl<'c> Server<'c> {
 
     /// The project of `path`, registered if it is new.
     fn project(&mut self, path: &Path) -> Project {
-        let project = klf_ide::project::resolve(
-            path,
-            &self.agreement.folders,
-            &self.languages.root_markers(),
-        );
+        let resolved = self.config.project_resolver.as_ref().map(|resolve| resolve(path));
+        let diagnostics = match &resolved {
+            Some(Ok(result)) => result.diagnostics.clone(),
+            Some(Err(error)) => {
+                self.log(&format!("{}: project resolution failed: {}", self.config.name, error.message));
+                vec![ProjectDiagnostic { message: error.message.clone(), code: error.code, span: error.span,
+                    path: error.path.clone(), severity: klf_diag::Severity::Error }]
+            }
+            None => Vec::new(),
+        };
+        let diagnostic_paths: Vec<_> = diagnostics.iter().filter_map(|diagnostic| diagnostic.path.clone()).collect();
+        if diagnostics.is_empty() { self.project_errors.remove(path); }
+        else { self.project_errors.insert(path.to_path_buf(), diagnostics); }
+        let project = match resolved {
+            Some(Ok(result)) if result.failed => klf_ide::project::resolve(path, &[], &[]),
+            Some(Ok(ProjectResolution { project: Some(project), .. })) => project,
+            Some(Err(_)) => klf_ide::project::resolve(path, &[], &[]),
+            _ => klf_ide::project::resolve(path, &self.agreement.folders, &self.languages.root_markers()),
+        };
+        if self.agreement.dynamic_watch {
+            let mut patterns: Vec<String> = project.watch.iter().map(|pattern| {
+                project.root.join(pattern).to_string_lossy().replace('\\', "/")
+            }).collect();
+            patterns.extend(diagnostic_paths.iter().map(|path| path.to_string_lossy().replace('\\', "/")));
+            patterns.retain(|pattern| self.watched.insert(pattern.clone()));
+            if !patterns.is_empty() {
+                let id = format!("klf-watch-{}", self.watched.len());
+                let watchers: Vec<_> = patterns.iter().map(|pattern| serde_json::json!({ "globPattern": pattern })).collect();
+                let params = serde_json::json!({ "registrations": [{ "id": id, "method": "workspace/didChangeWatchedFiles", "registerOptions": { "watchers": watchers } }] });
+                let request = Request::new(RequestId::from(id), "client/registerCapability".to_owned(), params);
+                let _ = self.connection.sender.send(Message::Request(request));
+            }
+        }
         self.projects.entry(project.clone()).or_default();
         project
     }
@@ -531,6 +563,8 @@ impl<'c> Server<'c> {
                 .iter()
                 .filter_map(|diagnostic| analyzed.analysis.path(diagnostic.file).cloned()),
         );
+        paths.extend(self.project_errors.iter().filter(|(input, _)| owns(project, input))
+            .flat_map(|(input, diagnostics)| diagnostics.iter().map(|diagnostic| diagnostic.path.clone().unwrap_or_else(|| input.clone()))));
         let previous = self
             .projects
             .get_mut(project)
@@ -541,7 +575,26 @@ impl<'c> Server<'c> {
             let Some(uri) = convert::uri(&path) else {
                 continue;
             };
-            let diagnostics = handlers::diagnostics(self, &snapshot, &path);
+            let mut diagnostics = handlers::diagnostics(self, &snapshot, &path);
+            let diagnostic_path = &path;
+            for error in self.project_errors.iter().filter(|(input, _)| owns(project, input))
+                .flat_map(|(input, diagnostics)| diagnostics.iter().filter(move |error| error.path.as_ref().unwrap_or(input) == diagnostic_path)) {
+                diagnostics.push(lsp_types::Diagnostic {
+                    range: error.span.and_then(|(start, end)| snapshot.line_index(&path)
+                        .map(|index| convert::range(&index, start, end, self.agreement.encoding)))
+                        .unwrap_or_default(),
+                    severity: Some(match error.severity {
+                        klf_diag::Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
+                        klf_diag::Severity::Warning => lsp_types::DiagnosticSeverity::WARNING,
+                        klf_diag::Severity::Note => lsp_types::DiagnosticSeverity::INFORMATION,
+                        klf_diag::Severity::Remark => lsp_types::DiagnosticSeverity::HINT,
+                    }),
+                    source: Some(self.config.name.clone()),
+                    code: error.code.map(|code| lsp_types::NumberOrString::String(code.to_string())),
+                    message: error.message.clone(),
+                    ..lsp_types::Diagnostic::default()
+                });
+            }
             let version = self.documents.get(&path).map(|(version, _)| *version);
             let params = PublishDiagnosticsParams {
                 uri,

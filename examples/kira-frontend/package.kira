@@ -1,0 +1,7 @@
+construct KLFFrontend extends Package {
+    let kind: PackageKind = .Library
+    let moduleRoot: String = "KLFFrontend"
+    let dependencies: [Dependency] = [
+        Dependency { name: "KLF", path: "../../library/KLF" }
+    ]
+}

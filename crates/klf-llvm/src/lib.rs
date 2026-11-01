@@ -79,7 +79,11 @@ pub fn emit_module_with(module: &Module, sources: &DebugSources) -> Result<Strin
         if function.foreign {
             // Two imports of one C symbol, or one the runtime declares,
             // share a single declaration; each call states its own type.
-            let symbol = klf_kir::c_symbol(function.name.as_str());
+            let symbol = if function.abi == klf_kir::FunctionAbi::Ridl {
+                function.name.as_str()
+            } else {
+                klf_kir::c_symbol(function.name.as_str())
+            };
             if !imported.insert(symbol) || RUNTIME_DECLS.contains(&format!("@{symbol}(")) {
                 continue;
             }

@@ -160,7 +160,9 @@ fn declare_functions<'a>(
         }
         let signature = lower::signature(object, function)?;
         let (symbol, linkage) = if function.foreign {
-            let symbol = if function.c_prototype.is_some() {
+            let symbol = if function.abi == klf_kir::FunctionAbi::Ridl {
+                function.name.as_str().to_owned()
+            } else if function.c_prototype.is_some() {
                 klf_kir::c_shim_symbol(function.name.as_str())
             } else {
                 klf_kir::c_symbol(function.name.as_str()).to_owned()

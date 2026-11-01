@@ -20,3 +20,6 @@ klf-target = { path = "../klf-target" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+klf-services = { path = "../klf-services" }

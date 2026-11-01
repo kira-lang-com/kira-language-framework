@@ -44,6 +44,7 @@ mod command;
 mod contract_reach;
 mod depfile;
 mod editor;
+mod editor_project;
 mod format;
 mod module_cache;
 mod module_pruning;
@@ -80,7 +81,7 @@ use klf_services::{
     DefinitionPhase, DefinitionPhaseArguments, DefinitionPhaseResult, DriverRequest, Session,
     select_driver_arguments,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char, c_int};
 
 pub(crate) use session_inputs::{add_inputs, expand_inputs, new_session};
@@ -113,19 +114,43 @@ thread_local! {
 /// the unit's heap baseline for the section 15.6 check.
 pub(crate) struct NativePhases {
     blocks_on_entry: usize,
+    artifact_frame: Cell<bool>,
+    artifact_error: Cell<bool>,
 }
 
 impl NativePhases {
     pub(crate) fn new() -> Self {
+        let blocks_on_entry = klf_native_rt::live_blocks();
+        // SAFETY: selectors 10 and 11 are reserved for Kira frontend frames;
+        // older frontend trampolines answer -1 for an unknown selector.
+        let began = unsafe { klffe_phase(11, 0, 0, 0) };
         Self {
-            blocks_on_entry: klf_native_rt::live_blocks(),
+            blocks_on_entry,
+            artifact_frame: Cell::new(began == 0),
+            artifact_error: Cell::new(began != 0 && began != -1),
         }
+    }
+
+    fn finish_artifacts(&self) {
+        if self.artifact_frame.replace(false) {
+            // SAFETY: a successful begin established this frontend's frame.
+            if unsafe { klffe_phase(10, 0, 0, 0) } != 0 {
+                self.artifact_error.set(true);
+            }
+        }
+    }
+}
+
+impl Drop for NativePhases {
+    fn drop(&mut self) {
+        self.finish_artifacts();
     }
 }
 
 impl PhaseRunner for NativePhases {
     fn balanced(&self) -> bool {
-        klf_native_rt::live_blocks() == self.blocks_on_entry
+        self.finish_artifacts();
+        !self.artifact_error.get() && klf_native_rt::live_blocks() == self.blocks_on_entry
     }
 
     fn run(
@@ -196,17 +221,34 @@ pub(crate) fn take_interrupted() -> Option<(DefinitionPhase, Interrupt)> {
 /// `argv` must hold `argc` NUL-terminated strings, as the C runtime guarantees.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn klffe_main(argc: c_int, argv: *const *const c_char) -> c_int {
+    #[cfg(windows)]
+    let _ = (argc, argv);
     configure_allocator();
     // A driver is a process: a trap in its definition reports the trap and
     // fails with status 1, rather than printing a test outcome and exiting 0.
     klf_native_rt::klfrt_process_start(1);
+    // Windows' narrow CRT argv uses the active code page, not UTF-8. Read the
+    // original wide command line to preserve source paths and arguments.
+    #[cfg(windows)]
+    let arguments = std::env::args_os()
+        .skip(1)
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    #[cfg(not(windows))]
     // SAFETY: the caller promises `argv` holds `argc` NUL-terminated strings.
     let arguments = unsafe { collect_arguments(argc, argv) };
+    #[cfg(windows)]
+    let program = std::env::args_os().next().unwrap_or_default().to_string_lossy().into_owned();
+    #[cfg(not(windows))]
     // SAFETY: as above.
-    bundle::select_for_program(&unsafe { program_name(argc, argv) });
+    let program = unsafe { program_name(argc, argv) };
+    bundle::select_for_program(&program);
     let metadata = read_metadata();
     MATERIALIZES.with(|flags| *flags.borrow_mut() = metadata.materializes);
     let first = arguments.first().map(String::as_str);
+    if first == Some("lsp-project-worker") {
+        return editor_project::worker(&metadata);
+    }
     if metadata.shader.is_some() && !matches!(first, Some("lsp" | "lsp-worker" | "format")) {
         return shader::run(&metadata, &arguments);
     }
@@ -307,6 +349,7 @@ enum Failure {
 
 /// # Safety
 /// `argv` must hold `argc` NUL-terminated strings, as the C runtime guarantees.
+#[cfg(not(windows))]
 unsafe fn program_name(argc: c_int, argv: *const *const c_char) -> String {
     if argv.is_null() || argc < 1 {
         return String::new();
@@ -324,6 +367,7 @@ unsafe fn program_name(argc: c_int, argv: *const *const c_char) -> String {
 
 /// # Safety
 /// `argv` must hold `argc` NUL-terminated strings, as the C runtime guarantees.
+#[cfg(not(windows))]
 unsafe fn collect_arguments(argc: c_int, argv: *const *const c_char) -> Vec<String> {
     let mut arguments = Vec::new();
     if argv.is_null() {
@@ -400,7 +444,8 @@ fn build(
         .target
         .clone()
         .unwrap_or_else(|| metadata.target.clone());
-    if matches!(invocation.emit.as_str(), "bin" | "lib" | "shared" | "run") {
+    let test_compile_only = std::env::var_os("KLF_TEST_COMPILE_ONLY").as_deref() == Some(std::ffi::OsStr::new("1"));
+    if !test_compile_only && matches!(invocation.emit.as_str(), "bin" | "lib" | "shared" | "run") {
         toolchain::check_target(&triple).map_err(Failure::Driver)?;
     }
     // The same status surface `klf` draws, from the same crate: a driver is a
@@ -468,7 +513,7 @@ fn build(
         klf_diag::raw_err!("{warnings}");
     }
     let level = optimization_level(&session);
-    if invocation.emit == "check" {
+    if invocation.emit == "check" || test_compile_only {
         display.end();
         klf_diag::out!("Check: Ok");
         return Ok(0);

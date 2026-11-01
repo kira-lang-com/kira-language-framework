@@ -1,6 +1,6 @@
 //! `klf test`'s unit tests (`KLF-TESTING.md`).
 //!
-//! `<package>/tests/*.klfd` compile into the package's image beside the
+//! `<package>/tests/*.kcore` compile into the package's image beside the
 //! definition, and every `@Test` function in them runs on the VM, each on a
 //! fresh machine. The `klf.test.*` services a test calls compile programs
 //! with the language that image defines, so the package loads once for the
@@ -36,8 +36,21 @@ struct TestState {
 /// compile with its tests.
 pub fn run_unit_tests(session: &mut Session, package: &Path) -> Result<Vec<CaseResult>, String> {
     let tests = test_sources(&package.join("tests"))?;
+    if crate::kira_frontend::is_package(package) && has_kira_tests(&package.join("tests"))? {
+        if !tests.is_empty() {
+            return Err(format!("{} still has KCore unit tests; migrate them to Kira before running the frontend tests", package.display()));
+        }
+        return crate::kira_unit_tests::run(session, package);
+    }
     if tests.is_empty() {
         return Ok(Vec::new());
+    }
+    if crate::kira_frontend::is_package(package) {
+        return Err(format!(
+            "{} has KCore unit tests; migrate them to Kira before running the frontend tests, \
+             refusing to run the tests against a different definition",
+            package.display()
+        ));
     }
     let loaded = load_package(package).map_err(|error| error.to_string())?;
     let mut sources = loaded.sources().to_vec();
@@ -60,7 +73,11 @@ pub fn run_unit_tests(session: &mut Session, package: &Path) -> Result<Vec<CaseR
             if let Err(error) = outcome {
                 state.issues.push(error);
             }
-            let stem = test.name.trim_end_matches(".klfd");
+            let stem = test
+                .name
+                .strip_suffix(".kcore")
+                .or_else(|| test.name.strip_suffix(".klfd"))
+                .unwrap_or(&test.name);
             results.push(CaseResult {
                 name: format!("{stem}::{name}"),
                 mismatches: std::mem::take(&mut state.issues),
@@ -69,6 +86,21 @@ pub fn run_unit_tests(session: &mut Session, package: &Path) -> Result<Vec<CaseR
         }
     }
     Ok(results)
+}
+
+fn has_kira_tests(directory: &Path) -> Result<bool, String> {
+    if !directory.is_dir() {
+        return Ok(false);
+    }
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("cannot read {}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("cannot read {}: {error}", directory.display()))?;
+        if entry.path().extension().is_some_and(|extension| extension == "kira") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn test_sources(directory: &Path) -> Result<Vec<DefinitionSource>, String> {
@@ -81,7 +113,7 @@ fn test_sources(directory: &Path) -> Result<Vec<DefinitionSource>, String> {
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension()
-                .is_some_and(|extension| extension == "klfd")
+                .is_some_and(|extension| extension == "klfd" || extension == "kcore")
         })
         .collect();
     paths.sort();

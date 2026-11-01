@@ -99,7 +99,10 @@ pub fn runner(target: &str) -> Result<PathBuf, String> {
                 .to_owned(),
         );
     };
-    let path = home.join("platforms").join(target).join(runner_file(target));
+    let path = home
+        .join("platforms")
+        .join(target)
+        .join(runner_file(target));
     if path.exists() {
         Ok(path)
     } else {
@@ -117,7 +120,11 @@ pub const RUNNER: &str = "klfvm-run";
 /// The runner's file for `target`: `klfvm-run`, or `klfvm-run.exe` for Windows.
 #[must_use]
 pub fn runner_file(target: &str) -> String {
-    if target.contains("-windows-") { format!("{RUNNER}.exe") } else { RUNNER.to_owned() }
+    if target.contains("-windows-") {
+        format!("{RUNNER}.exe")
+    } else {
+        RUNNER.to_owned()
+    }
 }
 
 /// The distribution `klf` runs from: the one `KLF_HOME` names, or the one
@@ -261,8 +268,12 @@ pub fn configure_cross(command: &mut std::process::Command, target: &str) -> Res
     if target == host_triple() || target.contains("-apple-") {
         return Ok(());
     }
-    let clang = find_clang().ok_or_else(|| format!("building for `{target}` needs the bundled clang"))?;
-    let variable = format!("KLF_SYSROOT_{}", target.to_ascii_uppercase().replace('-', "_"));
+    let clang =
+        find_clang().ok_or_else(|| format!("building for `{target}` needs the bundled clang"))?;
+    let variable = format!(
+        "KLF_SYSROOT_{}",
+        target.to_ascii_uppercase().replace('-', "_")
+    );
     let sysroot = [variable.as_str(), "KLF_SYSROOT"]
         .iter()
         .find_map(|name| std::env::var_os(name).filter(|path| !path.is_empty()))
@@ -527,7 +538,10 @@ pub fn build_distribution(out: &Path, targets: &[String]) -> Result<(), String> 
     };
     create(&out.join("bin"))?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    copy(&executable, &out.join("bin").join(klf_target::executable("klf")))?;
+    copy(
+        &executable,
+        &out.join("bin").join(klf_target::executable("klf")),
+    )?;
 
     // The linker and its two companions, which is all of the LLVM KLF runs. The
     // provisioned tree stays where it is; the distribution carries these files
@@ -536,7 +550,16 @@ pub fn build_distribution(out: &Path, targets: &[String]) -> Result<(), String> 
     // libraries beside it.
     // `ld64.lld` is the Mach-O linker clang runs for `-fuse-ld=lld` on macOS,
     // and `lld-link` the COFF one on Windows; lld reads which from its name.
-    for tool in ["clang", "clang++", "ld.lld", "ld64.lld", "lld-link", "llvm-strip", "llvm-ar", "llvm-nm"] {
+    for tool in [
+        "clang",
+        "clang++",
+        "ld.lld",
+        "ld64.lld",
+        "lld-link",
+        "llvm-strip",
+        "llvm-ar",
+        "llvm-nm",
+    ] {
         // From the RIDL LLVM itself: an installed distribution may predate a
         // tool this list has gained.
         if let Some(from) = klf_target::llvm_tool(tool) {
@@ -554,12 +577,47 @@ pub fn build_distribution(out: &Path, targets: &[String]) -> Result<(), String> 
     let driver = build_in_workspace(driver_archive, host)?;
     copy(&driver, &out.join("bin").join(driver_archive.file_name()))?;
 
+    let contract_directory = out.join("share/klf/ridl");
+    create(&contract_directory)?;
+    let contract = crate::kernel_ridl_module()?;
+    std::fs::write(
+        contract_directory.join("KLFKernel.ridl"),
+        klf_ridl::emit(&contract),
+    )
+    .map_err(|error| format!("cannot write KLFKernel contract: {error}"))?;
+    let platform_targets = distribution_targets(targets, host);
+    crate::kernel_ridl::write_kira_package(out, &platform_targets, &contract)?;
+    let archiver = find_llvm_tool("llvm-ar").ok_or("no bundled llvm-ar for KLF RIDL entries")?;
+    for target in &platform_targets {
+        let directory = out.join("platforms").join(target);
+        create(&directory)?;
+        let object = crate::kernel_ridl::compile_entries(&directory, target)?;
+        let archive = directory.join("libklf_kernel_ridl.a");
+        let result = Command::new(&archiver)
+            .arg("rcs")
+            .arg(&archive)
+            .arg(&object)
+            .output()
+            .map_err(|error| format!("cannot archive KLF RIDL entries: {error}"))?;
+        if !result.status.success() {
+            return Err(format!(
+                "cannot archive KLF RIDL entries: {}",
+                String::from_utf8_lossy(&result.stderr)
+            ));
+        }
+        std::fs::remove_file(&object)
+            .map_err(|error| format!("cannot remove {}: {error}", object.display()))?;
+        let ir = directory.join("klf-kernel-ridl.ll");
+        std::fs::remove_file(&ir)
+            .map_err(|error| format!("cannot remove {}: {error}", ir.display()))?;
+    }
+
     // `clang` is a driver over shared libraries beside it, not a static
     // executable: `libclang-cpp` is the compiler itself and `libLLVM` what it
     // links through. Without these it cannot start.
     copy_toolchain_libraries(out)?;
 
-    for target in targets {
+    for target in &platform_targets {
         let directory = out.join("platforms").join(target);
         create(&directory)?;
         copy(
@@ -581,6 +639,31 @@ pub fn build_distribution(out: &Path, targets: &[String]) -> Result<(), String> 
     Ok(())
 }
 
+// The distribution discovers itself through its host platform, and Kira
+// frontends always run on that host even when their output targets differ.
+fn distribution_targets(targets: &[String], host: &str) -> Vec<String> {
+    let mut platforms = targets.to_vec();
+    platforms.push(host.to_owned());
+    platforms.sort();
+    platforms.dedup();
+    platforms
+}
+
+#[cfg(test)]
+mod distribution_tests {
+    use super::distribution_targets;
+
+    #[test]
+    fn host_platform_is_included_once_for_cross_target_distributions() {
+        let targets = vec!["aarch64-unknown-linux-gnu".to_owned()];
+        let host = "x86_64-pc-windows-msvc";
+        let platforms = distribution_targets(&targets, host);
+        assert_eq!(platforms, ["aarch64-unknown-linux-gnu", host]);
+        assert_eq!(distribution_targets(&platforms, host), platforms);
+        assert_eq!(distribution_targets(&[], host), [host]);
+    }
+}
+
 /// Builds the bytecode runner for `target` with Cargo, once per triple.
 ///
 /// The runner is an artifact rather than a recipe: a sysroot copies it, so
@@ -594,9 +677,6 @@ fn build_runner(target: &str) -> Result<PathBuf, String> {
         target,
     );
     let built = directory.join(runner_file(target));
-    if built.exists() {
-        return Ok(built);
-    }
     configure_cross(&mut command, target)?;
     command.args(["--bin", RUNNER]);
     let output = command

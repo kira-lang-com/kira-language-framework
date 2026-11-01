@@ -1,0 +1,285 @@
+import Foundation
+
+public struct TestSource {
+    let name: String
+    let text: String
+}
+
+@ThreadLocal var klfTestHasDiagnostics: Bool = false
+
+// Compile with the frontend under test and run the resulting bytecode on KLF's VM.
+public function run(source: borrow String) -> Int {
+    let directory = environmentValue("KLF_TEST_DIR")
+    let driver = environmentValue("KLF_TEST_DRIVER")
+    if directory.isEmpty() || driver.isEmpty() { runtimeTrap() }
+    let input = directory + "/input." + environmentValue("KLF_TEST_EXTENSION")
+    let bytecode = directory + "/program.klbc"
+    match writeFileBytes(input, source.utf8()) {
+        Ok -> {}
+        Error(failure) -> { absorb failure
+            runtimeTrap() }
+    }
+    let result = runInputs([input], bytecode)
+    absorb removePath(input)
+    return result
+}
+
+public function runPath(path: borrow String) -> Int {
+    return runPaths([copy path])
+}
+
+public function runPaths(paths: borrow [String]) -> Int {
+    let root = environmentValue("KLF_TEST_PACKAGE")
+    let directory = environmentValue("KLF_TEST_DIR")
+    if root.isEmpty() || directory.isEmpty() { runtimeTrap() }
+    var inputs: [String] = []
+    for path in paths { inputs.append(root + "/" + path) }
+    return runInputs(inputs, directory + "/program.klbc")
+}
+
+public function runFiles(sources: borrow [TestSource]) -> Int {
+    let directory = environmentValue("KLF_TEST_DIR")
+    if directory.isEmpty() { runtimeTrap() }
+    let inputs = writeSources(sources, directory)
+    let value = runInputs(inputs, directory + "/program.klbc")
+    removeSources(sources, directory)
+    return value
+}
+
+function writeSources(sources: borrow [TestSource], directory: borrow String) -> [String] {
+    var inputs: [String] = []
+    for index in 0..sources.count {
+        let source = sources[index]
+        let name = testSourceName(source.name, index)
+        let parts = name.split("/")
+        var parent = copy directory
+        for partIndex in 0..parts.count {
+            if partIndex + 1 < parts.count {
+                parent = parent + "/" + parts[partIndex]
+                if !pathExists(parent) {
+                    match makeDirectory(parent) {
+                        Ok -> {}
+                        Error(failure) -> { absorb failure runtimeTrap() }
+                    }
+                }
+            }
+        }
+        let path = directory + "/" + name
+        match writeFileBytes(path, source.text.utf8()) {
+            Ok -> {}
+            Error(failure) -> { absorb failure
+                runtimeTrap() }
+        }
+        inputs.append(copy path)
+    }
+    return inputs
+}
+
+function removeSources(sources: borrow [TestSource], directory: borrow String) {
+    var directories: [String] = []
+    for index in 0..sources.count {
+        let name = testSourceName(sources[index].name, index)
+        absorb removePath(directory + "/" + name)
+        let parts = name.split("/")
+        var parent = copy directory
+        for partIndex in 0..parts.count {
+            if partIndex + 1 < parts.count {
+                parent = parent + "/" + parts[partIndex]
+                directories.append(copy parent)
+            }
+        }
+    }
+    for path in directories.reversed() { absorb removePath(path) }
+}
+
+function testSourceName(name: borrow String, index: Int) -> String {
+    if name.isEmpty() { return "input" + String(index) + "." + environmentValue("KLF_TEST_EXTENSION") }
+    if name.contains("\\") || name.contains(":") { runtimeTrap() }
+    for part in name.split("/") {
+        if part.isEmpty() || part == "." || part == ".." { runtimeTrap() }
+    }
+    return copy name
+}
+
+public function compiles(source: borrow String) -> Bool {
+    return compilesFiles([TestSource { name: "input." + environmentValue("KLF_TEST_EXTENSION"), text: copy source }])
+}
+
+public function formats(source: borrow String, expected: borrow String) -> Bool {
+    let directory = environmentValue("KLF_TEST_DIR")
+    let driver = environmentValue("KLF_TEST_DRIVER")
+    if directory.isEmpty() || driver.isEmpty() { runtimeTrap() }
+    let input = directory + "/input." + environmentValue("KLF_TEST_EXTENSION")
+    match writeFileBytes(input, source.utf8()) {
+        Ok -> {}
+        Error(failure) -> { absorb failure runtimeTrap() }
+    }
+    let command = ProcessCommand { program: driver, arguments: ["format", input] }
+    for pass in 0..2 {
+        absorb pass
+        let result = match command.run([]) {
+            Ok(result) -> result
+            Error(failure) -> { absorb failure runtimeTrap() return false }
+        }
+        if !result.succeeded() { absorb removePath(input) return false }
+        let bytes = match readFileBytes(input) {
+            Ok(bytes) -> bytes
+            Error(failure) -> { absorb failure absorb removePath(input) return false }
+        }
+        let text = match textFromBytes(bytes) { Some(text) -> text None -> { absorb removePath(input) return false } }
+        if text != expected { absorb removePath(input) return false }
+    }
+    absorb removePath(input)
+    return true
+}
+
+public function runNative(source: borrow String) -> Int {
+    let directory = environmentValue("KLF_TEST_DIR")
+    if directory.isEmpty() || !compileTestFiles([TestSource { name: "input." + environmentValue("KLF_TEST_EXTENSION"), text: copy source }], false) {
+        printError("Frontend failed to compile the native test program")
+        let path = directory + "/diagnostics.txt"
+        match readFileBytes(path) {
+            Ok(bytes) -> { match textFromBytes(bytes) { Some(text) -> printError(text) None -> {} } }
+            Error(failure) -> { absorb failure }
+        }
+        runtimeTrap()
+    }
+    let command = ProcessCommand { program: environmentValue("KLF_TEST_NATIVE"), arguments: [] }
+    let result = match command.run([]) {
+        Ok(result) -> result
+        Error(failure) -> { absorb failure runtimeTrap() return 0 }
+    }
+    return match result.exit {
+        Status(code) -> Int(code)
+        Signalled(signal) -> { printError("native test program was terminated") absorb signal runtimeTrap() return 0 }
+    }
+}
+
+public function compilesFiles(sources: borrow [TestSource]) -> Bool {
+    return compileTestFiles(sources, true)
+}
+
+function compileTestFiles(sources: borrow [TestSource], compileOnly: Bool) -> Bool {
+    klfTestHasDiagnostics = false
+    let directory = environmentValue("KLF_TEST_DIR")
+    let driver = environmentValue("KLF_TEST_DRIVER")
+    if directory.isEmpty() || driver.isEmpty() { runtimeTrap() }
+    let inputs = writeSources(sources, directory)
+    var arguments: [String] = []
+    for input in inputs { arguments.append(copy input) }
+    arguments.append("--emit")
+    arguments.append("bin")
+    arguments.append("-o")
+    arguments.append(environmentValue("KLF_TEST_NATIVE"))
+    var mode = "0"
+    if compileOnly { mode = "1" }
+    let command = ProcessCommand { program: driver, arguments: arguments,
+        environment: [EnvironmentEntry { name: "KLF_TEST_COMPILE_ONLY", value: mode }] }
+    let result = match command.run([]) {
+        Ok(result) -> result
+        Error(failure) -> { absorb failure
+            runtimeTrap()
+            return false }
+    }
+    recordTestDiagnostics(directory, result.errors)
+    removeSources(sources, directory)
+    return result.succeeded()
+}
+
+function recordTestDiagnostics(directory: borrow String, errorBytes: borrow [UN8]) {
+    let errors = match textFromBytes(errorBytes) { Some(text) -> text None -> "" }
+    match writeFileBytes(directory + "/diagnostics.txt", errors.utf8()) {
+        Ok -> klfTestHasDiagnostics = true
+        Error(failure) -> { absorb failure runtimeTrap() }
+    }
+}
+
+public function reported(text: borrow String) -> Bool {
+    if !klfTestHasDiagnostics { return false }
+    let path = environmentValue("KLF_TEST_DIR") + "/diagnostics.txt"
+    let bytes = match readFileBytes(path) { Ok(bytes) -> bytes Error(failure) -> { absorb failure
+        return false } }
+    return match textFromBytes(bytes) { Some(value) -> value.contains(text) None -> false }
+}
+
+public function diagnosed(code: Int, line: Int, column: Int) -> Bool {
+    if !klfTestHasDiagnostics { return false }
+    let path = environmentValue("KLF_TEST_DIR") + "/diagnostics.txt"
+    let bytes = match readFileBytes(path) { Ok(bytes) -> bytes Error(failure) -> { absorb failure
+        return false } }
+    let text = match textFromBytes(bytes) { Some(value) -> value None -> return false }
+    for entry in text.split("\n") {
+        let parts = entry.split(":")
+        if parts.count < 4 { continue }
+        for index in 2..parts.count {
+            let detail = parts[index].trim()
+            if !detail.startsWith("error[") { continue }
+            let number = detail.substring(6, detail.count).before("]").toNumber()
+            let row = parts[index - 2].toNumber()
+            let col = parts[index - 1].toNumber()
+            let n = match number { Some(value) -> value None -> continue }
+            let r = match row { Some(value) -> value None -> continue }
+            let c = match col { Some(value) -> value None -> continue }
+            if n == code && r == line && (column == 0 || c == column) { return true }
+        }
+    }
+    return false
+}
+
+function runInputs(inputs: borrow [String], bytecode: borrow String) -> Int {
+    klfTestHasDiagnostics = false
+    let driver = environmentValue("KLF_TEST_DRIVER")
+    let runner = environmentValue("KLF_TEST_RUNNER")
+    if driver.isEmpty() || runner.isEmpty() { runtimeTrap() }
+    var arguments: [String] = []
+    for input in inputs { arguments.append(copy input) }
+    arguments.append("--emit")
+    arguments.append("klbc")
+    arguments.append("-o")
+    arguments.append(copy bytecode)
+    let compiler = ProcessCommand { program: driver, arguments: arguments }
+    let built = match compiler.run([]) {
+        Ok(result) -> result
+        Error(failure) -> { absorb failure
+            runtimeTrap()
+            return 0 }
+    }
+    recordTestDiagnostics(environmentValue("KLF_TEST_DIR"), built.errors)
+    if !built.succeeded() {
+        for input in inputs { printError("Frontend failed to compile " + input) }
+        match textFromBytes(built.output) { Some(text) -> printError(text) None -> {} }
+        match textFromBytes(built.errors) { Some(text) -> printError(text) None -> {} }
+        runtimeTrap()
+    }
+    let command = ProcessCommand { program: runner, arguments: [bytecode, "--entry", "main"] }
+    let result = match command.run([]) {
+        Ok(result) -> result
+        Error(failure) -> { absorb failure
+            runtimeTrap()
+            return 0 }
+    }
+    if !result.succeeded() { runtimeTrap() }
+    let output = match textFromBytes(result.output) {
+        Some(text) -> text
+        None -> { runtimeTrap()
+            return 0 }
+    }
+    return match testOutcomeReturn(output) {
+        Some(value) -> value
+        None -> { runtimeTrap() return 0 }
+    }
+}
+
+// The outcome is the final nonempty line; earlier lines may be program output.
+function testOutcomeReturn(output: borrow String) -> Optional<Int> {
+    for raw in output.split("\n").reversed() {
+        let line = raw.trim()
+        if line.isEmpty() { continue }
+        if !line.startsWith("RET ") { return .None }
+        return match line.substring(4, line.count).trim().toNumber() {
+            Some(value) -> .Some(Int(value))
+            None -> .None
+        }
+    }
+    return .None
+}

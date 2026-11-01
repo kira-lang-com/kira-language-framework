@@ -39,12 +39,18 @@ pub(crate) fn serve(metadata: &FrontendMetadata) -> i32 {
             program: program.clone(),
         }) as Arc<dyn klf_ide::Formatter>
     });
+    let project_resolver = metadata.declares(klf_defsvc::Hook::Project).then(|| {
+        let program = program.clone();
+        Arc::new(move |path: &std::path::Path| crate::editor_project::resolve(&program, path))
+            as Arc<dyn Fn(&std::path::Path) -> Result<klf_ide::ProjectResolution, klf_ide::ProjectError> + Send + Sync>
+    });
     let config = |analyzer: Arc<dyn Analyzer>| ServerConfig {
         name: metadata.driver.clone(),
         version: metadata.version.clone(),
         languages: Languages::single(metadata.editor_spec()),
         analyzer,
         formatter,
+        project_resolver,
     };
     let served = if UNWINDS {
         let (jobs, queue) = channel();

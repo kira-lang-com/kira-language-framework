@@ -844,6 +844,7 @@ dependencies = [
  "klf-host-process",
  "klf-ridl",
  "klf-rt",
+ "klf-services",
  "klf-target",
  "libc",
 ]

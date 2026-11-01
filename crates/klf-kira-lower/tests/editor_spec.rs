@@ -81,6 +81,17 @@ fn an_editor_member_is_read_into_the_descriptor() {
 }
 
 #[test]
+fn kira_token_class_spelling_matches_kcore() {
+    let (original, _) = descriptor(EDITOR);
+    let (kira, codes) = descriptor(&EDITOR.replace("class =", "tokenClass ="));
+    assert_eq!(kira.unwrap_or_else(|| panic!("Kira spelling fails: {codes:?}")).editor, original.unwrap().editor);
+    let duplicate = EDITOR.replacen("class = .String", "class = .String, tokenClass = .String", 1);
+    let (invalid, codes) = descriptor(&duplicate);
+    assert!(invalid.is_none());
+    assert_eq!(codes, ["KLF-DEF-0002"]);
+}
+
+#[test]
 fn a_language_without_an_editor_member_gets_the_minimal_spec() {
     let (descriptor, _) = descriptor("");
     let descriptor = descriptor.expect("descriptor");

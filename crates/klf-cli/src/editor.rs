@@ -285,14 +285,22 @@ fn definition_language(package: &Path) -> Result<Language, ExitCode> {
         .parse()
         .map_err(|_| fail("klf editor gen: the host target is unknown"))?;
     let mut session = Session::new(target);
-    let definition = LanguageDefinition::load(&mut session, package, Backend::Vm);
+    let descriptor = if klf_driver::is_kira_frontend(package) {
+        let target = session.target().clone();
+        if let Err(message) = klf_driver::check_kira_frontend(&mut session, package, &target) {
+            if session.error_count() > 0 { klf_diag::raw_err!("{}", pipeline::render(&session)); }
+            return Err(fail(&format!("klf editor gen: {message}")));
+        }
+        klf_driver::kira_frontend_descriptor(&mut session, package).ok()
+    } else {
+        LanguageDefinition::load(&mut session, package, Backend::Vm)
+            .map(|definition| definition.metadata().descriptor.clone())
+    };
     if session.error_count() > 0 {
         klf_diag::raw_err!("{}", pipeline::render(&session));
         return Err(ExitCode::FAILURE);
     }
-    let definition =
-        definition.ok_or_else(|| fail("klf editor gen: definition package did not compile"))?;
-    let descriptor = &definition.metadata().descriptor;
+    let descriptor = descriptor.ok_or_else(|| fail("klf editor gen: definition package did not compile"))?;
     Ok(Language {
         name: descriptor.name.clone(),
         driver: descriptor.driver.clone(),
@@ -328,7 +336,7 @@ fn kernel_languages() -> Vec<Language> {
         spec,
     };
     vec![
-        language("klfd", &["klfd"], klf_kernel_ide::specs::klfd()),
+        language("kcore", &["kcore", "klfd", "klfk"], klf_kernel_ide::specs::kcore()),
         language("kir", &["kir"], klf_kernel_ide::specs::kir()),
         language("ridl", &["ridl", "ridlsig"], klf_kernel_ide::specs::ridl()),
     ]
@@ -337,4 +345,16 @@ fn kernel_languages() -> Vec<Language> {
 fn fail(message: &str) -> ExitCode {
     klf_diag::err!("{message}");
     ExitCode::FAILURE
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn kernel_editor_packages_name_kcore_and_accept_legacy_sources() {
+        let languages = super::kernel_languages();
+        let kcore = languages.iter().find(|language| language.name == "kcore").unwrap();
+        assert_eq!(kcore.extensions, ["kcore", "klfd", "klfk"]);
+        assert_eq!(kcore.spec.display_name, "KCore");
+        assert_eq!(kcore.spec.scope, "source.kcore");
+    }
 }

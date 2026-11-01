@@ -206,8 +206,13 @@ pub fn location(snapshot: &Snapshot, span: &FileSpan, encoding: Encoding) -> Opt
 #[must_use]
 pub fn uri(path: &Path) -> Option<Uri> {
     let mut text = String::from("file://");
-    for byte in path.to_string_lossy().bytes() {
-        if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
+    let path = path.to_string_lossy();
+    #[cfg(windows)]
+    let path = path.replace('\\', "/");
+    #[cfg(windows)]
+    if !path.starts_with('/') { text.push('/'); }
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/:-._~".contains(&byte) {
             text.push(char::from(byte));
         } else {
             let _ = write!(text, "%{byte:02X}");
@@ -231,7 +236,14 @@ pub fn path(uri: &Uri) -> Option<PathBuf> {
             bytes.push(byte);
         }
     }
-    Some(PathBuf::from(String::from_utf8(bytes).ok()?))
+    let decoded = String::from_utf8(bytes).ok()?;
+    #[cfg(windows)]
+    let decoded = if decoded.as_bytes().get(2) == Some(&b':') && decoded.starts_with('/') {
+        decoded[1..].to_owned()
+    } else { decoded };
+    #[cfg(windows)]
+    let decoded = decoded.replace('/', "\\");
+    Some(PathBuf::from(decoded))
 }
 
 #[must_use]

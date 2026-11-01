@@ -25,9 +25,10 @@ fn phase_unit(
 ) -> Result<(UnitId, Option<FileId>), String> {
     match arguments {
         DefinitionPhaseArguments::Units { inputs } => {
-            let file = *inputs
-                .first()
-                .ok_or_else(|| "definition units phase has no input file".to_owned())?;
+            let Some(&file) = inputs.first() else {
+                // Project discovery has a session but runs before units exist.
+                return Ok((UnitId::from_u32(u32::MAX), None));
+            };
             let unit = session
                 .unit_id(&DefinitionUnit::new(file))
                 .ok_or_else(|| "definition input unit is not registered".to_owned())?;

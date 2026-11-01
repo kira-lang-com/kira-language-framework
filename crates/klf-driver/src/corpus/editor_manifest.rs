@@ -1,5 +1,5 @@
 //! Reading editor corpus manifests (`KLF-EDITOR.md` Appendix A): each
-//! `corpus/editor/<name>.klfd` holds one `construct ... extends
+//! `corpus/editor/<name>.kcore` or `<name>.klfd` holds one `construct ... extends
 //! EditorCorpus` whose `cases` are `EditorCase` literals, read from the
 //! syntax alone.
 //!
@@ -82,7 +82,7 @@ pub enum EditorCheck {
     },
 }
 
-/// The manifests under `<package>/corpus/editor`, or only `<name>.klfd`;
+/// The manifests under `<package>/corpus/editor`, or only `<name>.kcore` or `<name>.klfd`;
 /// none when the package has no editor corpus.
 ///
 /// # Errors
@@ -102,7 +102,7 @@ pub fn read_editor_corpora(
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension()
-                .is_some_and(|extension| extension == "klfd")
+                .is_some_and(|extension| extension == "klfd" || extension == "kcore")
         })
         .filter(|path| only.is_none_or(|name| path.file_stem().is_some_and(|stem| stem == name)))
         .collect();

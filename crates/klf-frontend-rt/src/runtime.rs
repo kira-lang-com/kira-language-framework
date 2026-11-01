@@ -85,8 +85,10 @@ impl Runtime {
             Self::Vm if klf_target::is_msvc(target) => vec![
                 "-Wl,/INCLUDE:klfvm_invoke",
                 "-Wl,/INCLUDE:klfvm_attach",
+                "-Wl,/INCLUDE:klfrt_process_active",
                 "-Wl,/EXPORT:klfvm_invoke",
                 "-Wl,/EXPORT:klfvm_attach",
+                "-Wl,/EXPORT:klfrt_process_active",
             ],
             Self::Vm if is_windows(target) => vec![
                 "-Wl,-u,klfvm_invoke",

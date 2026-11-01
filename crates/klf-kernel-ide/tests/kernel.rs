@@ -18,7 +18,7 @@ fn workspace() -> PathBuf {
 
 #[test]
 fn the_kernel_specs_are_valid() {
-    for spec in [specs::klfd(), specs::kir(), specs::ridl()] {
+    for spec in [specs::kcore(), specs::klfd(), specs::kir(), specs::ridl()] {
         assert!(
             spec.validate().is_empty(),
             "{}: {:?}",
@@ -30,9 +30,37 @@ fn the_kernel_specs_are_valid() {
 }
 
 #[test]
+fn kcore_and_legacy_sources_share_the_kcore_editor_identity() {
+    let languages = languages();
+    for path in ["definition.kcore", "definition.klfd", "definition.klfk"] {
+        let spec = languages.spec(std::path::Path::new(path));
+        assert_eq!(spec.display_name, "KCore");
+        assert_eq!(spec.scope, "source.kcore");
+        assert!(spec.root_markers.iter().any(|marker| marker == "language.kcore"));
+        assert!(spec.root_markers.iter().any(|marker| marker == "language.klfd"));
+    }
+}
+
+#[test]
+fn legacy_klfk_source_is_analyzed_as_kcore() {
+    let path = std::env::temp_dir().join("klf-legacy-editor.klfk");
+    let analysis = KernelAnalyzer.analyze(
+        &AnalysisRequest {
+            arguments: vec![path.display().to_string()],
+            documents: vec![(path.clone(), "function answer() -> Int { return 42 }".to_owned())],
+            ..AnalysisRequest::default()
+        },
+        &Cancellation::new(),
+    );
+    let file = analysis.file(&path).expect("legacy source is analyzed");
+    let outline = analysis.facts.document_symbols(file);
+    assert_eq!(analysis.facts.symbol(outline[0].entity).unwrap().name, "answer");
+}
+
+#[test]
 fn a_package_is_checked_with_its_open_documents() {
     let root = workspace().join("definitions/mini");
-    let reader = root.join("reader.klfd");
+    let reader = root.join("reader.kcore");
     let broken = "function name_end() -> Int {\n    return missing\n}\n";
     let analysis = KernelAnalyzer.analyze(
         &AnalysisRequest {
@@ -44,7 +72,7 @@ fn a_package_is_checked_with_its_open_documents() {
         &Cancellation::new(),
     );
     assert_eq!(analysis.failure, None);
-    let file = analysis.file(&reader).expect("reader.klfd is analyzed");
+    let file = analysis.file(&reader).expect("reader.kcore is analyzed");
     assert!(
         analysis
             .diagnostics
@@ -54,8 +82,8 @@ fn a_package_is_checked_with_its_open_documents() {
         analysis.diagnostics
     );
     let language = analysis
-        .file(&root.join("language.klfd"))
-        .expect("language.klfd is analyzed");
+        .file(&root.join("language.kcore"))
+        .expect("language.kcore is analyzed");
     let outline = analysis.facts.document_symbols(language);
     assert_eq!(outline.len(), 1);
     assert_eq!(
@@ -66,6 +94,37 @@ fn a_package_is_checked_with_its_open_documents() {
         Some("Mini")
     );
     assert!(outline[0].children.len() > 4, "members of the construct");
+}
+
+#[test]
+fn kcore_package_is_checked_with_its_open_documents() {
+    let root = std::env::temp_dir().join(format!("klf-kcore-editor-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("create package");
+    let mini = workspace().join("definitions/mini");
+    std::fs::copy(mini.join("language.kcore"), root.join("language.kcore")).expect("language");
+    std::fs::copy(mini.join("reader.kcore"), root.join("reader.kcore")).expect("reader");
+    let reader = root.join("reader.kcore");
+    let analysis = KernelAnalyzer.analyze(
+        &AnalysisRequest {
+            directory: root.clone(),
+            arguments: vec![root.display().to_string()],
+            documents: vec![(
+                reader.clone(),
+                "function name_end() -> Int { return missing }".to_owned(),
+            )],
+            kir: false,
+        },
+        &Cancellation::new(),
+    );
+    let file = analysis.file(&reader).expect("reader is analyzed");
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.file == file)
+    );
+    assert!(analysis.file(&root.join("language.kcore")).is_some());
+    std::fs::remove_dir_all(root).expect("remove package");
 }
 
 #[test]

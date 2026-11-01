@@ -19,7 +19,7 @@ use klf_source::Span;
 /// The symbol follows from the service name: drop the `klf.` prefix and turn
 /// the remaining dots into underscores. The two `klf.io.*` wrappers predate
 /// that rule and keep their shorter spellings.
-fn wrapper_name(service_name: &str) -> Option<String> {
+pub(crate) fn wrapper_name(service_name: &str) -> Option<String> {
     let suffix = service_name.strip_prefix("klf.")?;
     wrapper_types_of(service_name)?;
     let name = match service_name {
@@ -556,7 +556,7 @@ pub(crate) fn parse_spec(spec: &str) -> (Vec<FeType>, FeType) {
     (params, spec_type(result.as_bytes()[0]))
 }
 
-fn wrapper_types(service: &KernelService) -> Option<(Vec<FeType>, FeType)> {
+pub(crate) fn wrapper_types(service: &KernelService) -> Option<(Vec<FeType>, FeType)> {
     wrapper_types_of(service.name.as_str())
 }
 

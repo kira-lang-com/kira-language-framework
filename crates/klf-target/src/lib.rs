@@ -106,17 +106,32 @@ pub fn cargo_build(
         command = std::process::Command::new(cargo);
     }
     command.args(["build", "--quiet", "--release", "-p", package]);
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
+        || workspace.join("target"),
+        |path| {
+            let path = std::path::PathBuf::from(path);
+            if path.is_absolute() {
+                path
+            } else {
+                workspace.join(path)
+            }
+        },
+    );
     if target == host_triple() {
-        return (command, workspace.join("target/release"));
+        return (command, target_dir.join("release"));
     }
     if is_tessera(target) {
         command
             .args(["-Z", "build-std=std", "-Z", "json-target-spec", "--target"])
-            .arg(workspace.join("kernel/targets").join(format!("{target}.json")));
+            .arg(
+                workspace
+                    .join("kernel/targets")
+                    .join(format!("{target}.json")),
+            );
     } else {
         command.args(["--target", target]);
     }
-    (command, workspace.join("target").join(target).join("release"))
+    (command, target_dir.join(target).join("release"))
 }
 
 /// Where KLF keeps what it caches between runs on this machine: `KLF_CACHE`
@@ -241,7 +256,10 @@ pub fn llvm_root() -> Option<std::path::PathBuf> {
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                let key = name.split(['.', '-']).map(|part| part.parse().unwrap_or(0)).collect();
+                let key = name
+                    .split(['.', '-'])
+                    .map(|part| part.parse().unwrap_or(0))
+                    .collect();
                 (key, root)
             })
             .collect();
@@ -272,8 +290,14 @@ mod tests {
     #[test]
     fn a_tessera_triple_works_in_its_linux_triple() {
         assert!(is_tessera("aarch64-unknown-tessera"));
-        assert_eq!(machine_triple("aarch64-unknown-tessera"), "aarch64-unknown-linux-gnu");
-        assert_eq!(machine_triple("x86_64-unknown-linux-gnu"), "x86_64-unknown-linux-gnu");
+        assert_eq!(
+            machine_triple("aarch64-unknown-tessera"),
+            "aarch64-unknown-linux-gnu"
+        );
+        assert_eq!(
+            machine_triple("x86_64-unknown-linux-gnu"),
+            "x86_64-unknown-linux-gnu"
+        );
         let target: Target = "aarch64-unknown-tessera".parse().unwrap();
         assert_eq!(target.pointer_width(), 64);
     }

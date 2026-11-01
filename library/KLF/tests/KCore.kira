@@ -1,0 +1,56 @@
+import Foundation
+
+struct TestArtifact {
+    let name: String
+    let values: [Int]
+}
+
+@Test
+function testOutcomeUsesFinalNonemptyLine() {
+    expect!(testOutcomeReturn("RET 999\nRET 42\n\n").unwrap() == 42)
+    let trapped = match testOutcomeReturn("RET 999\nTRAP failure\n") {
+        Some(value) -> { absorb value false }
+        None -> true
+    }
+    let invalid = match testOutcomeReturn("RET invalid\n") {
+        Some(value) -> { absorb value false }
+        None -> true
+    }
+    expect!(trapped)
+    expect!(invalid)
+}
+
+@Test
+function nestedArtifactFramesKeepAndReleaseValues() {
+    beginFrontendArtifacts()
+    let outer = artifactHandle(TestArtifact { name: "outer", values: [17, 25] })
+    beginFrontendArtifacts()
+    let inner = artifactHandle(TestArtifact { name: "inner", values: [2] })
+    let innerValue: TestArtifact = artifactValue<TestArtifact>(inner)
+    expect!(innerValue.name == "inner")
+    endFrontendArtifacts()
+    let value: TestArtifact = artifactValue<TestArtifact>(outer)
+    expect!(value.name == "outer")
+    expect!(value.values[0] + value.values[1] == 42)
+    endFrontendArtifacts()
+}
+
+@Test
+function textHelpersAndRidlServices() {
+    let text = "hé"
+    expect!(utf8Count(text) == 3)
+    expect!(utf8Byte(text, 1) == 195)
+    expect!(utf8Slice(text, 1, 3) == "é")
+    expect!(joinText([text, "!"]) == "hé!")
+    expect!(decimalText(-42) == "-42")
+    let handle: Optional<Session> = .Some(Session(42))
+    expect!(handle.unwrap().raw == 42)
+    let directory = driverDirectory()
+    expect!(utf8Count(directory) > 0)
+    expect!(driverPathExists(directory))
+    expect!(putc(4294967361) == 65)
+    expect!(putc(321) == 65)
+    expect!(format_text("") == 9223372036854775807)
+    expect!(format_text(text) == 9223372036854775807)
+    expect!(klfsvc_math_binary(20, 4611686018427387904, 4613937818241073152) == 4620693217682128896)
+}

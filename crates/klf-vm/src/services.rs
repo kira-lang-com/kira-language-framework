@@ -103,9 +103,9 @@ pub fn kernel_services_with_source_and_diagnostics(
     (capabilities, sink, diagnostics)
 }
 
-/// A service argument read as a signed word, saturating rather than wrapping.
+/// Interpret a service argument's bits as a signed word.
 fn word(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
+    i64::from_ne_bytes(value.to_ne_bytes())
 }
 
 /// Records one reported diagnostic and echoes it on the service sink, in the

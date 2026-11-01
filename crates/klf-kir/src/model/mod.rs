@@ -393,8 +393,8 @@ pub struct Function {
     pub linkage: Linkage,
     pub abi: FunctionAbi,
     pub nounwind: bool,
-    /// A platform-C foreign import (section 26): the name is the C symbol, the
-    /// body is empty, and `call.foreign` resolves its signature here.
+    /// A bodyless import. Platform imports name C symbols; RIDL imports retain
+    /// their full language-level name for binding to a separately built module.
     pub foreign: bool,
     /// What the function is at the C seam (section 26.2), when C calls it or
     /// it is a foreign import whose parameters are not plain words.

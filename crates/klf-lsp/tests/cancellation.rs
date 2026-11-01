@@ -77,6 +77,7 @@ impl Client {
                     languages: Languages::single(EditorSpec::minimal("toy")),
                     analyzer,
                     formatter: None,
+                    project_resolver: None,
                 },
             )
         });

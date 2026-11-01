@@ -77,10 +77,15 @@ pub fn build_sysroot(
             out.display()
         ));
     }
-    let loaded = crate::language::load_package(package).map_err(|error| error.to_string())?;
-    let definition = LanguageDefinition::from_package(session, &loaded, Backend::Vm)
-        .ok_or_else(|| format!("cannot compile definition package {}", package.display()))?;
-    let descriptor = definition.descriptor().clone();
+    let (loaded, descriptor) = if crate::kira_frontend::is_package(package) {
+        let (sources, metadata) = crate::kira_frontend::read_package(session, package)?;
+        (sources, metadata.descriptor)
+    } else {
+        let sources = crate::language::load_package(package).map_err(|error| error.to_string())?;
+        let definition = LanguageDefinition::from_package(session, &sources, Backend::Vm)
+            .ok_or_else(|| format!("cannot compile definition package {}", package.display()))?;
+        (sources, definition.descriptor().clone())
+    };
 
     let staging = staging_directory(out)?;
     let result = if descriptor.shader.is_some() {
@@ -178,7 +183,9 @@ fn assemble(
     } else {
         descriptor.driver.clone()
     };
-    let driver = staging.join("bin").join(&driver_name);
+    let driver = staging
+        .join("bin")
+        .join(klf_target::executable(&driver_name));
     progress!("build driver {}", driver_name);
     build_frontend(session, package, Some(&driver), &host_target, &[], profile)?;
 
@@ -220,6 +227,8 @@ fn assemble(
         run_std(&driver, &std_sources, triple, &library)?;
         let shared = native.join(if triple.contains("-apple-") {
             "libstd.dylib"
+        } else if triple.contains("-windows-") {
+            "libstd.dll"
         } else {
             "libstd.so"
         });
@@ -262,7 +271,9 @@ fn assemble(
                 .is_some_and(|parent| parent.ends_with(host))
         })
         .cloned();
-    let runner = staging.join("bin").join(klf_target::executable(&format!("{driver_name}-run")));
+    let runner = staging
+        .join("bin")
+        .join(klf_target::executable(&format!("{driver_name}-run")));
     link_runner(&runner, host_std.as_deref(), descriptor.entry)?;
 
     let triples: Vec<&str> = targets.iter().map(Target::triple).collect();
@@ -355,7 +366,9 @@ fn install_surface(
 }
 
 fn std_sources(root: &Path, extensions: &[String]) -> Result<StdSources, String> {
-    let root = std::fs::canonicalize(root).map(klf_target::plain_path).unwrap_or_else(|_| root.to_path_buf());
+    let root = std::fs::canonicalize(root)
+        .map(klf_target::plain_path)
+        .unwrap_or_else(|_| root.to_path_buf());
     let mut sources = Vec::new();
     let include = root.join("include");
     let mut headers = Vec::new();
@@ -483,11 +496,18 @@ fn install_std_sources(std_root: &Path, sources: &StdSources, to: &Path) -> Resu
         // A source outside `std_root` has no place under `to`. Joining it would
         // yield the source itself, and copying a file onto itself truncates it.
         let relative = source.strip_prefix(std_root).map_err(|_| {
-            format!("std source {} is outside {}", source.display(), std_root.display())
+            format!(
+                "std source {} is outside {}",
+                source.display(),
+                std_root.display()
+            )
         })?;
         let target = to.join(relative);
         if target == *source {
-            return Err(format!("std source {} would be copied onto itself", source.display()));
+            return Err(format!(
+                "std source {} would be copied onto itself",
+                source.display()
+            ));
         }
         if let Some(parent) = target.parent() {
             create(parent)?;
@@ -588,7 +608,7 @@ mod tests {
                 .expect("create fixture directory");
             std::fs::write(&file, text).expect("write fixture file");
         }
-        std::fs::canonicalize(&root).expect("canonical fixture root")
+        klf_target::plain_path(std::fs::canonicalize(&root).expect("canonical fixture root"))
     }
 
     fn relative(root: &Path, paths: &[PathBuf]) -> Vec<String> {
@@ -599,6 +619,7 @@ mod tests {
                     .expect("under root")
                     .display()
                     .to_string()
+                    .replace('\\', "/")
             })
             .collect()
     }

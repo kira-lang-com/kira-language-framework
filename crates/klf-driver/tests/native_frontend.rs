@@ -38,7 +38,7 @@ fn hosted(package: &Path, name: &str, source: &str) -> String {
 fn native(package: &Path, name: &str, source: &str, tag: &str) -> String {
     let directory = std::env::temp_dir().join(format!("klf-frontend-test-{tag}"));
     std::fs::create_dir_all(&directory).expect("temp directory");
-    let binary = directory.join(tag);
+    let binary = directory.join(klf_target::executable(tag));
 
     let mut session = session();
     let target = "aarch64-apple-darwin".parse().expect("valid target");
@@ -89,6 +89,82 @@ fn native_frontend_matches_the_vm_for_mini() {
         klf_driver::run(&module, "answer", &[], Backend::Vm).expect("runs"),
         klf_vm::Outcome::Return(Some(42))
     );
+}
+
+#[test]
+fn native_frontend_builds_kcore_sources() {
+    if !toolchain_available() {
+        eprintln!("skipping: no provisioned clang");
+        return;
+    }
+    let package = std::env::temp_dir().join(format!("klf-native-kcore-{}", std::process::id()));
+    std::fs::create_dir_all(&package).expect("create package");
+    let original = workspace().join("definitions/mini");
+    for stem in ["language", "reader"] {
+        std::fs::copy(
+            original.join(format!("{stem}.klfd")),
+            package.join(format!("{stem}.kcore")),
+        )
+        .expect("copy source");
+    }
+    let source = "answer 40";
+    assert_eq!(
+        native(&package, "input.mini", source, "kcore"),
+        hosted(&package, "input.mini", source)
+    );
+    std::fs::remove_dir_all(package).expect("remove package");
+}
+
+#[cfg(all(target_os = "windows", target_env = "msvc"))]
+#[test]
+fn ridl_entry_calls_the_native_kernel_service() {
+    use klf_ridl::module::ItemKind;
+    use std::collections::BTreeMap;
+
+    let directory = std::env::temp_dir().join(format!("klf-native-ridl-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("create directory");
+    let mut module = klf_driver::kernel_ridl_module().expect("kernel contract");
+    module.items.retain(|item| matches!(&item.kind, ItemKind::Function(function) if function.name == "klfsvc_math_binary"));
+    assert_eq!(module.items.len(), 1);
+    let name = "klfsvc_math_binary".to_owned();
+    let callees = BTreeMap::from([(name.clone(), name.clone())]);
+    let caller = klf_ridl::bindgen::caller_symbol(&module.name, &name);
+    let callers = BTreeMap::from([(name, caller.clone())]);
+    let target = klf_driver::host_triple();
+    let entries =
+        klf_ridl::llvm::entries(&module, &callees, &BTreeMap::new(), target, &str::to_owned)
+            .expect("entries");
+    let adapters = klf_ridl::llvm::adapters(&module, &callers, target, &str::to_owned, false)
+        .expect("adapters");
+    let entry_path = directory.join("entry.ll");
+    let adapter_path = directory.join("adapter.ll");
+    let caller_path = directory.join("caller.c");
+    let binary = directory.join("client.exe");
+    std::fs::write(&entry_path, entries).expect("write entries");
+    std::fs::write(&adapter_path, adapters).expect("write adapters");
+    std::fs::write(&caller_path, format!("extern long long {caller}(long long, long long, long long);\nint main(void) {{ return {caller}(20, 0x4000000000000000LL, 0x4008000000000000LL) == 0x4020000000000000LL ? 0 : 1; }}\n")).expect("write caller");
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map_or_else(|| workspace().join("target"), PathBuf::from);
+    let archive = target_dir.join("debug/klf_native_rt.lib");
+    let clang = klf_driver::find_clang().expect("bundled clang");
+    let output = Command::new(clang)
+        .args(["-fuse-ld=lld"])
+        .arg(&entry_path)
+        .arg(&adapter_path)
+        .arg(&caller_path)
+        .arg(&archive)
+        .args(["-luserenv", "-lntdll", "-lbcrypt", "-ladvapi32", "-lws2_32"])
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .expect("link client");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(Command::new(binary).status().expect("run client").success());
+    std::fs::remove_dir_all(directory).expect("remove directory");
 }
 
 #[test]

@@ -57,7 +57,7 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
             }
         }
     }
-    if !unit_only && klf_driver::has_corpus(package) {
+    if !unit_only && (corpus.is_some() || klf_driver::has_corpus(package)) {
         let others: Vec<&Path> = languages.iter().map(Path::new).collect();
         match klf_driver::test_package(
             &mut session,

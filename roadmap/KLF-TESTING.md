@@ -24,7 +24,19 @@ A unit test compiles with the definition, so it reaches the definition's helpers
 
 ## 2. Test files
 
-Tests live in `<package>/tests/*.klfd`. A normal build of the package MUST NOT include them: `tests/` directly under the package root is excluded the way `std/` and `corpus/` are. A test file starts with `import Testing`, which gives the unit the module's declarations (section 4). `import Testing` is the only import besides `KLF` that KLF Kira accepts.
+Tests live in `<package>/tests/*.kcore` or `<package>/tests/*.klfd` during the KCore source-file migration. A normal build of the package MUST NOT include them: `tests/` directly under the package root is excluded the way `std/` and `corpus/` are. A test file starts with `import Testing`, which gives the unit the module's declarations (section 4). `import Testing` is the only import besides `KLF` that KLF Kira accepts.
+
+A Kira-written frontend instead puts Kira tests in `tests/*.kira` and imports
+`KLF` for the shared frontend test helpers. `klf test` builds that frontend,
+runs its Kira tests with the resulting driver, and uses the first declared
+source extension for unnamed test inputs. These tests may call the frontend's
+Kira helpers directly. A package must migrate its KCore tests before running
+its Kira frontend tests; the driver must not silently run them against a
+different definition.
+For Kira frontend tests, `compiles` runs the frontend with its ordinary
+executable compilation mode and stops after the frontend phases, before
+checking for a native linker or emitting an executable. The test helper sets
+`KLF_TEST_COMPILE_ONLY=1` only on that compiler subprocess.
 
 ```
 import Testing

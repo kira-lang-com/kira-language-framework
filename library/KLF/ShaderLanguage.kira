@@ -1,0 +1,38 @@
+import Foundation
+
+public enum ShaderTarget { Msl Spirv Hlsl Glsl430 Wgsl Ksl }
+public enum LayoutRule { Std140 Std430 Scalar Msl Explicit }
+public enum ShaderCapability {
+    Float16 Float64 Int64 Int64Atomics ImageAtomics CubeArray Multisampled
+    SampleShading ClipDistances DualSourceBlending StorageImageReadWrite
+}
+
+public struct LayoutDefaults {
+    let uniform: LayoutRule
+    let storage: LayoutRule
+    let immediate: LayoutRule
+}
+
+public struct DiagnosticKey {
+    let key: String
+    let code: Int
+}
+
+public construct ShaderLanguage {
+    @Required let name: String
+    @Required let driver: String
+    @Required let version: String
+    @Required let extensions: [String]
+    @Required let layouts: LayoutDefaults
+    @Required let keys: [DiagnosticKey]
+    let libraryRoot: String { return "" }
+    let capabilities: [ShaderCapability] { return [] }
+    let targets: [ShaderTarget] { return [.Msl, .Spirv, .Hlsl, .Glsl430, .Wgsl] }
+    let flags: [DriverFlag] { return [] }
+    let diagnostics: [DiagnosticSpec] { return [] }
+
+    @Required function units(session: Session, inputs: borrow [SourceFile]) -> [Unit]
+    @Required function parse(session: Session, unit: Unit, program: borrow [SourceFile]) -> Tree
+    @Required function elaborate(session: Session, unit: Unit, tree: Tree) -> Program
+    @Required function lower(session: Session, unit: Unit, program: Program) -> ShaderModule
+}

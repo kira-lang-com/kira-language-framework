@@ -23,8 +23,10 @@ fn main() {
         (_, "windows", "msvc") => &[
             "/INCLUDE:klfvm_invoke",
             "/INCLUDE:klfvm_attach",
+            "/INCLUDE:klfrt_process_active",
             "/EXPORT:klfvm_invoke",
             "/EXPORT:klfvm_attach",
+            "/EXPORT:klfrt_process_active",
         ],
         (_, "windows", _) => &[
             "-Wl,-u,klfvm_invoke",

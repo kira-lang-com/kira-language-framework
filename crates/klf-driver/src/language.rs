@@ -44,7 +44,7 @@ impl fmt::Display for PackageError {
             }
             Self::Empty { root } => write!(
                 formatter,
-                "{} contains no .klfd definition sources",
+                "{} contains no .kcore or .klfd definition sources",
                 root.display()
             ),
         }
@@ -133,7 +133,7 @@ fn collect_sources(
             collect_sources(root, &path, sources)?;
         } else if path
             .extension()
-            .is_some_and(|extension| extension == "klfd")
+            .is_some_and(|extension| extension == "klfd" || extension == "kcore")
         {
             let text = fs::read_to_string(&path).map_err(|error| PackageError::Read {
                 path: path.clone(),

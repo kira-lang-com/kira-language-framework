@@ -87,24 +87,42 @@ pub fn build_frontend(
     languages: &[&Path],
     profile: Profile,
 ) -> Result<BuiltFrontend, String> {
+    if crate::kira_frontend::is_package(root) {
+        return crate::kira_frontend::build(session, root, output, target, languages, profile);
+    }
     progress!("read definition package");
     let package = read_package(root)?;
     let built = compile(session, root, &package, 0, target, profile)?;
+    if !built.shader && !languages.is_empty() {
+        return Err("additional language packages require a shader frontend".to_owned());
+    }
+    if built.shader && languages.iter().any(|language| crate::kira_frontend::is_package(language)) {
+        let binary = output.map_or_else(|| PathBuf::from(&built.driver), Path::to_path_buf);
+        crate::kira_frontend::build_with_kcore_primary(
+            session, root, &built.object, &binary, target, languages, profile,
+        )?;
+        return Ok(BuiltFrontend { binary, driver: built.driver });
+    }
     let mut objects = vec![built.object];
     if built.shader {
-        let own = root.canonicalize().ok();
+        let mut seen = vec![root.canonicalize().map_err(|error| format!("{}: {error}", root.display()))?];
         for language in languages {
             let language: &Path = language;
-            if language.canonicalize().ok() == own {
+            let canonical = language.canonicalize().map_err(|error| format!("{}: {error}", language.display()))?;
+            if seen.contains(&canonical) {
                 return Err(format!(
-                    "`{}` names the package being built; a frontend holds one definition once",
+                    "`{}` names a language already linked into this frontend",
                     language.display()
                 ));
             }
+            seen.push(canonical);
             let package = read_package(language)?;
             let object = cached(&package, objects.len(), target, profile, |index| {
-                compile(session, language, &package, index, target, profile)
-                    .map(|built| built.object)
+                let built = compile(session, language, &package, index, target, profile)?;
+                if !built.shader {
+                    return Err(format!("{} is not a shader language", language.display()));
+                }
+                Ok(built.object)
             })?;
             objects.push(object);
         }
@@ -120,6 +138,22 @@ pub fn build_frontend(
         binary,
         driver: built.driver,
     })
+}
+
+/// Compile a KCore shader out for a Kira-written shader driver.
+pub(crate) fn compile_shader_out(
+    session: &mut Session,
+    root: &Path,
+    index: usize,
+    target: &Target,
+    profile: Profile,
+) -> Result<Vec<u8>, String> {
+    let package = read_package(root)?;
+    let built = compile(session, root, &package, index, target, profile)?;
+    if !built.shader {
+        return Err(format!("{} is not a shader language", root.display()));
+    }
+    Ok(built.object)
 }
 
 /// One definition compiled into its object of a frontend binary.
@@ -314,6 +348,15 @@ fn link(objects: &[Vec<u8>], binary: &Path, driver: &str) -> Result<(), String> 
         std::fs::write(&path, object).map_err(|error| error.to_string())?;
         paths.push(path);
     }
+
+    let ridl_object = match crate::kernel_ridl::compile_entries(&directory, host_triple()) {
+        Ok(object) => object,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&directory);
+            return Err(error);
+        }
+    };
+    paths.push(ridl_object);
 
     let linked = crate::kernel::link(&paths, &[runtime], binary, host_triple());
     let _ = std::fs::remove_dir_all(&directory);

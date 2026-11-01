@@ -1,0 +1,83 @@
+import Foundation
+
+public enum TokenClass {
+    Comment DocComment String Character Escape Number Boolean Keyword Operator Punctuation
+    Namespace Type Struct Class Enum Interface TypeParameter Function Method Macro Variable
+    Parameter Property EnumMember Constant Label Annotation Builtin Error
+}
+
+public enum TokenModifier {
+    Declaration Definition Readonly Static Deprecated Abstract Async Modification Documentation
+    DefaultLibrary Mutable Consuming Borrowed Unmanaged Control Contextual Injected Inactive
+    Unresolved Resource StageIo Access Path
+}
+
+public enum AutoCloseContext { String Comment }
+public enum EnterAction { None Indent IndentOutdent Outdent }
+
+public struct BlockComment { let open: String  let close: String  let nests: Bool }
+public struct BracketPair { let open: String  let close: String }
+public struct StringForm {
+    let open: String
+    let close: String
+    let escape: Optional<String>
+    let multiline: Bool
+    let raw: Bool
+    let interpolation: Optional<BracketPair>
+    let tokenClass: TokenClass
+}
+public struct KeywordGroup { let tokenClass: TokenClass  let modifiers: [TokenModifier]  let words: [String] }
+public struct AutoClosePair { let open: String  let close: String  let notIn: [AutoCloseContext] }
+public struct IndentRules { let unit: String  let increase: Optional<String>  let decrease: Optional<String> }
+public struct OnEnterRule { let before: String  let after: Optional<String>  let action: EnterAction  let append: String }
+public struct RegionMarkers { let start: String  let end: String }
+public struct GrammarRef { let repository: String  let revision: String  let path: String }
+
+public struct EditorSpec {
+    let displayName: String
+    let scope: String
+    let fileNames: [String] = []
+    let rootMarkers: [String] = []
+    let firstLine: Optional<String> = .None
+    let lineComments: [String]
+    let blockComments: [BlockComment]
+    let docComments: [String] = []
+    let strings: [StringForm]
+    let numbers: [String]
+    let identifier: String
+    let keywords: [KeywordGroup]
+    let operators: [String]
+    let brackets: [BracketPair]
+    let autoClose: [AutoClosePair]
+    let indent: IndentRules
+    let onEnter: [OnEnterRule] = []
+    let regionMarkers: Optional<RegionMarkers> = .None
+    let annotation: Optional<String> = .None
+    let preprocessor: Optional<String> = .None
+    let grammar: Optional<GrammarRef> = .None
+    let icon: String = ""
+}
+
+public function editorSymbolText(entity: Int, field: Int, text: borrow String) -> Int {
+    return klfsvc_editor_symbol_text(entity, field, text.data, text.count)
+}
+
+public function editorTypeAt(file: Int, start: Int, end: Int, entity: Int, text: borrow String) -> Int {
+    return klfsvc_editor_type_at(file, start, end, entity, text.data, text.count)
+}
+
+public function editorValueAt(file: Int, start: Int, end: Int, text: borrow String) -> Int {
+    return klfsvc_editor_value_at(file, start, end, text.data, text.count)
+}
+
+public function editorHint(file: Int, offset: Int, kind: Int, padding: Int, target: Int, text: borrow String) -> Int {
+    return klfsvc_editor_hint(file, offset, kind, padding, target, text.data, text.count)
+}
+
+public function editorLink(file: Int, start: Int, end: Int, kind: Int, entity: Int, text: borrow String) -> Int {
+    return klfsvc_editor_link(file, start, end, kind, entity, text.data, text.count)
+}
+
+public function editorRunnable(file: Int, start: Int, end: Int, kind: Int, text: borrow String) -> Int {
+    return klfsvc_editor_runnable(file, start, end, kind, text.data, text.count)
+}

@@ -16,6 +16,7 @@ pub fn command(args: &[String]) -> ExitCode {
         languages: languages(),
         analyzer: Arc::new(KernelAnalyzer),
         formatter: None,
+        project_resolver: None,
     };
     match klf_lsp::serve(config) {
         Ok(()) => ExitCode::SUCCESS,

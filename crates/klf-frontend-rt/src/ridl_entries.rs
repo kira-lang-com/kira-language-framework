@@ -17,11 +17,13 @@ pub(crate) fn source(
         .iter()
         .map(|(path, function)| (path.clone(), defined(function)))
         .collect();
-    klf_ridl::llvm::entries(
-        &surface.module,
-        &callees,
-        &surface.destroys,
-        target,
-        defined,
-    )
+    if std::env::var_os("KLF_FRONTEND_RIDL_RUNTIME").is_some() {
+        klf_ridl::llvm::entries_requiring_runtime(
+            &surface.module, &callees, &surface.destroys, target, defined,
+        )
+    } else {
+        klf_ridl::llvm::entries(
+            &surface.module, &callees, &surface.destroys, target, defined,
+        )
+    }
 }

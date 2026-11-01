@@ -18,10 +18,15 @@ use std::path::Path;
 /// Compiles the package at `root` with the open documents in place of their
 /// files, the way `klf check` does.
 pub(crate) fn package(builder: &mut Builder<'_>, root: &Path) {
+    let marker = if root.join("language.kcore").is_file() {
+        root.join("language.kcore")
+    } else {
+        root.join(PACKAGE_MARKER)
+    };
     let package = match load_package(root) {
         Ok(package) => package,
         Err(error) => {
-            let file = builder.file(&root.join(PACKAGE_MARKER));
+            let file = builder.file(&marker);
             builder.error(
                 file,
                 0,
@@ -56,13 +61,13 @@ pub(crate) fn package(builder: &mut Builder<'_>, root: &Path) {
         LanguageDefinition::from_package(&mut session, &package, Backend::Vm).is_some()
     }));
     if compiled.is_err() {
-        let file = builder.file(&root.join(PACKAGE_MARKER));
+        let file = builder.file(&marker);
         builder.error(
             file,
             0,
             0,
             "KLF-DEF-0003",
-            "the KLF Kira frontend stopped unexpectedly".to_owned(),
+            "the KCore frontend stopped unexpectedly".to_owned(),
         );
     }
     let files: Vec<Option<FileId>> = session

@@ -316,6 +316,7 @@ impl Reader<'_> {
                 "raw",
                 "interpolation",
                 "class",
+                "tokenClass",
             ],
         )?;
         Some(StringForm {
@@ -329,15 +330,15 @@ impl Reader<'_> {
             interpolation: self.field(&fields, "interpolation", span, |reader, value| {
                 reader.optional(value, Self::bracket_pair)
             })?,
-            class: self.field(&fields, "class", span, Self::token_class)?,
+            class: self.token_class_field(&fields, span)?,
         })
     }
 
     fn keyword_group(&mut self, value: &Expr) -> Option<KeywordGroup> {
         let span = value.span;
-        let fields = self.record(value, "KeywordGroup", &["class", "modifiers", "words"])?;
+        let fields = self.record(value, "KeywordGroup", &["class", "tokenClass", "modifiers", "words"])?;
         Some(KeywordGroup {
-            class: self.field(&fields, "class", span, Self::token_class)?,
+            class: self.token_class_field(&fields, span)?,
             modifiers: self.field(&fields, "modifiers", span, |reader, value| {
                 reader.array(value, |reader, value| {
                     reader.case(value, "TokenModifier", TokenModifier::from_name)
@@ -345,6 +346,15 @@ impl Reader<'_> {
             })?,
             words: self.field(&fields, "words", span, Self::strings)?,
         })
+    }
+
+    fn token_class_field(&mut self, fields: &Fields<'_>, span: Span) -> Option<TokenClass> {
+        if fields.contains_key("class") && fields.contains_key("tokenClass") {
+            self.report(span, "sets both `class` and `tokenClass`");
+            return None;
+        }
+        let name = if fields.contains_key("tokenClass") { "tokenClass" } else { "class" };
+        self.field(fields, name, span, Self::token_class)
     }
 
     fn auto_close(&mut self, value: &Expr) -> Option<AutoClosePair> {

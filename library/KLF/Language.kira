@@ -1,0 +1,68 @@
+import Foundation
+
+public enum MemoryModel { Unmanaged Counted Affine }
+public enum Exclusivity { Static Dynamic None }
+public enum DefaultConvention { Ridl Platform }
+public enum EntryConvention { Outcome Process ProcessExit }
+public enum Severity { Error Warning Note Remark }
+public enum DriverFlagValue { Boolean(Bool) Integer(Int) String(String) }
+
+public struct DriverRequest {
+    let arguments: [String]
+}
+
+public struct Project {
+    let name: String
+    let root: String
+    let arguments: [String]
+    let watch: [String]
+    let output: Optional<String> = .None
+}
+
+public struct FileMode {
+    let name: String
+    let pragma: String
+    let flag: String
+    let extensions: [String] = []
+    let memory: Optional<MemoryModel> = .None
+    let convention: Optional<DefaultConvention> = .None
+}
+
+public struct DriverFlag {
+    let name: String
+    let default_value: DriverFlagValue
+}
+
+public struct DiagnosticSpec {
+    let code: Int
+    let severity: Severity
+    let title: String
+    let explanation: String
+    let help: String = ""
+}
+
+public struct LangItem {
+    let key: String
+    let required: Bool
+}
+
+public construct Language {
+    @Required let name: String
+    @Required let driver: String
+    @Required let version: String
+    @Required let extensions: [String]
+    @Required let memory: MemoryModel
+    @Required let exclusivity: Exclusivity
+    @Required let convention: DefaultConvention
+    @Required let stdRoot: String
+    let entry: EntryConvention { return .Outcome }
+    let fileModes: [FileMode] { return [] }
+    let langItems: [LangItem] { return [] }
+    let flags: [DriverFlag] { return [] }
+    let diagnostics: [DiagnosticSpec] { return [] }
+
+    @Required function units(session: Session, inputs: borrow [SourceFile]) -> [Unit]
+    @Required function parse(session: Session, unit: Unit, program: borrow [SourceFile]) -> Tree
+    @Required function elaborate(session: Session, unit: Unit, tree: Tree) -> Program
+    @Required function lower(session: Session, unit: Unit, program: Program) -> KirModule
+}

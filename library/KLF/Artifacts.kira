@@ -1,0 +1,29 @@
+import Foundation
+
+@ThreadLocal var klfArtifactFrames: [[Any]] = []
+
+public function beginFrontendArtifacts() {
+    klfArtifactFrames.append([])
+}
+
+public function endFrontendArtifacts() {
+    if klfArtifactFrames.count == 0 { runtimeTrap() }
+    let removed = klfArtifactFrames.popLast()
+}
+
+public function artifactHandle<T>(value: T) -> Int {
+    if klfArtifactFrames.count == 0 { runtimeTrap() }
+    let frame = klfArtifactFrames.count - 1
+    var values = klfArtifactFrames[frame]
+    values.append(move value)
+    let handle = values.count
+    klfArtifactFrames[frame] = move values
+    return handle
+}
+
+public function artifactValue<T>(handle: Int) -> T {
+    if klfArtifactFrames.count == 0 { runtimeTrap() }
+    let frame = klfArtifactFrames.count - 1
+    if handle < 1 || handle > klfArtifactFrames[frame].count { runtimeTrap() }
+    return klfArtifactFrames[frame][handle - 1] as T
+}

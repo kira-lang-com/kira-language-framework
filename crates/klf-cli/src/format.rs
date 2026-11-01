@@ -9,7 +9,10 @@ use klf_services::Session;
 use klf_target::Target;
 use std::io::Read;
 use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn command(args: &[String]) -> ExitCode {
     let mut options = Options::default();
@@ -39,6 +42,26 @@ pub fn command(args: &[String]) -> ExitCode {
         Err(message) => return fail(&message),
     };
     let mut session = Session::new(target.clone());
+    if klf_driver::is_kira_frontend(Path::new(root)) {
+        let result = format_kira(
+            &mut session,
+            Path::new(root),
+            files,
+            check,
+            &options,
+            &target,
+            || finish.end(),
+        );
+        finish.end();
+        return match result {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(error) => {
+                klf_diag::raw_err!("{}", crate::pipeline::render(&session));
+                fail(&format!("klf format: {error}"))
+            }
+        };
+    }
     let Some(definition) = LanguageDefinition::load(&mut session, Path::new(root), Backend::Vm)
     else {
         klf_diag::raw_err!("{}", crate::pipeline::render(&session));
@@ -112,6 +135,65 @@ pub fn command(args: &[String]) -> ExitCode {
         status = ExitCode::FAILURE;
     }
     status
+}
+
+fn format_kira(
+    session: &mut Session,
+    root: &Path,
+    files: &[String],
+    check: bool,
+    options: &Options,
+    target: &Target,
+    before_run: impl FnOnce(),
+) -> Result<bool, String> {
+    let descriptor = klf_driver::kira_frontend_descriptor(session, root)?;
+    let extension = descriptor
+        .extensions
+        .first()
+        .ok_or("frontend has no source extension")?;
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let directory = std::env::temp_dir().join(format!(
+        "klf-kira-format-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let scratch = Scratch(directory);
+    let driver = scratch.0.join(klf_target::executable("formatter"));
+    klf_driver::build_frontend(
+        session,
+        root,
+        Some(&driver),
+        target,
+        &[],
+        klf_driver::Profile::Debug,
+    )?;
+    let mut command = Command::new(&driver);
+    command
+        .arg("format")
+        .args(files)
+        .arg("--width")
+        .arg(options.width.to_string());
+    if check {
+        command.arg("--check");
+    }
+    if files.is_empty() {
+        command.arg("--stdin").arg(format!("input.{extension}"));
+    }
+    before_run();
+    let status = command
+        .status()
+        .map_err(|error| format!("cannot start formatter: {error}"))?;
+    Ok(status.success())
+}
+
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn fail(message: &str) -> ExitCode {

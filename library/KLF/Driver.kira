@@ -1,0 +1,96 @@
+import Foundation
+
+// Reads values installed by the driver for a command invocation. These match
+// the helpers used by KCore's generated command entry.
+public function __klf_cli_count(slot: Int) -> Int {
+    return klfsvc_cli_count(slot)
+}
+
+public function __klf_cli_int(slot: Int, index: Int) -> Int {
+    return klfsvc_cli_int(slot, index)
+}
+
+public function __klf_cli_string(slot: Int, index: Int) -> String {
+    let count = klfsvc_cli_string_len(slot, index)
+    let result = klfTextBuffer(count)
+    if klfsvc_cli_string_copy(slot, index, result.data, count) != 1 { runtimeTrap() }
+    return result
+}
+
+// Reconstructs the arguments installed by the driver's hook invocation.
+public function driverArguments(start: Int, count: Int) -> [String] {
+    var arguments: [String] = []
+    for offset in 0..count {
+        let index = start + offset
+        let length = klfsvc_driver_argument_len(index)
+        let value = klfTextBuffer(length)
+        if klfsvc_driver_argument_copy(index, value.data, length) != 1 { runtimeTrap() }
+        arguments.append(move value)
+    }
+    return arguments
+}
+
+// Commits the normalized arguments returned by compatDriver.
+public function submitDriverRequest(request: borrow DriverRequest) -> Int {
+    for argument in request.arguments {
+        if klfsvc_driver_request_push(argument.data, argument.count) != 1 { runtimeTrap() }
+    }
+    return 1
+}
+
+// Hands a project returned by the frontend to the editor host.
+public function submitProject(project: borrow Project) -> Int {
+    pushProjectField(0, project.name)
+    pushProjectField(1, project.root)
+    for argument in project.arguments { pushProjectField(2, argument) }
+    for path in project.watch { pushProjectField(3, path) }
+    match project.output {
+        Some(path) -> pushProjectField(4, path)
+        None -> {}
+    }
+    return 1
+}
+
+function pushProjectField(kind: Int, value: borrow String) {
+    if klfsvc_editor_project_field(kind, value.data, value.count) != 1 { runtimeTrap() }
+}
+
+// Runs a command with the driver's attached input and output streams.
+public function runAttached(command: borrow [String]) -> Int {
+    return runDriverCommand(command, 0)
+}
+
+public function runCommand(command: borrow [String]) -> Int {
+    return runDriverCommand(command, 1)
+}
+
+function runDriverCommand(command: borrow [String], capture: Int) -> Int {
+    for argument in command {
+        if klfsvc_process_command_push(argument.data, argument.count) != 1 { runtimeTrap() }
+    }
+    return klfsvc_process_command_run(capture)
+}
+
+public function commandOutput(stream: Int) -> String {
+    let count = klfsvc_process_output(stream, RawPtr.null, 0)
+    if count < 0 { runtimeTrap() }
+    let result = klfTextBuffer(count)
+    if klfsvc_process_output(stream, result.data, count) != count { runtimeTrap() }
+    return result
+}
+
+public function writeOutput(text: borrow String) -> Int {
+    return klfsvc_io_write(text.data, text.count)
+}
+
+public function writeDriverOutput(text: borrow String) -> Int {
+    return writeOutput(text)
+}
+
+public function writeError(text: borrow String) -> Int {
+    return klfsvc_io_write_error(text.data, text.count)
+}
+
+public function writeDriverError(text: borrow String) -> Int {
+    return writeError(text)
+}

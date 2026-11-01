@@ -119,7 +119,7 @@ This document is the single normative specification for KLF (the Kira Language F
 
 1. One kernel hosts many languages. Kira, KArc (C++ with imposed ARC), C and Swift are peers. Kira has no privileged position in the kernel.
 2. Changing a hosted language never changes Rust. A breaking change to Kira is an edit to Kira's `.klfd` files and to Kira's std.
-3. No bootstrap cycle and no trusted binary seed. The only language whose frontend is written in Rust is KLF Kira. Every other language is defined in KLF Kira. No definition is ever written in the language it defines.
+3. No bootstrap cycle and no trusted binary seed. The only language whose frontend is written in Rust is KCore. KCore builds Kira; the KArc frontend is written in Kira and uses the KLF library. No definition is ever written in the language it defines.
 4. `klf build` turns a definition into a specialized compiler, VM and hybrid runtime. At user-compile time no `.klfd` is read or interpreted, so genericity costs nothing at compile time.
 5. One ownership discipline in KIR expresses four memory models: unmanaged (C), counted (KArc, Swift), affine (Kira), and mixed modes per file (KArc raw files).
 6. Every hosted language gets all three execution modes (VM, native, hybrid), stock LLDB debugging, hot module push, and RIDL export, without per-language backend work.
@@ -156,7 +156,7 @@ This document is the single normative specification for KLF (the Kira Language F
 ### 4.1 The three layers
 
 1. Kernel (Rust). Contains: the KLF Kira frontend; KIR with its verifier, ownership passes, generics engine and optimizer; the bytecode compiler and VM; the LLVM backend; the hybrid runtime; the KLF runtime (allocator, reference counting, traps); RIDL and `.klffi` processing; the kernel services exposed to definitions; the `klf` tool.
-2. Definitions (KLF Kira, `.klfd`). One package per hosted language. A definition is a compiler frontend: it reads source text of its language and produces KIR through kernel services. It also declares the language's memory model, file modes, driver flags, diagnostics and lang items.
+2. Definitions. One package per hosted language. A definition is a compiler frontend: it reads source text of its language and produces KIR through KLF. It also declares the language's memory model, file modes, driver flags, diagnostics and lang items. Kira's definition is written in KCore; other definitions can be written in Kira against the KLF library.
 3. Standard libraries (each in its own language). Kira's `heap` and `std` are Kira. C's libc is C. KArc's standard headers and runtime are C++. They are compiled by the generated toolchain.
 
 ### 4.2 The two times
@@ -203,6 +203,9 @@ klf/
   kernel/<target-triple>/libklfvm.a           VM core per target
   kernel/<target-triple>/libklfhybrid.a       hybrid runtime per target
   kernel/services.manifest                    list of kernel service entry points (section 8.12)
+  share/klf/ridl/KLFKernel.ridl               kernel service RIDL contract (section 8.13)
+  share/klf/KLF/                               Kira package importing the kernel service entries
+  platforms/<host-triple>/libklf_kernel_ridl.a  native RIDL entries for kernel services
   prelude/*.klfd                              KLF Kira prelude and the KLF module
   lld, llvm tools                             bundled linker and LLVM
 ```
@@ -217,6 +220,7 @@ Generating a toolchain MUST NOT require a Rust installation. The kernel librarie
 | `klf check <defdir>` | Parse and type-check the definition only |
 | `klf test <defdir> [--corpus <name>]` | Build, then run the definition's conformance corpus (section 31) |
 | `klf ridl check <file.ridl>` | Validate a `.ridl` file |
+| `klf ridl kernel --contract` or `--entries --target <triple>` | Emit the kernel services' RIDL contract or native entries (section 8.13) |
 | `klf ridl bindgen --lang rust or swift <file.ridl>` | Generate bindings for non-KLF languages |
 | `klf ffi gen <header.h> --target <t> -o <file.klffi>` | Generate `.klffi` from C headers using the C definition's frontend |
 | `klf abi freeze <module>` | Compute the module's RIDL surface, mint a UUID, write the `.ridlsig` delta |
@@ -429,6 +433,10 @@ other than `aarch64-apple-darwin`, and a runtime built without Rust.
 
 The cache directory is `$KLF_CACHE` or `~/.cache/klf`. Keys are SHA-256 over (KLF version, definition hash, target, profile, query key, input hashes). Cached values: query results serialized through `Cacheable` (section 8.9), `.kirb` modules, generic instances, object files, and the executable of a `run` without `-o`, which runs again without compiling while every path its compile read, asked the existence of or listed (section 5.5) and every archive it links holds what it did. Cache entries from a different KLF release or definition hash MUST be ignored.
 
+For a Kira frontend, the definition hash is the SHA-256 of its compiled
+frontend archive. It therefore changes when the compiled Kira code or any
+library compiled into it changes, including KLF and Foundation.
+
 ### 5.7 Reproducibility
 
 Given identical inputs, flags and KLF release, a driver MUST produce bit-identical `.klbc`, `.ridl` and `.ridlsig` files, and bit-identical object files when the linker and LLVM are the bundled ones. Drivers MUST NOT embed timestamps or absolute paths unless `--debug-paths=absolute` is given.
@@ -449,6 +457,10 @@ Tessera is an operating system with Linux behind it. Its triples are `aarch64-un
 ## 6. KLF Kira, the definition language
 
 ### 6.1 Position
+
+KCore is the name of the bootstrap language previously called KLF Kira.
+During the source-file migration, `.kcore` and `.klfd` both identify KCore
+definition sources and have identical syntax and semantics.
 
 KLF Kira is the only language whose frontend is written in Rust. At the freeze of `klfkira 1.0` it is a strict subset of Kira plus the `KLF` module. It is versioned independently of Kira and does not track Kira afterwards. Its grammar is Appendix A.1. After 1.0 it changes additively only: a program valid under `klfkira 1.x` stays valid with the same meaning under `klfkira 1.y`, y greater than x.
 
@@ -509,7 +521,7 @@ karc/
   ffi/*.klffi          C ABI libraries the std needs
 ```
 
-Every `.klfd` file of the directory tree, except under `std/` and `corpus/`, belongs to the package. All files share one namespace; `import KLF` brings in the kernel services.
+Every `.kcore` and `.klfd` file of the directory tree, except under `std/`, `corpus/` and `tests/`, belongs to the package. All files share one namespace; `import KLF` brings in the kernel services.
 
 ### 7.2 The `Language` family (provided by the `KLF` module)
 
@@ -572,6 +584,59 @@ applying command-line overrides. The Rust API exposes the effective values to
 Rust callers through `Session::flag`; `.klfd` code also reads the effective
 typed `DriverFlagValue` through `session.flag(name)`. The VM and native paths
 share the same service handlers and checked bulk-buffer access.
+
+A definition may add a third `program: [SourceFile]` parameter to `parse`.
+It receives the program's input files in their registered order; a definition
+that does not need them uses the two-parameter form above.
+In Kira, `Language` is a non-generic construct family whose `Tree` and
+`Program` are the session handles. Its `units` and `parse` members borrow
+their source-file arrays, and `parse` always receives the third parameter.
+The remaining phase signatures and metadata retain the meaning above.
+
+### 7.2.1 Kira-written frontend entry points
+
+A Kira frontend is a Kira library package. Its module root must be a valid
+frontend symbol and must be distinct from the roots of other Kira frontends
+linked into the same driver.
+`app/Language.kira` contains its one declaration extending `Language` and
+its literal metadata. The package exports these RIDL functions:
+
+```
+function klfFrontendUnits(session: I64, count: I64) -> I64
+function klfFrontendParse(session: I64, unit: I64, count: I64) -> I64
+function klfFrontendElaborate(session: I64, unit: I64, tree: I64) -> I64
+function klfFrontendLower(session: I64, unit: I64, program: I64) -> I64
+function klfFrontendBegin() -> I64
+function klfFrontendDispose() -> I64
+```
+
+When the `Language` construct declares `format`, the package also exports
+`klfFrontendFormat(session: I64, unit: I64, tree: I64) -> I64`. It invokes
+the format hook and returns 1 for success or 0 for failure; the driver's
+format services and artifact frame remain in effect during the call.
+When it declares `compatDriver`, it also exports
+`klfFrontendCompatDriver(count: I64) -> I64`. The entry reconstructs the
+original arguments through the driver argument services and returns 0 for
+`None`, or pushes the requested arguments and returns 1 for `Some`.
+When it declares `runProgram`, it also exports
+`klfFrontendRunProgram(commandCount: I64, totalCount: I64) -> I64`. The entry
+reconstructs the command and original driver arguments through those services
+and returns the hook's exit status.
+
+The words are the existing session, unit and artifact handles. `count` is the
+number of input files available through `definition_input`. The units entry
+returns the artifact made by `klf.definition.units_finish`; the other entries
+return the artifacts made by `klf.definition.tree`, `klf.definition.program`,
+and `klf.kir.module.finish`, respectively. The driver installs its normal
+phase services for each call. `klf build` compiles the package with Kira,
+links its RIDL entries and the KLF kernel into the normal driver, and keeps the
+driver's existing schedule. `KLF_KIRA` selects the Kira executable; otherwise
+`kira` on the path is used.
+The driver calls `klfFrontendBegin` when it creates a phase runner and calls
+`klfFrontendDispose` before checking the runner's heap balance, or when an
+error discards it. These entries start and end a thread-local artifact frame.
+Nested runners on the same thread use nested frames; a frontend must not use
+an artifact after its frame ends.
 
 ### 7.3 Meaning of the members
 
@@ -665,7 +730,7 @@ let binaryOperators: [Operator] = [
 
 1. A package MUST contain exactly one declaration extending `Language` (`KLF-DEF-0001` otherwise). It MUST take no parameters.
 2. Definition code MUST NOT perform I/O except through `Session`.
-3. A definition MUST NOT be written in the language it defines. This holds by construction: `.klfd` is always KLF Kira.
+3. A definition MUST NOT be written in the language it defines. Kira's definition is written in KCore. A Kira-written frontend defines a different language.
 4. A definition MUST produce raw KIR that passes the verifier's raw rules (section 11.7). Verifier failures in KIR produced from a well-formed user program are definition bugs and are reported as internal errors `KLF-KIR-9xxx` with the definition's name.
 
 ---
@@ -876,6 +941,39 @@ Compiles the KIR function and its callees to bytecode and runs it in a sandboxed
 ### 8.12 Kernel service ABI (internal)
 
 Each service is a Rust function exported with the platform C convention, taking and returning only integers, floats and (pointer, length) pairs. `kernel/services.manifest` lists every entry point with its signature; the KLF Kira prelude's wrappers are generated from it and marked `@Service`. This ABI is internal to one KLF release. Services are coarse: no service is called per character or per token; lexing helpers operate on whole buffers, and arena access is inlined by LTO.
+
+### 8.13 RIDL access to kernel services
+
+The `KLFKernel` RIDL module provides a low-level entry for each service in
+`kernel/services.manifest`. Each entry has the service's linker symbol as its
+RIDL function name, its manifest parameters in order named `arg0`, `arg1`,
+and so on, and its manifest result. Integer and float widths and signedness
+are preserved, `ptr` maps to `RawPtr`, and `void` is a void result. Each
+RIDL entry calls the corresponding internal service. The services retain
+their existing phase and session requirements; declaring an entry does not
+make a phase-scoped service available outside its driver context. The `KLF`
+library supplies the typed KCore-facing API on this boundary.
+
+The library makes every API available to a KCore definition available to
+Kira code, including the `Language` contract and the source, diagnostic,
+session, KIR builder, target, driver and tooling services. A Kira frontend
+runs under the same KLF driver and phase schedule as a KCore frontend. The
+library and the driver's frontend boundary use RIDL; KCore remains the
+bootstrap that builds Kira.
+
+`klf ridl kernel --contract` emits the interface, `--kcore` emits the KCore
+service wrappers as Kira source, and `klf ridl kernel --entries
+--target <triple>` emits LLVM IR implementing its RIDL entries against the
+internal service symbols. Both are generated from the same manifest.
+Native frontend drivers link those entries with their kernel runtime, so a
+frontend linked into the driver reaches the same phase service table through
+RIDL.
+The KLF distribution also supplies a Kira package named `KLF`, with public
+declarations for these entries and the host entry archive as a native library.
+The KLF driver supplies this package when it compiles a Kira frontend. A tool
+invoking Kira directly can select the installed package with
+`--dependency KLF=<KLF_HOME>/share/klf/KLF`; a frontend's source-tree path
+alone does not contain the generated kernel bindings and native entry archive.
 
 ---
 
@@ -1970,6 +2068,13 @@ Scalar types allowed in signatures: the RIDL scalars, `CString` (NUL-terminated 
 
 A call to an extern function is `call.foreign`. It is unmanaged: the verifier trusts the declaration. The native backend emits a direct platform-convention call. The VM uses thunks (section 15.6).
 
+A bodyless declaration may instead name a function supplied by another KLF
+module using RIDL. The frontend marks it with `klf.kir.function.ridl`; its
+full KIR name and RIDL calling convention survive lowering. A linker binds
+that exact name to the separately built definition, including any overload
+identity. It must not strip a suffix or fall back to a platform C symbol.
+Platform-C declarations continue to use the C symbol and platform convention.
+
 ### 26.4 Function pointers and thunks
 
 A function pointer that crosses into C (as a `@FFI.Callback` argument or stored in a C struct) MUST have the platform convention. When a hosted function using `ridlcc` is converted to a callback type, the compiler emits a static thunk with the platform convention that calls it. Closures with captured state cannot convert to a callback type unless the C API provides a user-data pointer named by `context: <parameter>` in the `@FFI.Callback`; the thunk then recovers the closure from it. The reverse direction (calling a C function pointer) is `call.foreign` through the pointer.
@@ -2352,7 +2457,7 @@ What Swift forced into the design: the polymorphic strategy, descriptors as firs
 
 ### 31.1 Corpus-defined conformance
 
-A hosted language conforms when its toolchain matches the oracle on the language's corpus. `corpus/<name>.klfd` manifests list sources, build commands, the oracle, and what is compared.
+A hosted language conforms when its toolchain matches the oracle on the language's corpus. `corpus/<name>.kcore` or `corpus/<name>.klfd` manifests list sources, build commands, the oracle, and what is compared.
 
 A manifest holds one `construct <Name>() extends Corpus` with three members.
 `cases: [CorpusCase]` lists the cases; a `CorpusCase` literal has `name`,

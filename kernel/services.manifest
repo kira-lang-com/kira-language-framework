@@ -512,6 +512,7 @@ klf.kir.switch.case   klfsvc_kir_switch_case   (i64, i64, i64) -> void # functio
 klf.kir.switch.int   klfsvc_kir_switch_int   (i64, i64, i64) -> void # function, value, default block
 klf.kir.switch.enum   klfsvc_kir_switch_enum   (i64, i64) -> void # function, enum address; cases from switch.case
 klf.kir.signature.declare   klfsvc_kir_signature_declare   (i64) -> i64 # signature -> body-less function
+klf.kir.function.ridl   klfsvc_kir_function_ridl   (i64) -> void # function -> RIDL declaration
 klf.kir.function.body   klfsvc_kir_function_body   (i64) -> void # function
 klf.kir.function.at   klfsvc_kir_function_at   (i64, i64, i64) -> void # function, span start, end: the source the instructions that follow come from (section 16.3)
 klf.kir.function.initializer   klfsvc_kir_function_initializer   (i64) -> void # function; runs before the entry

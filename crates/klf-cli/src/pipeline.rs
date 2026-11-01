@@ -207,7 +207,7 @@ entry():
 
     #[test]
     fn executes_kira_definition_corpus_on_vm_and_native() {
-        const DEFINITION: &str = include_str!("../../../definitions/calc.klfd");
+        const DEFINITION: &str = include_str!("../../../definitions/calc.kcore");
         const INPUT: &str = "20 + 2 * (10 + 1)";
         let module =
             compile(DEFINITION, "calc.klfd", "CalcDefinition", target()).expect("compiles");

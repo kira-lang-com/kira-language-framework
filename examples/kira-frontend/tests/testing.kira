@@ -1,0 +1,13 @@
+import Foundation
+import KLF
+
+@Test
+function sharedFrontendTestingUsesTheLanguageExtension() {
+    expect!(run("main 40") == 42)
+    expect!(compiles("main 40"))
+    expect!(formats("main 40", "main 40\n"))
+    expect!(runFiles([TestSource { name = "nested/deep/input.mini", text = "main 40" }]) == 42)
+    expect!(runFiles([TestSource { name = "input.h", text = "main 40" }]) == 42)
+    expect!(runFiles([TestSource { name = "", text = "main 40" }]) == 42)
+    expect!(runPath("tests/sample.mini") == 42)
+}

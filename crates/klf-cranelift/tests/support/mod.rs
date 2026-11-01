@@ -66,7 +66,8 @@ fn build_runtime() -> PathBuf {
     assert!(status.success(), "building klf-native-rt failed");
     std::env::var_os("CARGO_TARGET_DIR")
         .map_or_else(|| workspace_root().join("target"), PathBuf::from)
-        .join("release/libklf_native_rt.a")
+        .join("release")
+        .join(klf_target::static_library("klf_native_rt", klf_target::host_triple()))
 }
 
 /// Lower `source`'s `entry` to a native object with Cranelift, link and run it.
@@ -89,7 +90,7 @@ pub fn cranelift_stdout(source: &str, entry: &str, arguments: &[u64]) -> String 
     let dir = std::env::temp_dir().join(format!("klf-clif-{entry}-{}-{tag:x}", arguments.len()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let obj = dir.join("program.o");
-    let bin = dir.join("program.out");
+    let bin = dir.join(klf_target::executable("program"));
     std::fs::write(&obj, object).expect("write object");
 
     let mut command = Command::new(&tools.clang);
@@ -99,14 +100,13 @@ pub fn cranelift_stdout(source: &str, entry: &str, arguments: &[u64]) -> String 
     if !cfg!(target_os = "macos") && tools.clang.with_file_name("ld.lld").exists() {
         command.arg("-fuse-ld=lld");
     }
-    let status = command
-        .arg(&obj)
-        .arg(&tools.runtime)
-        .arg("-lm")
-        .arg("-o")
-        .arg(&bin)
-        .status()
-        .expect("clang runs");
+    command.arg(&obj).arg(&tools.runtime);
+    if klf_target::is_msvc(klf_target::host_triple()) {
+        command.args(klf_target::MSVC_SYSTEM_LIBRARIES);
+    } else {
+        command.arg("-lm");
+    }
+    let status = command.arg("-o").arg(&bin).status().expect("clang runs");
     assert!(status.success(), "clang link failed for `{entry}`");
 
     let output = Command::new(&bin).output().expect("native program runs");

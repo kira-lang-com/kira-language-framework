@@ -1,0 +1,6 @@
+construct OtherName extends Package {
+    let kind: PackageKind = .Library
+    let dependencies: [Dependency] = [Dependency { name: "KLF", path: "../../library/KLF" }]
+    let moduleRoot: String = "HlslFrontend"
+}
+

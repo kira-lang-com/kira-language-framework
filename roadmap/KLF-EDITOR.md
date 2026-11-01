@@ -175,7 +175,7 @@ The server is not a separate program. `<driver> lsp` is the same binary as `<dri
 | --- | --- |
 | A program language's `extensions` | `<driver> lsp` of that language |
 | A shader language's `extensions` | `<driver> lsp` of that shader language |
-| `.klfd`, `.kir`, `.ksir`, `.ridl`, `.ridlsig`, `.klffi` | `klf lsp` |
+| `.kcore`, `.klfd`, `.klfk`, `.kir`, `.ksir`, `.ridl`, `.ridlsig`, `.klffi` | `klf lsp` |
 
 ---
 
@@ -251,6 +251,10 @@ struct RegionMarkers { let start: Pattern  let end: Pattern }
 struct GrammarRef { let repository: String  let revision: String  let path: String }
 distinct Pattern = String                    // the dialect of Appendix C
 ```
+
+In the Kira KLF library, `StringForm.class` and `KeywordGroup.class` are
+spelled `tokenClass`, because `class` is a Kira keyword. The metadata reader
+accepts both spellings with the same meaning.
 
 Rules:
 
@@ -1022,9 +1026,14 @@ A workspace with Kira and KSL sources runs two servers, `kira lsp` and `ksl lsp`
 
 `klf lsp` is a server for the kernel's own file types, using the same host (`klf-ide`) with native Rust analyzers in place of a compiled definition. One process serves all of them.
 
+The generated editor packages identify the bootstrap language as `kcore`, with
+display name `KCore` and scope `source.kcore`; they associate both `.kcore` and
+the legacy `.klfd` and `.klfk` extensions with that language. A loose `.klfk`
+file is analyzed as KCore; package discovery still uses `.kcore` and `.klfd`.
+
 | Type | Analysis | Notable features |
 | --- | --- | --- |
-| `.klfd` | The KLF Kira frontend (`klf-kira-syntax`, `klf-kira-lower`) in editor mode, with the definition package as the project (`KLF-RIDL.md` 7.1) | Diagnostics (`KLFK-E`, `KLF-DEF`); navigation into the prelude (`prelude/*.klfd`, opened read-only from the KLF distribution); hover on kernel services showing their `services.manifest` signature; completion of `session.` services and family members; a quick fix "Add the required members" on a declaration extending `Language`, `ShaderLanguage` or `Corpus` that misses `@Required` members; runnables for corpus cases (`klf test <defdir> --corpus <name>`) |
+| `.kcore`, `.klfd` | The KCore frontend (`klf-kira-syntax`, `klf-kira-lower`) in editor mode, with the definition package as the project (`KLF-RIDL.md` 7.1) | Diagnostics (`KLFK-E`, `KLF-DEF`); navigation into the prelude (`prelude/*.klfd`, opened read-only from the KLF distribution); hover on kernel services showing their `services.manifest` signature; completion of `session.` services and family members; a quick fix "Add the required members" on a declaration extending `Language`, `ShaderLanguage` or `Corpus` that misses `@Required` members; runnables for corpus cases (`klf test <defdir> --corpus <name>`) |
 | `.kir` | Parser and verifier (`klf-kir`, `klf-kir-verify`) | Verifier rule diagnostics (V1 to V12) at the instruction; navigation for `%values`, blocks, functions, globals and types; hover with types |
 | `.ksir` | Parser and validator (`klf-shader`, `klf-shader-valid`) | SV rule diagnostics; navigation for handles; hover with types and layouts |
 | `.ridl`, `.ridlsig` | `klf-ridl` parser and checker | Diagnostics of `klf ridl check`; `@Source` links (section 15.3); hover with layout and symbol names (`KLF-RIDL.md` 21, 24.2); `.ridlsig` read-only |
@@ -1400,7 +1409,7 @@ As `KLF-RIDL.md` 32.3. A change to a fact service, a token class, a setting or a
 
 ## 27. Appendix A: editor corpus format
 
-A definition's editor corpus is a set of `.klfd` manifests under `corpus/editor/`, each holding one `construct <Name>() extends EditorCorpus`:
+A definition's editor corpus is a set of `.kcore` or `.klfd` manifests under `corpus/editor/`, each holding one `construct <Name>() extends EditorCorpus`:
 
 ```
 construct KiraNavigation() extends EditorCorpus {

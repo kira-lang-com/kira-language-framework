@@ -13,7 +13,6 @@
 use crate::{backtrace, ending, interrupt, is_process};
 use klf_diag::report::{Report, fill_operands, report_code};
 use std::cell::Cell;
-use std::sync::atomic::Ordering;
 
 thread_local! {
     /// The values the next trap's report names as `{0}` and `{1}`.
@@ -146,7 +145,7 @@ fn checked_source(text: &str) -> String {
 fn print(rendered: &str) -> ! {
     eprint!("{rendered}");
     backtrace::report();
-    if crate::TRAP_EXITS.load(Ordering::Relaxed) {
+    if crate::process_host::klfrt_process_mode() & 2 != 0 {
         std::process::exit(1)
     }
     std::process::abort()

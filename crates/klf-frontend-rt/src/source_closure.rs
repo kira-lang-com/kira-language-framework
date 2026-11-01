@@ -11,7 +11,10 @@ pub(crate) fn register(
     known: &mut HashSet<PathBuf>,
 ) -> Result<(), String> {
     let std_include = crate::output::installed_sysroot()
-        .map(|sysroot| crate::output::std_include(&sysroot, &metadata.name));
+        .map(|sysroot| crate::output::std_include(&sysroot, &metadata.name))
+        .or_else(|| {
+            (!metadata.std_root.is_empty()).then(|| PathBuf::from(&metadata.std_root).join("include"))
+        });
     let search = include_dirs(session);
     let mut pending = VecDeque::from([(root.to_owned(), text.to_owned())]);
     // `#define LIST "file.hh"`, for an `#include LIST` read after it.
