@@ -31,7 +31,11 @@ pub(crate) fn register(capabilities: &mut Capabilities) {
         1
     });
     capabilities.register("klfsvc_thread_unpark", |arguments| {
-        if arguments.first() == Some(&MAIN) { 1 } else { UNKNOWN }
+        if arguments.first() == Some(&MAIN) {
+            1
+        } else {
+            UNKNOWN
+        }
     });
     capabilities.register("klfsvc_thread_yield", |_| 0);
     capabilities.register("klfsvc_thread_parallelism", |_| 1);

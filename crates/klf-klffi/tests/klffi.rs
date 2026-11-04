@@ -30,7 +30,6 @@ function sysWrite(fd: I32, buffer: RawPtr, count: USize) -> ISize
 let SAPP_MAX_TOUCHPOINTS: I32 = 8
 ";
 
-
 /// Generates a header for a Linux target, with no include directories.
 fn generate_text(header: &str, library: &str) -> (FfiModule, Vec<Remark>) {
     let predefined = Predefined::for_triple("x86_64-unknown-linux-gnu").expect("a Linux target");
@@ -38,8 +37,14 @@ fn generate_text(header: &str, library: &str) -> (FfiModule, Vec<Remark>) {
         predefined: &predefined,
         include_dirs: &[],
     };
-    generate(header, Path::new("header.h"), library, environment, &mut |_| None)
-        .expect("the header preprocesses")
+    generate(
+        header,
+        Path::new("header.h"),
+        library,
+        environment,
+        &mut |_| None,
+    )
+    .expect("the header preprocesses")
 }
 
 #[test]
@@ -207,11 +212,13 @@ int make(VkDevice device, uint32_t* count, VkDevice* out, void** data, char* nam
         "{printed}"
     );
     assert!(
-        printed.contains("@FFI.Pointer { target: U32, ownership: borrowed }\nstruct uint32_t_ptr\n"),
+        printed
+            .contains("@FFI.Pointer { target: U32, ownership: borrowed }\nstruct uint32_t_ptr\n"),
         "{printed}"
     );
     assert!(
-        printed.contains("@FFI.Pointer { target: RawPtr, ownership: borrowed }\nstruct RawPtr_ptr\n"),
+        printed
+            .contains("@FFI.Pointer { target: RawPtr, ownership: borrowed }\nstruct RawPtr_ptr\n"),
         "{printed}"
     );
     assert!(

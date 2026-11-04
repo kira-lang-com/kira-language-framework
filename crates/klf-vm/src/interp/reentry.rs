@@ -64,7 +64,10 @@ pub unsafe extern "C" fn klfvm_invoke(
         instance.call(function, arguments)
     } else {
         let Some((machine, capabilities, resolved_capabilities)) = ACTIVE.get() else {
-            eprint!("{}", klf_diag::report::trap_description("KLF-VM-0007").render());
+            eprint!(
+                "{}",
+                klf_diag::report::trap_description("KLF-VM-0007").render()
+            );
             std::process::exit(1);
         };
         // SAFETY: the machine and capabilities were published by a foreign

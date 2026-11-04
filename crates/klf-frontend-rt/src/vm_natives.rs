@@ -132,7 +132,11 @@ pub(crate) fn emit_natives(
         // a Unix library binds from the runner; a DLL cannot leave it
         // unbound, so it links a copy of its own.
         arguments.push(crate::runtime::Runtime::Native.archive(&target)?.into());
-        arguments.extend(crate::output::system_libraries(&target).into_iter().map(OsString::from));
+        arguments.extend(
+            crate::output::system_libraries(&target)
+                .into_iter()
+                .map(OsString::from),
+        );
     }
     arguments.push("-o".into());
     arguments.push(library.clone().into());
@@ -176,7 +180,11 @@ fn ridl_objects(
 fn compiled(toolchain: &CToolchain, target: &str, source: &Path) -> Result<PathBuf, String> {
     let object = source.with_extension("o");
     let mut arguments: Vec<&std::ffi::OsStr> = vec!["-c".as_ref(), "-O2".as_ref()];
-    arguments.extend(klf_target::pic_flags(target).iter().map(|flag| std::ffi::OsStr::new(*flag)));
+    arguments.extend(
+        klf_target::pic_flags(target)
+            .iter()
+            .map(|flag| std::ffi::OsStr::new(*flag)),
+    );
     arguments.extend([
         "-Wno-override-module".as_ref(),
         source.as_os_str(),
@@ -219,8 +227,13 @@ fn entry_symbol(function: &Function, described: Option<&str>) -> Option<String> 
 /// the module's whole archives define. A shared object on Unix exports them
 /// all by default, and the VM finds a native function by its name; a DLL
 /// exports only what it is told to.
-fn exports_definition(objects: &[PathBuf], module: &Module, scratch: &Scratch) -> Result<PathBuf, String> {
-    let nm = crate::toolchain::find_tool("llvm-nm").ok_or_else(|| "no bundled llvm-nm to list the library's exports".to_owned())?;
+fn exports_definition(
+    objects: &[PathBuf],
+    module: &Module,
+    scratch: &Scratch,
+) -> Result<PathBuf, String> {
+    let nm = crate::toolchain::find_tool("llvm-nm")
+        .ok_or_else(|| "no bundled llvm-nm to list the library's exports".to_owned())?;
     let mut inputs: Vec<PathBuf> = objects.to_vec();
     for attribute in &module.attributes {
         if let Some(value) = &attribute.value
@@ -236,7 +249,10 @@ fn exports_definition(objects: &[PathBuf], module: &Module, scratch: &Scratch) -
         .output()
         .map_err(|error| format!("llvm-nm: {error}"))?;
     if !output.status.success() {
-        return Err(format!("llvm-nm failed\n{}", String::from_utf8_lossy(&output.stderr)));
+        return Err(format!(
+            "llvm-nm failed\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     let mut names: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -295,11 +311,20 @@ fn whole_libraries(module: &Module, target: &str) -> Vec<OsString> {
 /// words to `klfvm_invoke` with the instance and the function's index, and
 /// returns its result. A RIDL module's library also runs its image when it
 /// loads.
-fn entry_source(module: &Module, windows: bool, prefix: &str, described: Option<&str>, attaches: bool) -> String {
-    let mut source = String::from(
-        "typedef __UINT64_TYPE__ uint64_t;\ntypedef __UINT32_TYPE__ uint32_t;\n",
-    );
-    source.push_str(if windows { WINDOWS_HOST_ENTRIES } else { HOST_ENTRIES });
+fn entry_source(
+    module: &Module,
+    windows: bool,
+    prefix: &str,
+    described: Option<&str>,
+    attaches: bool,
+) -> String {
+    let mut source =
+        String::from("typedef __UINT64_TYPE__ uint64_t;\ntypedef __UINT32_TYPE__ uint32_t;\n");
+    source.push_str(if windows {
+        WINDOWS_HOST_ENTRIES
+    } else {
+        HOST_ENTRIES
+    });
     source.push_str(
         "static const void *klf_vm_instance;\nstatic uint32_t klf_vm_first;\n\
          KLF_EXPORT void klf_vm_bind(const void *instance, uint32_t first) {\n\

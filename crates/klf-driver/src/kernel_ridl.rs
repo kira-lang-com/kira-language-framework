@@ -182,7 +182,11 @@ fn kira_target(triple: &str) -> String {
     triple.to_owned()
 }
 
-pub(crate) fn write_kira_package(out: &Path, targets: &[String], module: &Module) -> Result<(), String> {
+pub(crate) fn write_kira_package(
+    out: &Path,
+    targets: &[String],
+    module: &Module,
+) -> Result<(), String> {
     let root = out.join("share/klf/KLF");
     let sources = root.join("app");
     std::fs::create_dir_all(&sources)
@@ -191,7 +195,9 @@ pub(crate) fn write_kira_package(out: &Path, targets: &[String], module: &Module
     for target in targets {
         let key = kira_target(target);
         if let Some(previous) = rows.insert(key.clone(), target) {
-            return Err(format!("Kira target {key} is shared by {previous} and {target}"));
+            return Err(format!(
+                "Kira target {key} is shared by {previous} and {target}"
+            ));
         }
     }
     let entries = rows.iter().map(|(triple, target)| format!(
@@ -202,8 +208,11 @@ pub(crate) fn write_kira_package(out: &Path, targets: &[String], module: &Module
     );
     std::fs::write(root.join("package.kira"), manifest)
         .map_err(|error| format!("cannot write KLF package: {error}"))?;
-    std::fs::write(root.join("README.md"), include_str!("../../../library/KLF/README.md"))
-        .map_err(|error| format!("cannot write KLF package documentation: {error}"))?;
+    std::fs::write(
+        root.join("README.md"),
+        include_str!("../../../library/KLF/README.md"),
+    )
+    .map_err(|error| format!("cannot write KLF package documentation: {error}"))?;
     let bindings = klf_ridl::bindgen::kira_bindings(module).replace(
         "@Ridl(\"KLFKernel\") function ",
         "@Ridl(\"KLFKernel\") public function ",
@@ -228,10 +237,16 @@ pub(crate) fn write_kira_package(out: &Path, targets: &[String], module: &Module
         include_str!("../../../library/KLF/ShaderLanguage.kira"),
     )
     .map_err(|error| format!("cannot write ShaderLanguage interface: {error}"))?;
-    std::fs::write(sources.join("Editor.kira"), include_str!("../../../library/KLF/Editor.kira"))
-        .map_err(|error| format!("cannot write editor interface: {error}"))?;
-    std::fs::write(sources.join("Layout.kira"), include_str!("../../../library/KLF/Layout.kira"))
-        .map_err(|error| format!("cannot write formatting layout: {error}"))?;
+    std::fs::write(
+        sources.join("Editor.kira"),
+        include_str!("../../../library/KLF/Editor.kira"),
+    )
+    .map_err(|error| format!("cannot write editor interface: {error}"))?;
+    std::fs::write(
+        sources.join("Layout.kira"),
+        include_str!("../../../library/KLF/Layout.kira"),
+    )
+    .map_err(|error| format!("cannot write formatting layout: {error}"))?;
     std::fs::write(
         sources.join("Session.kira"),
         include_str!("../../../library/KLF/Session.kira"),
@@ -269,22 +284,36 @@ mod tests {
 
     #[test]
     fn distribution_selects_archives_by_kira_target() {
-        let directory = std::env::temp_dir().join(format!("klf-kira-targets-{}", std::process::id()));
-        let targets = vec!["x86_64-pc-windows-msvc".to_owned(), "aarch64-unknown-linux-gnu".to_owned()];
+        let directory =
+            std::env::temp_dir().join(format!("klf-kira-targets-{}", std::process::id()));
+        let targets = vec![
+            "x86_64-pc-windows-msvc".to_owned(),
+            "aarch64-unknown-linux-gnu".to_owned(),
+        ];
         write_kira_package(&directory, &targets, &kernel_ridl_module().unwrap()).unwrap();
-        let manifest = std::fs::read_to_string(directory.join("share/klf/KLF/package.kira")).unwrap();
+        let manifest =
+            std::fs::read_to_string(directory.join("share/klf/KLF/package.kira")).unwrap();
         assert!(manifest.contains("triple: \"x86_64-windows-msvc\", staticLib: \"../../../platforms/x86_64-pc-windows-msvc/libklf_kernel_ridl.a\""));
         assert!(manifest.contains("triple: \"aarch64-linux-gnu\", staticLib: \"../../../platforms/aarch64-unknown-linux-gnu/libklf_kernel_ridl.a\""));
         assert_eq!(kira_target("aarch64-apple-darwin"), "aarch64-macos-none");
-        assert_eq!(kira_target("x86_64-unknown-tessera"), "x86_64-unknown-tessera");
-        let ambiguous = vec!["x86_64-linux-gnu".to_owned(), "x86_64-unknown-linux-gnu".to_owned()];
-        assert!(write_kira_package(&directory, &ambiguous, &kernel_ridl_module().unwrap()).is_err());
+        assert_eq!(
+            kira_target("x86_64-unknown-tessera"),
+            "x86_64-unknown-tessera"
+        );
+        let ambiguous = vec![
+            "x86_64-linux-gnu".to_owned(),
+            "x86_64-unknown-linux-gnu".to_owned(),
+        ];
+        assert!(
+            write_kira_package(&directory, &ambiguous, &kernel_ridl_module().unwrap()).is_err()
+        );
         std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn kernel_entry_object_uses_the_requested_target() {
-        let directory = std::env::temp_dir().join(format!("klf-kernel-cross-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("klf-kernel-cross-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let object = compile_entries(&directory, "aarch64-unknown-linux-gnu").unwrap();
         let bytes = std::fs::read(object).unwrap();

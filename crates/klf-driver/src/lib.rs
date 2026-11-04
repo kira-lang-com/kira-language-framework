@@ -5,9 +5,9 @@
 mod corpus;
 mod format;
 mod frontend;
+mod kcore_bindings;
 mod kernel;
 mod kernel_ridl;
-mod kcore_bindings;
 mod kira_frontend;
 mod kira_unit_tests;
 mod language;
@@ -24,12 +24,15 @@ pub use corpus::{
     run_editor_corpus, run_shader_corpus, test_package,
 };
 pub use frontend::{BuiltFrontend, Profile, build_frontend};
-pub use kira_frontend::{check as check_kira_frontend, descriptor as kira_frontend_descriptor, is_package as is_kira_frontend};
-pub use kernel_ridl::{kernel_ridl_entries, kernel_ridl_module};
 pub use kcore_bindings::generate as kcore_service_bindings;
 pub use kernel::{
     KernelArchive, build_distribution, distribution_home, find_clang, find_llvm_tool, host_triple,
     kernel_archive,
+};
+pub use kernel_ridl::{kernel_ridl_entries, kernel_ridl_module};
+pub use kira_frontend::{
+    check as check_kira_frontend, descriptor as kira_frontend_descriptor,
+    is_package as is_kira_frontend,
 };
 pub use language::{LanguageDefinition, PackageError, load_package};
 pub use native::{NativeError, build_native, toolchain_available};

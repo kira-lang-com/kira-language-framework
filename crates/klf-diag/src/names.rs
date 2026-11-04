@@ -119,7 +119,10 @@ fn overload(parameters: &str) -> String {
         Some((parameters, result)) => (parameters, Some(result)),
         None => (parameters, None),
     };
-    let listed: Vec<&str> = parameters.split('$').filter(|parameter| !parameter.is_empty()).collect();
+    let listed: Vec<&str> = parameters
+        .split('$')
+        .filter(|parameter| !parameter.is_empty())
+        .collect();
     let mut shown = format!("({})", listed.join(", "));
     if let Some(result) = result {
         shown.push_str(" -> ");
@@ -136,10 +139,19 @@ mod tests {
     fn local_names_read_as_their_source_names() {
         for (local, shown) in [
             ("pick#TrapGallery", "TrapGallery.pick"),
-            ("Picker#KiraUI<String>.describe", "KiraUI.Picker<String>.describe"),
-            ("ExecutorTask.cancel#dispatch", "ExecutorTask.cancel (dispatch)"),
+            (
+                "Picker#KiraUI<String>.describe",
+                "KiraUI.Picker<String>.describe",
+            ),
+            (
+                "ExecutorTask.cancel#dispatch",
+                "ExecutorTask.cancel (dispatch)",
+            ),
             ("__globals#init#Foundation", "Foundation.__globals (init)"),
-            ("max$Number$Foundation.Number", "max(Number, Foundation.Number)"),
+            (
+                "max$Number$Foundation.Number",
+                "max(Number, Foundation.Number)",
+            ),
             ("cString$String$result$RawPtr", "cString(String) -> RawPtr"),
             ("Map<Int,Int>.value", "Map<Int,Int>.value"),
             ("divide#", "divide"),

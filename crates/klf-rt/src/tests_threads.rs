@@ -26,9 +26,17 @@ fn release_on_another_thread_destroys_and_frees_to_the_owner() {
         let mut other = Heap::shared();
         let p = sent.0 as *mut u8;
         other.release(p);
-        assert_eq!(REMOTE_DESTROYS.load(Ordering::SeqCst), 0, "one count is left");
+        assert_eq!(
+            REMOTE_DESTROYS.load(Ordering::SeqCst),
+            0,
+            "one count is left"
+        );
         other.release(p);
-        assert_eq!(REMOTE_DESTROYS.load(Ordering::SeqCst), 1, "the last release destroys");
+        assert_eq!(
+            REMOTE_DESTROYS.load(Ordering::SeqCst),
+            1,
+            "the last release destroys"
+        );
         other.orphan();
     })
     .join()
@@ -69,7 +77,8 @@ fn an_orphaned_heap_takes_frees_after_its_thread_ends() {
         let mut ended = Heap::shared();
         let p = ended.alloc_counted(200, 8, None);
         let large = ended.alloc_counted(100_000, 8, None);
-        sent.send((Sent(p as usize), Sent(large as usize))).expect("the test listens");
+        sent.send((Sent(p as usize), Sent(large as usize)))
+            .expect("the test listens");
         ended.orphan();
     })
     .join()
@@ -79,7 +88,11 @@ fn an_orphaned_heap_takes_frees_after_its_thread_ends() {
     assert_eq!(here.strong_count(p.0 as *mut u8), Some(1));
     here.release(p.0 as *mut u8);
     here.release(large.0 as *mut u8);
-    assert_eq!(here.strong_count(p.0 as *mut u8), Some(0), "freed into the orphan");
+    assert_eq!(
+        here.strong_count(p.0 as *mut u8),
+        Some(0),
+        "freed into the orphan"
+    );
 }
 
 #[test]

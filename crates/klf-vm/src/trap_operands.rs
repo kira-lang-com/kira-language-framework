@@ -45,6 +45,9 @@ pub(crate) fn filled(code: &str) -> String {
     if klf_diag::report::report_code(code).is_none() {
         return code.to_owned();
     }
-    let valued = klf_diag::report::fill_operands(code, &operands.map(|pair| pair.to_vec()).unwrap_or_default());
+    let valued = klf_diag::report::fill_operands(
+        code,
+        &operands.map(|pair| pair.to_vec()).unwrap_or_default(),
+    );
     klf_diag::report::fill_text(&valued, text.as_deref())
 }

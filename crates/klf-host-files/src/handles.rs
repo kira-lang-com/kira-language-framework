@@ -81,7 +81,9 @@ fn word(result: Result<i64, Failure>) -> i64 {
 
 fn file(handle: i64) -> Result<Arc<fs::File>, Failure> {
     let index = usize::try_from(handle - 1).map_err(|_| Failure::InvalidHandle)?;
-    let table = TABLE.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let table = TABLE
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     table
         .get(index)
         .and_then(Option::clone)
@@ -98,7 +100,9 @@ pub fn open(path_bytes: &[u8], access: Access) -> i64 {
     word((|| {
         let path = path(path_bytes).ok_or(Failure::InvalidPath)?;
         let opened = Arc::new(access.options().open(path)?);
-        let mut table = TABLE.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut table = TABLE
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let index = if let Some(free) = table.iter().position(Option::is_none) {
             table[free] = Some(opened);
             free
@@ -115,7 +119,9 @@ pub fn open(path_bytes: &[u8], access: Access) -> i64 {
 pub fn close(handle: i64) -> i64 {
     word((|| {
         let index = usize::try_from(handle - 1).map_err(|_| Failure::InvalidHandle)?;
-        let mut table = TABLE.write().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut table = TABLE
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let slot = table.get_mut(index).ok_or(Failure::InvalidHandle)?;
         slot.take().ok_or(Failure::InvalidHandle)?;
         Ok(1)

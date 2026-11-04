@@ -95,12 +95,18 @@ impl PageMap {
     /// made it first.
     #[cold]
     fn add_window(&self, hi: usize) -> &[AtomicUsize] {
-        let _held = self.grow.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _held = self
+            .grow
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(leaf) = self.leaf(hi) {
             return leaf;
         }
         let at = self.used.load(Ordering::Relaxed);
-        assert!(at < WINDOWS, "the heap spans more address windows than the page map names");
+        assert!(
+            at < WINDOWS,
+            "the heap spans more address windows than the page map names"
+        );
         let leaf: Box<[AtomicUsize]> = (0..LEAF_LEN).map(|_| AtomicUsize::new(0)).collect();
         let leaf = Box::into_raw(leaf).cast::<AtomicUsize>();
         self.windows[at].store(hi, Ordering::Relaxed);

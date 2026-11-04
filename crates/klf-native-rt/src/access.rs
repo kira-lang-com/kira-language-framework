@@ -54,7 +54,9 @@ pub extern "C-unwind" fn klfrt_access_begin(address: *mut u8, mode: i32, size: u
         let access = if mode != 0 { "modify" } else { "read" };
         crate::trap::trap_with(
             3,
-            vec![format!("a {access} of {size} bytes at {address:p} overlaps an access still open")],
+            vec![format!(
+                "a {access} of {size} bytes at {address:p} overlaps an access still open"
+            )],
         );
     }
 }

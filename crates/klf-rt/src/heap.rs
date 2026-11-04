@@ -13,18 +13,18 @@ use crate::meta::{
 };
 use crate::pagemap::PageMap;
 
+mod access;
 mod arena;
 mod bulk;
-mod access;
 mod cycles;
 mod destroys;
 mod exit;
 mod remote;
 mod scalar;
 
-use destroys::{clear_destroy, free_destroys, run_destroy, set_destroy};
 use crate::sizeclass::{build_classes, class_for, large_layout, layout_for_class};
 use crate::span::{LARGE_CLASS, MAGIC, REMOTE_END, SENTINEL, SPAN_SIZE, SpanHeader, meta_ref};
+use destroys::{clear_destroy, free_destroys, run_destroy, set_destroy};
 pub use exit::ExitReport;
 
 const SMALL_LOOKUP_STEPS: usize = 64;
@@ -658,7 +658,6 @@ impl Heap {
     pub fn live_blocks(&self) -> usize {
         self.live
     }
-
 }
 
 // SAFETY: a heap is used by one thread at a time; one moves between threads

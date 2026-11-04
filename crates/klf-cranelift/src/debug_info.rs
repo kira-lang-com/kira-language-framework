@@ -17,8 +17,7 @@ use cranelift::codegen::CompiledCode;
 use cranelift_module::FuncId;
 use cranelift_object::ObjectProduct;
 use gimli::write::{
-    Address, AttributeValue, DwarfUnit, LineProgram, LineString, Range, RangeList,
-    Sections, Writer,
+    Address, AttributeValue, DwarfUnit, LineProgram, LineString, Range, RangeList, Sections, Writer,
 };
 use gimli::{SectionId, constants};
 use object::write::{Relocation as ObjectRelocation, SymbolId};
@@ -49,7 +48,10 @@ pub(crate) fn rows(code: &CompiledCode, places: &[klf_kir::DebugLocation]) -> Ve
         let Some(place) = places.get(location.bits() as usize) else {
             continue;
         };
-        if rows.last().is_some_and(|row| row.file == place.file && row.line == place.line) {
+        if rows
+            .last()
+            .is_some_and(|row| row.file == place.file && row.line == place.line)
+        {
             continue;
         }
         // The prologue, which no instruction's place covers, is the first
@@ -123,13 +125,20 @@ impl DebugTables {
     }
 
     /// Writes the DWARF sections into `product`.
-    pub(crate) fn write(self, product: &mut ObjectProduct, unit_name: &str) -> Result<(), EmitError> {
+    pub(crate) fn write(
+        self,
+        product: &mut ObjectProduct,
+        unit_name: &str,
+    ) -> Result<(), EmitError> {
         let format = product.object.format();
         if self.functions.is_empty() || !matches!(format, BinaryFormat::Elf | BinaryFormat::MachO) {
             return Ok(());
         }
-        let symbols: Vec<SymbolId> =
-            self.functions.iter().map(|function| product.function_symbol(function.id)).collect();
+        let symbols: Vec<SymbolId> = self
+            .functions
+            .iter()
+            .map(|function| product.function_symbol(function.id))
+            .collect();
         // Mach-O DWARF names a function by its address in the object, which
         // `dsymutil` maps through the binary's debug map. The debug sections
         // follow every other, so the object written without them places the
@@ -138,7 +147,11 @@ impl DebugTables {
             BinaryFormat::MachO => Some(std::sync::Arc::new(object_addresses(product, &symbols)?)),
             _ => None,
         };
-        let mut dwarf = unit(&self.functions, unit_name, placed.as_deref().map(Vec::as_slice));
+        let mut dwarf = unit(
+            &self.functions,
+            unit_name,
+            placed.as_deref().map(Vec::as_slice),
+        );
         let mut sections = Sections::new(DebugSection {
             placed,
             ..DebugSection::default()
@@ -170,7 +183,10 @@ fn object_addresses(product: &ObjectProduct, symbols: &[SymbolId]) -> Result<Vec
         .iter()
         .map(|symbol| {
             let name = product.object.symbol(*symbol).name.as_slice();
-            placed.get(name.strip_prefix(b"_").unwrap_or(name)).copied().unwrap_or(0)
+            placed
+                .get(name.strip_prefix(b"_").unwrap_or(name))
+                .copied()
+                .unwrap_or(0)
         })
         .collect())
 }
@@ -233,19 +249,31 @@ fn unit(functions: &[Function], unit_name: &str, placed: Option<&[u64]>) -> Dwar
             program.generate_row();
         }
         program.end_sequence(function.size);
-        entries.push((position, function, Some((files[first.file.as_str()], first.line))));
+        entries.push((
+            position,
+            function,
+            Some((files[first.file.as_str()], first.line)),
+        ));
     }
     let covered = placed.and_then(|placed| {
         let first = (0..functions.len()).min_by_key(|position| placed[*position])?;
-        let end = (0..functions.len()).map(|position| placed[position] + functions[position].size).max()?;
+        let end = (0..functions.len())
+            .map(|position| placed[position] + functions[position].size)
+            .max()?;
         Some((first, end - placed[first]))
     });
     let ranges = dwarf.unit.ranges.add(RangeList(ranges));
     let name = dwarf.strings.add(unit_name);
     let producer = dwarf.strings.add("KLF Kira");
     let unit_entry = dwarf.unit.get_mut(root);
-    unit_entry.set(constants::DW_AT_producer, AttributeValue::StringRef(producer));
-    unit_entry.set(constants::DW_AT_language, AttributeValue::Language(constants::DwLang(KIRA_LANGUAGE)));
+    unit_entry.set(
+        constants::DW_AT_producer,
+        AttributeValue::StringRef(producer),
+    );
+    unit_entry.set(
+        constants::DW_AT_language,
+        AttributeValue::Language(constants::DwLang(KIRA_LANGUAGE)),
+    );
     unit_entry.set(constants::DW_AT_name, AttributeValue::StringRef(name));
     match covered {
         Some((first, length)) => {
@@ -259,8 +287,14 @@ fn unit(functions: &[Function], unit_name: &str, placed: Option<&[u64]>) -> Dwar
             unit_entry.set(constants::DW_AT_high_pc, AttributeValue::Udata(length));
         }
         None => {
-            unit_entry.set(constants::DW_AT_low_pc, AttributeValue::Address(Address::Constant(0)));
-            unit_entry.set(constants::DW_AT_ranges, AttributeValue::RangeListRef(ranges));
+            unit_entry.set(
+                constants::DW_AT_low_pc,
+                AttributeValue::Address(Address::Constant(0)),
+            );
+            unit_entry.set(
+                constants::DW_AT_ranges,
+                AttributeValue::RangeListRef(ranges),
+            );
         }
     }
     for (position, function, declared) in entries {
@@ -275,10 +309,19 @@ fn unit(functions: &[Function], unit_name: &str, placed: Option<&[u64]>) -> Dwar
                 addend: 0,
             }),
         );
-        subprogram.set(constants::DW_AT_high_pc, AttributeValue::Udata(function.size));
+        subprogram.set(
+            constants::DW_AT_high_pc,
+            AttributeValue::Udata(function.size),
+        );
         if let Some((file, line)) = declared {
-            subprogram.set(constants::DW_AT_decl_file, AttributeValue::FileIndex(Some(file)));
-            subprogram.set(constants::DW_AT_decl_line, AttributeValue::Udata(u64::from(line)));
+            subprogram.set(
+                constants::DW_AT_decl_file,
+                AttributeValue::FileIndex(Some(file)),
+            );
+            subprogram.set(
+                constants::DW_AT_decl_line,
+                AttributeValue::Udata(u64::from(line)),
+            );
         }
         subprogram.set(constants::DW_AT_external, AttributeValue::Flag(true));
     }
@@ -327,15 +370,25 @@ impl Writer for DebugSection {
         match address {
             Address::Constant(value) => self.write_udata(value, size),
             Address::Symbol { symbol, addend } => {
-                self.addresses.push((self.bytes.len(), symbol, size, addend));
-                let placed = self.placed.as_ref().and_then(|placed| placed.get(symbol).copied());
+                self.addresses
+                    .push((self.bytes.len(), symbol, size, addend));
+                let placed = self
+                    .placed
+                    .as_ref()
+                    .and_then(|placed| placed.get(symbol).copied());
                 self.write_udata(placed.unwrap_or(0).wrapping_add(addend as u64), size)
             }
         }
     }
 
-    fn write_offset(&mut self, value: usize, section: SectionId, size: u8) -> gimli::write::Result<()> {
-        self.offsets.push((self.bytes.len(), section, size, value as i64));
+    fn write_offset(
+        &mut self,
+        value: usize,
+        section: SectionId,
+        size: u8,
+    ) -> gimli::write::Result<()> {
+        self.offsets
+            .push((self.bytes.len(), section, size, value as i64));
         self.write_udata(value as u64, size)
     }
 
@@ -366,20 +419,24 @@ fn emit(
 ) -> Result<(), EmitError> {
     let format = product.object.format();
     let mut ids: HashMap<SectionId, object::write::SectionId> = HashMap::new();
-    sections
-        .for_each(|id, section| {
-            if section.bytes.is_empty() {
-                return Ok::<(), EmitError>(());
-            }
-            let (segment, name) = match format {
-                BinaryFormat::MachO => (b"__DWARF".to_vec(), id.name().replacen('.', "__", 1).into_bytes()),
-                _ => (Vec::new(), id.name().as_bytes().to_vec()),
-            };
-            let added = product.object.add_section(segment, name, SectionKind::Debug);
-            product.object.append_section_data(added, &section.bytes, 1);
-            ids.insert(id, added);
-            Ok(())
-        })?;
+    sections.for_each(|id, section| {
+        if section.bytes.is_empty() {
+            return Ok::<(), EmitError>(());
+        }
+        let (segment, name) = match format {
+            BinaryFormat::MachO => (
+                b"__DWARF".to_vec(),
+                id.name().replacen('.', "__", 1).into_bytes(),
+            ),
+            _ => (Vec::new(), id.name().as_bytes().to_vec()),
+        };
+        let added = product
+            .object
+            .add_section(segment, name, SectionKind::Debug);
+        product.object.append_section_data(added, &section.bytes, 1);
+        ids.insert(id, added);
+        Ok(())
+    })?;
     let absolute = |size: u8| RelocationFlags::Generic {
         kind: RelocationKind::Absolute,
         encoding: RelocationEncoding::Generic,

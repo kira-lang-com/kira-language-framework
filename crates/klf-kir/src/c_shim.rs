@@ -172,7 +172,10 @@ fn foreign_declarations(
             continue;
         }
         let (result, types) = first.split_once('|').expect("the spelling has both halves");
-        let _ = writeln!(source, "{result} {name}({types}) __asm__(\"{prefix}{symbol}\");");
+        let _ = writeln!(
+            source,
+            "{result} {name}({types}) __asm__(\"{prefix}{symbol}\");"
+        );
         calls.insert(symbol, Callee::Declared(name));
     }
     Ok((source, calls))
@@ -191,8 +194,11 @@ impl Callee {
         match self {
             Self::Declared(name) => name.clone(),
             Self::Cast(name) => {
-                let types: Vec<String> =
-                    prototype.parameters.iter().map(|ty| records.of(ty)).collect();
+                let types: Vec<String> = prototype
+                    .parameters
+                    .iter()
+                    .map(|ty| records.of(ty))
+                    .collect();
                 format!(
                     "(({} (*)({})){name})",
                     records.of(&prototype.result),

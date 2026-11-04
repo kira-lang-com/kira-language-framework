@@ -39,7 +39,10 @@ pub(crate) fn report() {
     // `KLF_BACKTRACE=full` lists every frame as the platform resolves it,
     // the runtime's own included, as `RUST_BACKTRACE=full` does.
     if std::env::var_os("KLF_BACKTRACE").is_some_and(|value| value == "full") {
-        eprintln!("stack backtrace, every frame:\n{}", Backtrace::force_capture());
+        eprintln!(
+            "stack backtrace, every frame:\n{}",
+            Backtrace::force_capture()
+        );
         CAPTURING.set(false);
         return;
     }
@@ -58,19 +61,22 @@ pub(crate) fn innermost_place() -> Option<Place> {
     if CAPTURING.replace(true) {
         return None;
     }
-    let place = captured().into_iter().find_map(|frame| frame.place).map(|(path, line, column)| {
-        let source_line = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| text.lines().nth(line.saturating_sub(1)).map(str::to_owned));
-        Place {
-            path,
-            line,
-            column,
-            source_line,
-            width: 1,
-            label: String::new(),
-        }
-    });
+    let place = captured()
+        .into_iter()
+        .find_map(|frame| frame.place)
+        .map(|(path, line, column)| {
+            let source_line = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| text.lines().nth(line.saturating_sub(1)).map(str::to_owned));
+            Place {
+                path,
+                line,
+                column,
+                source_line,
+                width: 1,
+                label: String::new(),
+            }
+        });
     CAPTURING.set(false);
     place
 }
@@ -81,7 +87,10 @@ fn captured() -> Vec<Frame> {
         .into_iter()
         .skip_while(|frame| runtime_frame(&frame.name))
         .collect();
-    if let Some(entry) = frames.iter().position(|frame| matches!(frame.name.as_str(), "main" | "_main")) {
+    if let Some(entry) = frames
+        .iter()
+        .position(|frame| matches!(frame.name.as_str(), "main" | "_main"))
+    {
         frames.truncate(entry + 1);
     }
     frames
@@ -123,11 +132,21 @@ fn position(text: &str) -> Option<(String, usize, usize)> {
 /// to the program.
 fn runtime_frame(name: &str) -> bool {
     [
-        "std::", "<std::", "core::", "<core::", "klf_native_rt::", "klfrt_trap", "_klfrt_trap",
-        "_sigtramp", "__sigtramp", "__restore_rt", "_os_", "_platform_",
+        "std::",
+        "<std::",
+        "core::",
+        "<core::",
+        "klf_native_rt::",
+        "klfrt_trap",
+        "_klfrt_trap",
+        "_sigtramp",
+        "__sigtramp",
+        "__restore_rt",
+        "_os_",
+        "_platform_",
     ]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
 }
 
 /// How many of the innermost and outermost frames a long backtrace shows.
@@ -157,9 +176,7 @@ fn listing(frames: &[Frame]) -> String {
         }
     }
     if frames.iter().all(|frame| frame.place.is_none()) {
-        out.push_str(
-            "      (no file and line: the program was built without debug information)\n",
-        );
+        out.push_str("      (no file and line: the program was built without debug information)\n");
     }
     out
 }
@@ -372,7 +389,8 @@ mod tests {
 
     #[test]
     fn frames_read_as_their_source_names_and_places() {
-        let text = "   0: _kir.pick#TrapGallery\n             at ./app/main.kira:8:12\n   1: main\n";
+        let text =
+            "   0: _kir.pick#TrapGallery\n             at ./app/main.kira:8:12\n   1: main\n";
         assert_eq!(
             parse(text),
             vec![

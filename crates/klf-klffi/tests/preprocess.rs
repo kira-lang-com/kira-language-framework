@@ -72,10 +72,7 @@ fn function_like_name_without_arguments_is_left_alone() {
 
 #[test]
 fn invocation_may_span_lines() {
-    assert_eq!(
-        text_of("#define F(a, b) a b\nF(\n1,\n2\n)\n"),
-        "1 2"
-    );
+    assert_eq!(text_of("#define F(a, b) a b\nF(\n1,\n2\n)\n"), "1 2");
 }
 
 #[test]
@@ -129,7 +126,8 @@ fn elif_takes_the_first_true_branch_only() {
 
 #[test]
 fn ifdef_and_ifndef_test_definitions() {
-    let text = "#define HAS\n#ifdef HAS\na\n#endif\n#ifndef HAS\nb\n#endif\n#ifndef MISSING\nc\n#endif\n";
+    let text =
+        "#define HAS\n#ifdef HAS\na\n#endif\n#ifndef HAS\nb\n#endif\n#ifndef MISSING\nc\n#endif\n";
     assert_eq!(text_of(text), "a\nc");
 }
 
@@ -147,9 +145,7 @@ fn an_else_group_defined_inside_a_false_group_stays_off() {
 
 #[test]
 fn quoted_include_resolves_beside_the_including_file() {
-    let files = [
-        ("/src/local.h", "#define L 7\nint l = L;\n"),
-    ];
+    let files = [("/src/local.h", "#define L 7\nint l = L;\n")];
     let text = "#include \"local.h\"\nint main_value;\n";
     let preprocessed = run_in(&linux(), text, &files).expect("preprocesses");
     assert_eq!(preprocessed.text.trim(), "int l = 7;\nint main_value;");
@@ -165,10 +161,7 @@ fn angle_include_resolves_along_include_directories() {
 
 #[test]
 fn include_guard_admits_a_header_once() {
-    let files = [(
-        "/inc/g.h",
-        "#ifndef G\n#define G\nint g;\n#endif\n",
-    )];
+    let files = [("/inc/g.h", "#ifndef G\n#define G\nint g;\n#endif\n")];
     let text = "#include <g.h>\n#include <g.h>\n";
     let preprocessed = run_in(&linux(), text, &files).expect("preprocesses");
     assert_eq!(preprocessed.text.trim(), "int g;");
@@ -177,8 +170,8 @@ fn include_guard_admits_a_header_once() {
 #[test]
 fn include_cycle_is_left_out_with_a_remark() {
     let files = [("/src/main.h", "#include \"main.h\"\nint x;\n")];
-    let preprocessed = run_in(&linux(), "#include \"main.h\"\nint x;\n", &files)
-        .expect("a cycle is not an error");
+    let preprocessed =
+        run_in(&linux(), "#include \"main.h\"\nint x;\n", &files).expect("a cycle is not an error");
     assert_eq!(preprocessed.text.trim(), "int x;");
     assert_eq!(preprocessed.remarks.len(), 1, "{:?}", preprocessed.remarks);
     assert!(preprocessed.remarks[0].contains("include cycle"));
@@ -209,7 +202,9 @@ fn comments_and_line_splices_are_removed() {
 
 #[test]
 fn defines_list_each_name_once_with_its_final_value() {
-    let preprocessed = run("#define A 1\n#define B(x) x\n#define C \"s\"\n#define A 2\n#define D (1+1)\n#undef C\n");
+    let preprocessed = run(
+        "#define A 1\n#define B(x) x\n#define C \"s\"\n#define A 2\n#define D (1+1)\n#undef C\n",
+    );
     let names: Vec<(&str, &str)> = preprocessed
         .defines
         .iter()
@@ -229,7 +224,8 @@ fn guard_defines_appear_in_defines_once() {
 #[test]
 fn predefined_macros_follow_the_target_triple() {
     let windows = Predefined::for_triple("x86_64-pc-windows-msvc").expect("a Windows target");
-    let text = "#if defined(_WIN32) && defined(_WIN64)\nwin64\n#elif defined(__linux__)\nlinux\n#endif\n";
+    let text =
+        "#if defined(_WIN32) && defined(_WIN64)\nwin64\n#elif defined(__linux__)\nlinux\n#endif\n";
     let preprocessed = run_in(&windows, text, &[]).expect("preprocesses");
     assert_eq!(preprocessed.text.trim(), "win64");
     let linux_text = "#if defined(_WIN32)\nwin\n#elif defined(__linux__) && defined(__x86_64__)\nlinux\n#endif\n";

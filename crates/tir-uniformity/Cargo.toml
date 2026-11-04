@@ -1,0 +1,12 @@
+[package]
+name = "tir-uniformity"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tir-diag = { path = "../tir-diag" }
+tir-format = { path = "../tir-format" }
+
+[lints]
+workspace = true

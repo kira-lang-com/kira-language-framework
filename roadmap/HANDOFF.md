@@ -444,7 +444,7 @@ avoided; it is shared (D-254).
   fixed-expression `.klfd` runtime vertical exist, but they do not yet load a
   definition object or expose the complete compiler services needed by a real
   language implementation.
-- Reference: `kira` 1.9.1 at `../kira` (spec's oracle; `tests-kik`, `examples`).
+- Reference: `kira` 1.9.1 at `../deprecated-kira-rust` (spec's oracle; `tests-kik`, `examples`).
   D-139 permits reusing its code/assets. Different IR, so algorithms + corpus,
   not drop-in.
 

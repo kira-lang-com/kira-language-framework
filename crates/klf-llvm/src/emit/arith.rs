@@ -562,12 +562,132 @@ impl FnEmitter<'_, '_> {
                 }
                 Ok(())
             }
+            C::SignedToSignedSaturating
+            | C::SignedToUnsignedSaturating
+            | C::UnsignedToSignedSaturating
+            | C::UnsignedToUnsignedSaturating => {
+                let source_bits = scalar_bits(self.ty_of(value)?)?;
+                let dest_bits = scalar_bits(ty)?;
+                let casted = self.integer_to_int_saturating(
+                    kind,
+                    &src,
+                    &dst,
+                    &operand,
+                    source_bits,
+                    dest_bits,
+                );
+                self.record(&result, casted);
+                Ok(())
+            }
             C::FloatToSigned | C::FloatToUnsigned => {
                 let casted = self.float_to_int(kind, &src, &dst, &operand, ty)?;
                 self.record(&result, casted);
                 Ok(())
             }
+            C::FloatToSignedSaturating | C::FloatToUnsignedSaturating => {
+                let casted = self.float_to_int_saturating(kind, &src, &dst, &operand, ty)?;
+                self.record(&result, casted);
+                Ok(())
+            }
             _ => unreachable!(),
+        }
+    }
+
+    fn integer_to_int_saturating(
+        &mut self,
+        kind: ConvertKind,
+        src: &str,
+        dst: &str,
+        operand: &str,
+        source_bits: u32,
+        dest_bits: u32,
+    ) -> String {
+        use ConvertKind as C;
+        let source_signed = matches!(
+            kind,
+            C::SignedToSignedSaturating | C::SignedToUnsignedSaturating
+        );
+        let dest_signed = matches!(
+            kind,
+            C::SignedToSignedSaturating | C::UnsignedToSignedSaturating
+        );
+        let mut bounded = operand.to_owned();
+        if source_signed {
+            if dest_signed && dest_bits < source_bits {
+                let minimum = -(1i128 << (dest_bits - 1));
+                let maximum = (1i128 << (dest_bits - 1)) - 1;
+                let below = self.fresh();
+                self.line(&format!("  {below} = icmp slt {src} {bounded}, {minimum}"));
+                let low_clamped = self.fresh();
+                self.line(&format!(
+                    "  {low_clamped} = select i1 {below}, {src} {minimum}, {src} {bounded}"
+                ));
+                let above = self.fresh();
+                self.line(&format!(
+                    "  {above} = icmp sgt {src} {low_clamped}, {maximum}"
+                ));
+                let high_clamped = self.fresh();
+                self.line(&format!(
+                    "  {high_clamped} = select i1 {above}, {src} {maximum}, {src} {low_clamped}"
+                ));
+                bounded = high_clamped;
+            } else if !dest_signed {
+                let negative = self.fresh();
+                self.line(&format!("  {negative} = icmp slt {src} {bounded}, 0"));
+                let low_clamped = self.fresh();
+                self.line(&format!(
+                    "  {low_clamped} = select i1 {negative}, {src} 0, {src} {bounded}"
+                ));
+                if dest_bits < source_bits {
+                    let maximum = ((1u128 << dest_bits) - 1) as i64;
+                    let above = self.fresh();
+                    self.line(&format!(
+                        "  {above} = icmp sgt {src} {low_clamped}, {maximum}"
+                    ));
+                    let high_clamped = self.fresh();
+                    self.line(&format!(
+                        "  {high_clamped} = select i1 {above}, {src} {maximum}, {src} {low_clamped}"
+                    ));
+                    bounded = high_clamped;
+                } else {
+                    bounded = low_clamped;
+                }
+            }
+        } else if dest_signed && dest_bits <= source_bits {
+            let maximum = (1i128 << (dest_bits - 1)) - 1;
+            let above = self.fresh();
+            self.line(&format!("  {above} = icmp ugt {src} {bounded}, {maximum}"));
+            let high_clamped = self.fresh();
+            self.line(&format!(
+                "  {high_clamped} = select i1 {above}, {src} {maximum}, {src} {bounded}"
+            ));
+            bounded = high_clamped;
+        } else if !dest_signed && dest_bits < source_bits {
+            let maximum = (1u128 << dest_bits) - 1;
+            let above = self.fresh();
+            self.line(&format!("  {above} = icmp ugt {src} {bounded}, {maximum}"));
+            let high_clamped = self.fresh();
+            self.line(&format!(
+                "  {high_clamped} = select i1 {above}, {src} {maximum}, {src} {bounded}"
+            ));
+            bounded = high_clamped;
+        }
+
+        if source_bits == dest_bits {
+            bounded
+        } else {
+            let casted = self.fresh();
+            let operation = if source_bits > dest_bits {
+                "trunc"
+            } else if source_signed {
+                "sext"
+            } else {
+                "zext"
+            };
+            self.line(&format!(
+                "  {casted} = {operation} {src} {bounded} to {dst}"
+            ));
+            casted
         }
     }
 
@@ -621,6 +741,78 @@ impl FnEmitter<'_, '_> {
         let casted = self.fresh();
         self.line(&format!("  {casted} = {op} {src} {operand} to {dst}"));
         Ok(casted)
+    }
+
+    fn float_to_int_saturating(
+        &mut self,
+        kind: ConvertKind,
+        src: &str,
+        dst: &str,
+        operand: &str,
+        ty: &Type,
+    ) -> Result<String, EmitError> {
+        let signed = matches!(kind, ConvertKind::FloatToSignedSaturating);
+        let bits = scalar_bits(ty)?;
+        let nan = self.fresh();
+        self.line(&format!("  {nan} = fcmp uno {src} {operand}, {operand}"));
+
+        let (minimum, upper, low_value, high_value, operation) = if signed {
+            let (minimum, maximum) = signed_bounds(bits);
+            (
+                minimum as f64,
+                (1i128 << (bits - 1)) as f64,
+                minimum.to_string(),
+                maximum.to_string(),
+                "fptosi",
+            )
+        } else {
+            (
+                0.0,
+                (1u128 << bits) as f64,
+                "0".to_owned(),
+                unsigned_max(bits).to_string(),
+                "fptoui",
+            )
+        };
+        let low = self.fresh();
+        self.line(&format!(
+            "  {low} = fcmp olt {src} {operand}, {}",
+            float_hex(minimum)
+        ));
+        let high = self.fresh();
+        self.line(&format!(
+            "  {high} = fcmp oge {src} {operand}, {}",
+            float_hex(upper)
+        ));
+        let outside = self.fresh();
+        self.line(&format!("  {outside} = or i1 {low}, {high}"));
+        let invalid = self.fresh();
+        self.line(&format!("  {invalid} = or i1 {outside}, {nan}"));
+
+        // Keep the conversion itself in range; select the saturated endpoint
+        // afterward so LLVM never evaluates an out-of-range fptosi/fptoui.
+        let safe = self.fresh();
+        self.line(&format!(
+            "  {safe} = select i1 {invalid}, {src} {}, {src} {operand}",
+            float_hex(0.0)
+        ));
+        let converted = self.fresh();
+        self.line(&format!(
+            "  {converted} = {operation} {src} {safe} to {dst}"
+        ));
+        let low_clamped = self.fresh();
+        self.line(&format!(
+            "  {low_clamped} = select i1 {low}, {dst} {low_value}, {dst} {converted}"
+        ));
+        let high_clamped = self.fresh();
+        self.line(&format!(
+            "  {high_clamped} = select i1 {high}, {dst} {high_value}, {dst} {low_clamped}"
+        ));
+        let result = self.fresh();
+        self.line(&format!(
+            "  {result} = select i1 {nan}, {dst} 0, {dst} {high_clamped}"
+        ));
+        Ok(result)
     }
 }
 

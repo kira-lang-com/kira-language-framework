@@ -18,10 +18,10 @@ mod file_services;
 pub use file_services::{listing, path_present};
 mod format_drive;
 mod format_services;
-mod project_hook;
 mod metadata;
 mod module_builder;
 mod module_evaluation;
+mod project_hook;
 mod report;
 mod shader;
 mod sink;
@@ -35,6 +35,7 @@ mod aggregate_call_builder;
 mod arithmetic_builder;
 mod control_flow_builder;
 mod conversion_builder;
+mod debug_locations;
 mod default_policy;
 mod driver_arguments;
 mod enum_array_builder;
@@ -59,7 +60,6 @@ mod struct_builder;
 mod struct_copy;
 mod terminator_builder;
 mod trap_report;
-mod debug_locations;
 mod type_builder;
 mod type_table;
 mod type_value_builder;
@@ -75,6 +75,10 @@ use klf_services::{
     DefinitionPhaseArguments, DefinitionRuntimeArtifact, DefinitionUnit, DefinitionUnitList,
     DriverFlagValue, Exclusivity, FunctionBuilder, MemoryModel, ModuleBuilder, Session,
     SessionHandle, UnitId,
+};
+pub use klf_services::{
+    TirBlockBuilder, TirFunctionBuilder, TirFunctionParameter, TirFunctionSignature,
+    TirModuleBuildError, TirModuleBuilder,
 };
 use klf_source::Span;
 use klf_target::Target;

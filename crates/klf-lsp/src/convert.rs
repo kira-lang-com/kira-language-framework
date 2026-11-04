@@ -210,7 +210,9 @@ pub fn uri(path: &Path) -> Option<Uri> {
     #[cfg(windows)]
     let path = path.replace('\\', "/");
     #[cfg(windows)]
-    if !path.starts_with('/') { text.push('/'); }
+    if !path.starts_with('/') {
+        text.push('/');
+    }
     for byte in path.bytes() {
         if byte.is_ascii_alphanumeric() || b"/:-._~".contains(&byte) {
             text.push(char::from(byte));
@@ -240,7 +242,9 @@ pub fn path(uri: &Uri) -> Option<PathBuf> {
     #[cfg(windows)]
     let decoded = if decoded.as_bytes().get(2) == Some(&b':') && decoded.starts_with('/') {
         decoded[1..].to_owned()
-    } else { decoded };
+    } else {
+        decoded
+    };
     #[cfg(windows)]
     let decoded = decoded.replace('/', "\\");
     Some(PathBuf::from(decoded))

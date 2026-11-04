@@ -7,8 +7,8 @@ mod operators;
 mod types;
 
 pub use operation::{
-    BlockTarget, ClosureCall, ConditionalBranch, EnumSwitch, FallibleCall, IndirectCall,
-    InlineAsm, IntegerSwitch, IntrinsicCall, Operation, RawAccess, UnwindingCall, VtableCall, WitnessCall,
+    BlockTarget, ClosureCall, ConditionalBranch, EnumSwitch, FallibleCall, IndirectCall, InlineAsm,
+    IntegerSwitch, IntrinsicCall, Operation, RawAccess, UnwindingCall, VtableCall, WitnessCall,
 };
 pub use operation_uses::ResultArity;
 pub use operators::{

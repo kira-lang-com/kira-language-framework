@@ -60,7 +60,9 @@ pub fn tcp_connect(address_text: &[u8]) -> i64 {
         // socket still connecting may refuse it, as Windows does, and that
         // is no reason to fail the connection.
         let _ = stream.set_nodelay(true);
-        Ok(table::insert(Resource::Stream(Mutex::new(Connection::Tcp(stream)))))
+        Ok(table::insert(Resource::Stream(Mutex::new(
+            Connection::Tcp(stream),
+        ))))
     })())
 }
 
@@ -75,7 +77,9 @@ pub fn unix_connect(path: &[u8]) -> i64 {
             use std::os::unix::ffi::OsStrExt;
             let path = std::path::Path::new(std::ffi::OsStr::from_bytes(path));
             let stream = mio::net::UnixStream::connect(path)?;
-            Ok(table::insert(Resource::Stream(Mutex::new(Connection::Local(stream)))))
+            Ok(table::insert(Resource::Stream(Mutex::new(
+                Connection::Local(stream),
+            ))))
         }
         #[cfg(not(unix))]
         {
@@ -115,7 +119,9 @@ pub fn tcp_accept(handle: i64, peer: &mut [u8]) -> i64 {
         let (stream, from) = table::lock(listener).accept()?;
         stream.set_nodelay(true)?;
         ended_text(&from.to_string(), peer);
-        Ok(table::insert(Resource::Stream(Mutex::new(Connection::Tcp(stream)))))
+        Ok(table::insert(Resource::Stream(Mutex::new(
+            Connection::Tcp(stream),
+        ))))
     })())
 }
 

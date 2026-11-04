@@ -12,9 +12,17 @@ pub(crate) fn state() -> i32 {
     // enter process mode after the library is loaded, so query it on each call.
     unsafe extern "system" {
         fn GetModuleHandleW(name: *const u16) -> *mut core::ffi::c_void;
-        fn GetProcAddress(module: *mut core::ffi::c_void, name: *const u8) -> *mut core::ffi::c_void;
+        fn GetProcAddress(
+            module: *mut core::ffi::c_void,
+            name: *const u8,
+        ) -> *mut core::ffi::c_void;
     }
-    let entry = unsafe { GetProcAddress(GetModuleHandleW(std::ptr::null()), c"klfrt_process_active".as_ptr().cast()) };
+    let entry = unsafe {
+        GetProcAddress(
+            GetModuleHandleW(std::ptr::null()),
+            c"klfrt_process_active".as_ptr().cast(),
+        )
+    };
     if entry.is_null() {
         return 0;
     }

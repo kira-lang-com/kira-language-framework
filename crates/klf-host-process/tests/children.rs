@@ -25,9 +25,16 @@ fn read_all(child: i64, stream: i64) -> Vec<u8> {
 
 #[test]
 fn a_piped_child_is_read_and_waited_for() {
-    let handle = command(&["/bin/sh", "-c", "printf \"$GREETING\"; printf oops >&2; exit 3"]);
+    let handle = command(&[
+        "/bin/sh",
+        "-c",
+        "printf \"$GREETING\"; printf oops >&2; exit 3",
+    ]);
     assert_eq!(children::spawn_clear_environment(handle), 1);
-    assert_eq!(children::spawn_environment(handle, b"GREETING=hello there"), 1);
+    assert_eq!(
+        children::spawn_environment(handle, b"GREETING=hello there"),
+        1
+    );
     assert_eq!(children::spawn_stream(handle, 1, Stream::Pipe), 1);
     assert_eq!(children::spawn_stream(handle, 2, Stream::Pipe), 1);
     let child = children::spawn_start(handle);
@@ -48,7 +55,11 @@ fn input_goes_to_the_child_and_a_directory_is_its_own() {
     assert_eq!(children::child_write(child, b"piped"), 5);
     assert_eq!(children::child_close_input(child), 1);
     let output = read_all(child, 1);
-    assert!(output.ends_with(b"\npiped"), "{}", String::from_utf8_lossy(&output));
+    assert!(
+        output.ends_with(b"\npiped"),
+        "{}",
+        String::from_utf8_lossy(&output)
+    );
     assert_eq!(children::child_wait(child, -1), 0);
 }
 

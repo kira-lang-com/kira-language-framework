@@ -11,8 +11,8 @@
 //! ([`keep_subqueries`]): an answer computed by another toolchain may differ.
 
 use crate::{DefinitionServiceState, ServiceSink};
-use klf_rt::{MAX_SERVICE_BUFFER_BYTES, ServiceMemory};
 use klf_ridl::sha256::{hex, sha256};
+use klf_rt::{MAX_SERVICE_BUFFER_BYTES, ServiceMemory};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 

@@ -47,7 +47,9 @@ impl DefinitionServiceState {
         let offset = offset.min(text.len());
         let line = starts.partition_point(|start| *start <= offset).max(1);
         let line_start = starts[line - 1];
-        let column = text.get(line_start..offset).map_or(1, |prefix| prefix.chars().count() + 1);
+        let column = text
+            .get(line_start..offset)
+            .map_or(1, |prefix| prefix.chars().count() + 1);
         Some(DebugLocation {
             file: path,
             line: u32::try_from(line).ok()?,

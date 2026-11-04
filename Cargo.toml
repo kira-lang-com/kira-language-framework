@@ -47,6 +47,16 @@ members = [
     "crates/klf-cli",
     "crates/klf-toy-calc",
     "crates/klf-driver",
+    "crates/tir-core",
+    "crates/tir-diag",
+    "crates/tir-format",
+    "crates/tir-target",
+    "crates/tir-types",
+    "crates/tir-layout",
+    "crates/tir-uniformity",
+    "crates/tir-verify",
+    "crates/tvisa-format",
+    "crates/tvisa-verify",
     "xtask",
 ]
 
@@ -54,6 +64,9 @@ members = [
 version = "26.10.4"
 edition = "2024"
 rust-version = "1.96"
+
+[profile.dev]
+incremental = false
 
 [workspace.lints.rust]
 # `deny`, not `forbid`, so the one spec-mandated unsafe region — the VM's

@@ -17,9 +17,10 @@ mod observe;
 mod query;
 mod service;
 mod session;
-mod snippet;
 mod shader_family;
+mod snippet;
 mod solver;
+mod tir_builder;
 mod types;
 
 pub use arena::{Arena, Id};
@@ -49,11 +50,18 @@ pub use session::{
     ArtifactId, Entity, EntityId, Expansion, LanguageDefaults, Namespace, Position, ScopeId,
     Session, SessionHandle, UnitId, overlay_key, read_through,
 };
-pub use snippet::{Excerpt, Rendered, render as render_snippet, runtime_diagnostic, session_diagnostic, split_message};
 pub use shader_family::{SHADER_KEYS, ShaderFamily, ShaderSettings};
+pub use snippet::{
+    Excerpt, Rendered, render as render_snippet, runtime_diagnostic, session_diagnostic,
+    split_message,
+};
 pub use solver::{
     Binding, Bindings, Choice, Conflict, Conformance, Requirement, Solution, Solver, TraitId,
     TraitInfo,
+};
+pub use tir_builder::{
+    TirBlockBuilder, TirFunctionBuilder, TirFunctionParameter, TirFunctionSignature,
+    TirModuleBuildError, TirModuleBuilder,
 };
 pub use types::{
     CopyPolicy, DestroyPolicy, FunctionSignature, LayoutRule, Pairing, Policy, RelocatePolicy,

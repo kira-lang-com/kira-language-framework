@@ -286,7 +286,11 @@ pub(crate) fn image_library(image: &str, target: &str) -> Vec<OsString> {
 /// `binary` on Windows, which has no run-time search path: its loader looks
 /// for a DLL a binary needs in the binary's own directory, and the library
 /// runs the image it finds beside itself.
-pub(crate) fn place_image_libraries(module: &Module, target: &str, binary: &Path) -> Result<(), String> {
+pub(crate) fn place_image_libraries(
+    module: &Module,
+    target: &str,
+    binary: &Path,
+) -> Result<(), String> {
     if !target.contains("windows") {
         return Ok(());
     }
@@ -294,7 +298,11 @@ pub(crate) fn place_image_libraries(module: &Module, target: &str, binary: &Path
         return Ok(());
     };
     for attribute in &module.attributes {
-        let Some(value) = attribute.value.as_ref().filter(|value| value.ends_with(".klbc")) else {
+        let Some(value) = attribute
+            .value
+            .as_ref()
+            .filter(|value| value.ends_with(".klbc"))
+        else {
             continue;
         };
         if attribute.name != LIBRARY_ATTRIBUTE {
@@ -311,8 +319,13 @@ pub(crate) fn place_image_libraries(module: &Module, target: &str, binary: &Path
             if std::path::absolute(&placed).ok() == Some(file.clone()) {
                 continue;
             }
-            std::fs::copy(&file, &placed)
-                .map_err(|error| format!("cannot copy {} beside {}: {error}", file.display(), binary.display()))?;
+            std::fs::copy(&file, &placed).map_err(|error| {
+                format!(
+                    "cannot copy {} beside {}: {error}",
+                    file.display(),
+                    binary.display()
+                )
+            })?;
         }
     }
     Ok(())
@@ -358,7 +371,11 @@ fn copy_resource(source: &Path, destination: &Path) -> Result<(), String> {
         return Ok(());
     }
     std::fs::copy(source, destination).map_err(|error| {
-        format!("cannot copy {} to {}: {error}", source.display(), destination.display())
+        format!(
+            "cannot copy {} to {}: {error}",
+            source.display(),
+            destination.display()
+        )
     })?;
     Ok(())
 }

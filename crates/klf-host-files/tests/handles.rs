@@ -27,7 +27,10 @@ fn positional_writes_and_reads_round_trip() {
     assert_eq!(handles::size(handle), 5);
     assert_eq!(handles::close(handle), 1);
     assert_eq!(handles::close(handle), Failure::InvalidHandle as i64);
-    assert_eq!(handles::open(&path, Access::CreateNew), Failure::Exists as i64);
+    assert_eq!(
+        handles::open(&path, Access::CreateNew),
+        Failure::Exists as i64
+    );
     let _ = std::fs::remove_file(String::from_utf8(path).unwrap_or_default());
 }
 
@@ -59,10 +62,14 @@ fn a_lock_is_held_until_its_handle_closes() {
 fn a_descriptor_a_library_handed_over_closes_once() {
     use std::os::fd::IntoRawFd;
     let path = scratch("descriptor");
-    let file = std::fs::File::create(String::from_utf8(path.clone()).expect("utf-8 path")).expect("created");
+    let file = std::fs::File::create(String::from_utf8(path.clone()).expect("utf-8 path"))
+        .expect("created");
     let descriptor = i64::from(file.into_raw_fd());
     assert_eq!(handles::close_descriptor(descriptor), 1);
-    assert_eq!(handles::close_descriptor(descriptor), Failure::InvalidHandle as i64);
+    assert_eq!(
+        handles::close_descriptor(descriptor),
+        Failure::InvalidHandle as i64
+    );
     assert_eq!(handles::close_descriptor(-1), Failure::InvalidHandle as i64);
     let _ = std::fs::remove_file(String::from_utf8(path).expect("utf-8 path"));
 }

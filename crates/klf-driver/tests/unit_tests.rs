@@ -67,7 +67,10 @@ fn kira_frontend_tests_do_not_run_against_a_legacy_definition() {
     std::fs::write(package.join("tests/legacy.kcore"), TESTS).expect("legacy tests");
     let mut session = Session::new("x86_64-pc-windows-msvc".parse().expect("target"));
     let error = run_unit_tests(&mut session, &package).expect_err("unsupported Kira tests");
-    assert!(error.contains("refusing to run the tests against a different definition"), "{error}");
+    assert!(
+        error.contains("refusing to run the tests against a different definition"),
+        "{error}"
+    );
     std::fs::remove_dir_all(package).expect("remove fixture");
 }
 
@@ -78,8 +81,13 @@ fn kira_only_tests_are_not_silently_skipped() {
     std::fs::create_dir_all(package.join("tests")).expect("test directory");
     std::fs::write(package.join("package.kira"), "").expect("manifest");
     std::fs::write(package.join("app/Language.kira"), "").expect("frontend");
-    std::fs::write(package.join("tests/unit.kira"), "@Test function example() {}").expect("test");
+    std::fs::write(
+        package.join("tests/unit.kira"),
+        "@Test function example() {}",
+    )
+    .expect("test");
     let mut session = Session::new("x86_64-pc-windows-msvc".parse().expect("target"));
-    run_unit_tests(&mut session, &package).expect_err("an invalid Kira frontend must not silently skip its tests");
+    run_unit_tests(&mut session, &package)
+        .expect_err("an invalid Kira frontend must not silently skip its tests");
     std::fs::remove_dir_all(package).expect("remove fixture");
 }

@@ -85,7 +85,11 @@ fn capabilities(process: Option<bool>) -> Capabilities {
     });
     capabilities.register("klfsvc_io_puti", move |arguments| {
         let value = i64::from_ne_bytes(arguments.first().copied().unwrap_or(0).to_ne_bytes());
-        if process.unwrap_or_else(|| klf_native_rt::klfrt_process_active() & 1 != 0) { println!("{value}"); } else { println!("IO {value}"); }
+        if process.unwrap_or_else(|| klf_native_rt::klfrt_process_active() & 1 != 0) {
+            println!("{value}");
+        } else {
+            println!("IO {value}");
+        }
         0
     });
     capabilities

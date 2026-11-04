@@ -29,11 +29,20 @@ pub struct ProjectError {
 }
 
 impl From<String> for ProjectError {
-    fn from(message: String) -> Self { Self { message, code: None, span: None, path: None } }
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            code: None,
+            span: None,
+            path: None,
+        }
+    }
 }
 
 impl From<&str> for ProjectError {
-    fn from(message: &str) -> Self { message.to_owned().into() }
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
 }
 
 /// A set of inputs one `check` analyzes.
@@ -80,7 +89,9 @@ pub fn resolve(file: &Path, folders: &[PathBuf], markers: &[String]) -> Project 
 
 fn directory_project(root: &Path) -> Project {
     Project {
-        name: root.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+        name: root
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
         root: root.to_path_buf(),
         arguments: vec![root.to_string_lossy().into_owned()],
         loose: false,

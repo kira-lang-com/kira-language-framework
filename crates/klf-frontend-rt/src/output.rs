@@ -6,8 +6,8 @@
 //! built, `<out>/lib/<lang>/<target>/libstd.a`.
 
 use crate::runtime::Runtime;
-use crate::toolchain::{CToolchain, check_target, find_tool, is_apple, is_windows};
 pub(crate) use crate::toolchain::system_libraries;
+use crate::toolchain::{CToolchain, check_target, find_tool, is_apple, is_windows};
 use klf_defsvc::FrontendMetadata;
 use klf_kir::Module;
 use std::path::{Path, PathBuf};
@@ -59,8 +59,10 @@ pub(crate) fn emit_binary(
                     (object, Some(cache))
                 }
                 None => (
-                    klf_cranelift::emit_object_exporting(&module, "main", convention, &exports, None)
-                        .map_err(|error| format!("Cranelift emission failed: {error:?}"))?,
+                    klf_cranelift::emit_object_exporting(
+                        &module, "main", convention, &exports, None,
+                    )
+                    .map_err(|error| format!("Cranelift emission failed: {error:?}"))?,
                     None,
                 ),
             };
@@ -548,7 +550,9 @@ fn optimized(
         &mut module,
         level,
         klf_kir_passes::Backend::Cranelift,
-        cache.as_ref().map(|cache| cache as &dyn klf_kir_passes::Memo),
+        cache
+            .as_ref()
+            .map(|cache| cache as &dyn klf_kir_passes::Memo),
     );
     if let Some(cache) = cache {
         cache.settle();

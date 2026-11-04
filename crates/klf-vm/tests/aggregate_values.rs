@@ -33,4 +33,3 @@ fn every_aggregate_instruction_computes_its_value() {
         );
     }
 }
-

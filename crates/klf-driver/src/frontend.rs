@@ -96,19 +96,37 @@ pub fn build_frontend(
     if !built.shader && !languages.is_empty() {
         return Err("additional language packages require a shader frontend".to_owned());
     }
-    if built.shader && languages.iter().any(|language| crate::kira_frontend::is_package(language)) {
+    if built.shader
+        && languages
+            .iter()
+            .any(|language| crate::kira_frontend::is_package(language))
+    {
         let binary = output.map_or_else(|| PathBuf::from(&built.driver), Path::to_path_buf);
         crate::kira_frontend::build_with_kcore_primary(
-            session, root, &built.object, &binary, target, languages, profile,
+            session,
+            root,
+            &built.object,
+            &binary,
+            target,
+            languages,
+            profile,
         )?;
-        return Ok(BuiltFrontend { binary, driver: built.driver });
+        return Ok(BuiltFrontend {
+            binary,
+            driver: built.driver,
+        });
     }
     let mut objects = vec![built.object];
     if built.shader {
-        let mut seen = vec![root.canonicalize().map_err(|error| format!("{}: {error}", root.display()))?];
+        let mut seen = vec![
+            root.canonicalize()
+                .map_err(|error| format!("{}: {error}", root.display()))?,
+        ];
         for language in languages {
             let language: &Path = language;
-            let canonical = language.canonicalize().map_err(|error| format!("{}: {error}", language.display()))?;
+            let canonical = language
+                .canonicalize()
+                .map_err(|error| format!("{}: {error}", language.display()))?;
             if seen.contains(&canonical) {
                 return Err(format!(
                     "`{}` names a language already linked into this frontend",

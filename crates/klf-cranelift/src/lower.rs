@@ -157,7 +157,8 @@ impl<'a> FnLowerer<'a> {
             self.places.push(place.clone());
         }
         let index = u32::try_from(self.places.len() - 1).unwrap_or(0);
-        self.builder.set_srcloc(cranelift::codegen::ir::SourceLoc::new(index));
+        self.builder
+            .set_srcloc(cranelift::codegen::ir::SourceLoc::new(index));
     }
 
     pub(crate) fn lower(&mut self, function: &Function) -> Result<(), EmitError> {
@@ -658,7 +659,9 @@ pub(crate) fn single(results: &[Name]) -> Result<&Name, EmitError> {
 /// a language check's message instead.
 pub(crate) fn trap_number(code: &str) -> Option<i32> {
     let (prefix, digits) = code.rsplit_once('-')?;
-    let named = prefix.split('-').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_uppercase()));
+    let named = prefix
+        .split('-')
+        .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_uppercase()));
     if !named || digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }

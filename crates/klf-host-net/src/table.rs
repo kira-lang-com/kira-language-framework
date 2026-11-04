@@ -83,7 +83,12 @@ impl Write for Connection {
 }
 
 impl Source for Connection {
-    fn register(&mut self, registry: &Registry, token: Token, interests: Interest) -> io::Result<()> {
+    fn register(
+        &mut self,
+        registry: &Registry,
+        token: Token,
+        interests: Interest,
+    ) -> io::Result<()> {
         match self {
             Self::Tcp(stream) => stream.register(registry, token, interests),
             #[cfg(unix)]

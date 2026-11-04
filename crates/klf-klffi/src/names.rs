@@ -94,7 +94,10 @@ mod tests {
         let taken = vec!["type_value".to_owned()];
         assert_eq!(field_name("type", &taken).as_deref(), Some("type_value_"));
         assert_eq!(field_name("width", &taken).as_deref(), Some("width"));
-        assert_eq!(field_name("function", &[]).as_deref(), Some("function_value"));
+        assert_eq!(
+            field_name("function", &[]).as_deref(),
+            Some("function_value")
+        );
         assert_eq!(field_name("", &taken), None);
     }
 

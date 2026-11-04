@@ -72,7 +72,11 @@ pub(crate) fn in_order<S, R: Send>(
             .collect();
         handles
             .into_iter()
-            .flat_map(|handle| handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+            .flat_map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
             .collect()
     });
     results.sort_unstable_by_key(|(position, _)| *position);
@@ -184,4 +188,3 @@ pub(crate) fn compile(
         fresh: fresh.into_iter().collect(),
     })
 }
-

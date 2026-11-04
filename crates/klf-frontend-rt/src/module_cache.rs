@@ -21,11 +21,11 @@
 //! target and profile, and a new entry replaces the others of its slot: an
 //! edited package or a rebuilt frontend makes the older entries unreachable.
 
+use klf_core::FileId;
 use klf_defsvc::{
     Decode, FrontendMetadata, Kept, ModuleCache, Stored, UnitTrace, render_diagnostics,
     render_kept_diagnostics,
 };
-use klf_core::FileId;
 use klf_kir::Module;
 use klf_ridl::sha256::{hex, sha256};
 use klf_services::{DefinitionPhase, DefinitionUnit, Observation, Session};
@@ -97,7 +97,8 @@ const OUTPUT_FLAGS: &[&str] = &["doc"];
 /// Whether the run sets a flag in `OUTPUT_FLAGS` to true.
 fn writes_output(invocation: &klf_defsvc::driver_cli::Invocation) -> bool {
     invocation.flag_overrides.iter().any(|(name, value)| {
-        OUTPUT_FLAGS.contains(&name.as_str()) && matches!(value, klf_services::DriverFlagValue::Boolean(true))
+        OUTPUT_FLAGS.contains(&name.as_str())
+            && matches!(value, klf_services::DriverFlagValue::Boolean(true))
     })
 }
 
@@ -206,7 +207,12 @@ impl DiskModuleCache {
 }
 
 impl ModuleCache for DiskModuleCache {
-    fn stored(&self, session: &Session, unit: &DefinitionUnit, program: &[FileId]) -> Option<Stored> {
+    fn stored(
+        &self,
+        session: &Session,
+        unit: &DefinitionUnit,
+        program: &[FileId],
+    ) -> Option<Stored> {
         let path = self.entry_path(session, unit, program)?;
         if !path.is_file() {
             return None;
@@ -254,18 +260,25 @@ impl ModuleCache for DiskModuleCache {
             return;
         }
         let observations = &session.observations()[trace.observations.clone()];
-        let contract = |path: &PathBuf| path.extension().is_some_and(|extension| extension == "ridl");
+        let contract = |path: &PathBuf| {
+            path.extension()
+                .is_some_and(|extension| extension == "ridl")
+        };
         let seed = crate::contract_reach::seed(
             unit.files()
                 .iter()
                 .map(|file| session.file(*file).text())
-                .chain(observations.iter().filter_map(|observation| match observation {
-                    Observation::Read {
-                        path,
-                        text: Some(text),
-                    } if !contract(path) => Some(&**text),
-                    _ => None,
-                })),
+                .chain(
+                    observations
+                        .iter()
+                        .filter_map(|observation| match observation {
+                            Observation::Read {
+                                path,
+                                text: Some(text),
+                            } if !contract(path) => Some(&**text),
+                            _ => None,
+                        }),
+                ),
         );
         let mut contracts: Vec<(&PathBuf, &str)> = Vec::new();
         for observation in observations {

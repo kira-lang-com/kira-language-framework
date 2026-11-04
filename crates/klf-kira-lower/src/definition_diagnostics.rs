@@ -80,8 +80,13 @@ fn spec(session: &mut Session, value: &Expr) -> Option<DiagnosticSpec> {
         return None;
     };
     Some(
-        DiagnosticSpec::new(code, severity.unwrap_or(Severity::Error), title, explanation)
-            .with_help(help.unwrap_or_default()),
+        DiagnosticSpec::new(
+            code,
+            severity.unwrap_or(Severity::Error),
+            title,
+            explanation,
+        )
+        .with_help(help.unwrap_or_default()),
     )
 }
 

@@ -16,7 +16,12 @@ pub trait ModuleCache {
     /// What an earlier build of `unit` kept, when there is an entry for it:
     /// read off the session now, and checked and decoded by the returned
     /// function on any thread.
-    fn stored(&self, session: &Session, unit: &DefinitionUnit, program: &[FileId]) -> Option<Stored>;
+    fn stored(
+        &self,
+        session: &Session,
+        unit: &DefinitionUnit,
+        program: &[FileId],
+    ) -> Option<Stored>;
 
     /// Keeps the diagnostics the phases of a unit the cache answered kept
     /// when they ran.
@@ -146,7 +151,10 @@ pub fn drive_cached<R: PhaseRunner>(
         // A unit after a rejected one never comes to be answered.
         let mut ran: Vec<Option<Result<Module, DriveError>>> = Vec::new();
         for (unit, checked) in units.iter().zip(&checked) {
-            if ran.last().is_some_and(|answer| matches!(answer, Some(Err(_)))) {
+            if ran
+                .last()
+                .is_some_and(|answer| matches!(answer, Some(Err(_))))
+            {
                 break;
             }
             let held = *checked && holds.recv().unwrap_or(false);

@@ -1,0 +1,22 @@
+/// Optional TIR GPU capabilities in their binary bit order.
+pub const GPU_CAPABILITY_NAMES: &[&str; 19] = &[
+    "float64",
+    "atomic128",
+    "float16.atomics",
+    "tile",
+    "framebuffer_fetch",
+    "raster_order",
+    "work_graphs",
+    "work_graphs.mesh",
+    "coop.fp8",
+    "coop.blockscaled",
+    "coop.reduce",
+    "compute_derivatives",
+    "float32.denorm_preserve",
+    "sparse_residency",
+    "sampler_feedback",
+    "subgroup_size_control",
+    "triangle_vertex_positions",
+    "shading_rate",
+    "printf",
+];

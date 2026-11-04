@@ -13,7 +13,9 @@ use cranelift::codegen::binemit::Reloc;
 use cranelift::codegen::ir::{KnownSymbol, LibCall};
 use cranelift::codegen::isa::TargetIsa;
 use cranelift::codegen::isa::unwind::UnwindInfo;
-use cranelift_module::{DataId, FuncId, FuncOrDataId, Linkage, Module, ModuleReloc, ModuleRelocTarget};
+use cranelift_module::{
+    DataId, FuncId, FuncOrDataId, Linkage, Module, ModuleReloc, ModuleRelocTarget,
+};
 use cranelift_object::ObjectModule;
 use klf_kir::{Function, Module as KirModule};
 use rustc_hash::FxHashMap as HashMap;
@@ -135,7 +137,9 @@ fn shallow_digest(items: &[Item<'_>], names: &HashMap<&str, u32>) -> (Key, Vec<u
         };
         if hashed.is_err() {
             hashing.hasher.update(std::process::id().to_le_bytes());
-            hashing.hasher.update(format!("{:?}", std::time::SystemTime::now()));
+            hashing
+                .hasher
+                .update(format!("{:?}", std::time::SystemTime::now()));
         }
     }
     let Hashing { hasher, named, .. } = hashing;
@@ -158,7 +162,10 @@ fn linkage_tag(linkage: Linkage) -> u8 {
 fn deep_digests(shallow: &[(Key, Vec<u32>)]) -> Vec<Key> {
     let mut digests = vec![[0; 32]; shallow.len()];
     for cycle in cycles(shallow) {
-        let mut members: Vec<&Key> = cycle.iter().map(|&item| &shallow[item as usize].0).collect();
+        let mut members: Vec<&Key> = cycle
+            .iter()
+            .map(|&item| &shallow[item as usize].0)
+            .collect();
         members.sort_unstable();
         let mut reached: Vec<&Key> = cycle
             .iter()
@@ -260,7 +267,13 @@ fn build_digest(module: &KirModule, isa: &dyn TargetIsa, unwinding: bool) -> Key
     }
     hasher.update(isa.triple().to_string());
     hasher.update(isa.flags().to_string());
-    hasher.update(isa.isa_flags().iter().map(ToString::to_string).collect::<Vec<_>>().join(","));
+    hasher.update(
+        isa.isa_flags()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    );
     hasher.update([u8::from(unwinding)]);
     let names = HashMap::default();
     let mut hashing = Hashing::new(&names, &[]);
@@ -272,7 +285,9 @@ fn build_digest(module: &KirModule, isa: &dyn TargetIsa, unwinding: bool) -> Key
         &module.attributes,
     );
     if whole.serialize(&mut hashing).is_err() {
-        hashing.hasher.update(format!("{:?}", std::time::SystemTime::now()));
+        hashing
+            .hasher
+            .update(format!("{:?}", std::time::SystemTime::now()));
     }
     hasher.update(hashing.hasher.finalize());
     hasher.finalize().into()
@@ -349,7 +364,12 @@ pub(crate) fn remembered(object: &ObjectModule, compiled: &Compiled) -> Option<V
 
 /// The code the cache keeps as `code` under `key`, as `id` of `object`;
 /// none when it does not decode or names what `object` does not declare.
-pub(crate) fn recalled(object: &ObjectModule, id: FuncId, key: Key, code: &[u8]) -> Option<Compiled> {
+pub(crate) fn recalled(
+    object: &ObjectModule,
+    id: FuncId,
+    key: Key,
+    code: &[u8],
+) -> Option<Compiled> {
     let code: Code = postcard::from_bytes(code).ok()?;
     let relocs = code
         .relocs
@@ -501,11 +521,20 @@ impl Serializer for &mut Hashing<'_> {
         Ok(())
     }
 
-    fn serialize_unit_variant(self, _: &'static str, index: u32, _: &'static str) -> Result<(), Unhashable> {
+    fn serialize_unit_variant(
+        self,
+        _: &'static str,
+        index: u32,
+        _: &'static str,
+    ) -> Result<(), Unhashable> {
         self.serialize_u32(index)
     }
 
-    fn serialize_newtype_struct<T: ?Sized + Serialize>(self, _: &'static str, value: &T) -> Result<(), Unhashable> {
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+        self,
+        _: &'static str,
+        value: &T,
+    ) -> Result<(), Unhashable> {
         value.serialize(self)
     }
 
@@ -533,7 +562,13 @@ impl Serializer for &mut Hashing<'_> {
         Ok(self)
     }
 
-    fn serialize_tuple_variant(self, _: &'static str, index: u32, _: &'static str, _: usize) -> Result<Self, Unhashable> {
+    fn serialize_tuple_variant(
+        self,
+        _: &'static str,
+        index: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self, Unhashable> {
         self.hasher.update(index.to_le_bytes());
         Ok(self)
     }
@@ -547,7 +582,13 @@ impl Serializer for &mut Hashing<'_> {
         Ok(self)
     }
 
-    fn serialize_struct_variant(self, _: &'static str, index: u32, _: &'static str, _: usize) -> Result<Self, Unhashable> {
+    fn serialize_struct_variant(
+        self,
+        _: &'static str,
+        index: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self, Unhashable> {
         self.hasher.update(index.to_le_bytes());
         Ok(self)
     }
@@ -614,7 +655,11 @@ impl ser::SerializeMap for &mut Hashing<'_> {
 impl ser::SerializeStruct for &mut Hashing<'_> {
     type Ok = ();
     type Error = Unhashable;
-    fn serialize_field<T: ?Sized + Serialize>(&mut self, key: &'static str, value: &T) -> Result<(), Unhashable> {
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Unhashable> {
         if self.skipped.contains(&key) {
             return Ok(());
         }
@@ -628,7 +673,11 @@ impl ser::SerializeStruct for &mut Hashing<'_> {
 impl ser::SerializeStructVariant for &mut Hashing<'_> {
     type Ok = ();
     type Error = Unhashable;
-    fn serialize_field<T: ?Sized + Serialize>(&mut self, key: &'static str, value: &T) -> Result<(), Unhashable> {
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &T,
+    ) -> Result<(), Unhashable> {
         if self.skipped.contains(&key) {
             return Ok(());
         }

@@ -53,7 +53,11 @@ impl Registration {
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        if let Some(threads) = THREADS.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+        if let Some(threads) = THREADS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
             threads.remove(&self.0);
         }
     }
@@ -104,7 +108,11 @@ pub extern "C" fn klfsvc_thread_spawn(entry: *const u8, argument: i64) -> i64 {
 }
 
 fn take_handle(handle: i64) -> Option<JoinHandle<()>> {
-    HANDLES.lock().unwrap_or_else(PoisonError::into_inner).as_mut()?.remove(&handle)
+    HANDLES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_mut()?
+        .remove(&handle)
 }
 
 /// Kernel service `klf.thread.join`: waits for the thread `handle` names to
@@ -128,7 +136,11 @@ pub extern "C" fn klfsvc_thread_join(handle: i64) -> i64 {
 /// on unjoined. Answers 1, or a failure below zero.
 #[unsafe(no_mangle)]
 pub extern "C" fn klfsvc_thread_detach(handle: i64) -> i64 {
-    if take_handle(handle).is_some() { 1 } else { UNKNOWN }
+    if take_handle(handle).is_some() {
+        1
+    } else {
+        UNKNOWN
+    }
 }
 
 /// Kernel service `klf.thread.current`: the calling thread's number, above

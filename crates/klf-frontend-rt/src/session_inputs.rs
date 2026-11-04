@@ -90,7 +90,10 @@ pub(crate) fn add_inputs(
 /// The input files: a file as given, and a directory as every file under it
 /// whose extension is one the language accepts, in path order (section 5.5
 /// `[paths]`). The definition decides what the files mean together.
-pub(crate) fn expand_inputs(inputs: &[PathBuf], extensions: &[String]) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn expand_inputs(
+    inputs: &[PathBuf],
+    extensions: &[String],
+) -> Result<Vec<PathBuf>, String> {
     fn walk(
         directory: &Path,
         extensions: &[String],

@@ -25,12 +25,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 `klf setup` installs the newest released `klf` and the RIDL LLVM it links
-with into `~/.klf`, or brings an install up to date; nothing about it needs
-Rust. CI builds each host's release with:
+with into `~/.klf`, or into `KLFD_HOME` when set; nothing about it needs Rust.
+CI builds each host's release with:
 
 ```sh
 cargo xtask release OUT VERSION
 ```
+
+From this monorepo checkout, `cargo xtask bootstrap-kira` builds KLF, uses it
+to bootstrap Kira and `knvm`, then installs the current KLF and Kira checkouts
+on the `dev` channel and installs `knvm` with its compiler launchers. Artifacts
+go under Cargo's target directory. `knvm sinstall` also configures the active
+shell to put the installed tools on `PATH`.
 
 ## macOS SDK linker compatibility
 

@@ -1,0 +1,11 @@
+[package]
+name = "tir-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+blake3 = "1.8"
+
+[lints]
+workspace = true

@@ -217,9 +217,21 @@ mod tests {
 
     #[test]
     fn registered_windows_headers_match_slash_separated_includes() {
-        assert!(source_suffix_matches(r"C:\sdk\include\sys\types.h", "/sys/types.h", true));
-        assert!(!source_suffix_matches(r"C:\sdk\include\sys\types.h", "/sys/types.h", false));
-        assert!(!source_suffix_matches(r"C:\sdk\include\other_types.h", "/types.h", true));
+        assert!(source_suffix_matches(
+            r"C:\sdk\include\sys\types.h",
+            "/sys/types.h",
+            true
+        ));
+        assert!(!source_suffix_matches(
+            r"C:\sdk\include\sys\types.h",
+            "/sys/types.h",
+            false
+        ));
+        assert!(!source_suffix_matches(
+            r"C:\sdk\include\other_types.h",
+            "/types.h",
+            true
+        ));
     }
 }
 

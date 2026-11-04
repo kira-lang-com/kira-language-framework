@@ -218,7 +218,10 @@ pub(super) fn remove_parameters(function: &mut Function) -> bool {
     if function.blocks.len() < 2 {
         return false;
     }
-    if function.blocks[1..].iter().all(|block| block.parameters.is_empty()) {
+    if function.blocks[1..]
+        .iter()
+        .all(|block| block.parameters.is_empty())
+    {
         return false;
     }
     let pinned = pinned_blocks(function);

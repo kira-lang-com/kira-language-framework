@@ -171,7 +171,10 @@ pub fn run_corpus(
     // reads it, so each is built once before the cases run side by side.
     let mut libraries = Vec::new();
     for case in manifest.cases.iter().filter(|case| runs(case)) {
-        let packages = case.kira_archives.iter().map(|package| (package, Engine::Native));
+        let packages = case
+            .kira_archives
+            .iter()
+            .map(|package| (package, Engine::Native));
         let images = case.kira_images.iter().map(|package| (package, Engine::Vm));
         for (package, engine) in packages.chain(images) {
             if !libraries.contains(&(package, engine)) {
@@ -214,7 +217,11 @@ pub fn run_corpus(
     let one = |case: &CorpusCase| {
         let name = format!("{}::{}", manifest.name, case.name);
         if !runs(case) {
-            return CaseResult { name, mismatches: Vec::new(), skipped: true };
+            return CaseResult {
+                name,
+                mismatches: Vec::new(),
+                skipped: true,
+            };
         }
         let broken = case
             .kira_archives
@@ -223,14 +230,22 @@ pub fn run_corpus(
             .chain(&case.c_archives)
             .find_map(|package| failed.iter().find(|(built, _)| *built == package));
         if let Some((_, error)) = broken {
-            return CaseResult { name, mismatches: vec![error.clone()], skipped: false };
+            return CaseResult {
+                name,
+                mismatches: vec![error.clone()],
+                skipped: false,
+            };
         }
         let directory = scratch.join(&manifest.name).join(&case.name);
         let mismatches = match run_case(driver, runner, manifest, case, &directory) {
             Ok(mismatches) => mismatches,
             Err(error) => vec![error],
         };
-        CaseResult { name, mismatches, skipped: false }
+        CaseResult {
+            name,
+            mismatches,
+            skipped: false,
+        }
     };
     // Each case is its own compiler and program processes writing under its
     // own directory, so the cases run on every core, reported in order.
@@ -246,7 +261,9 @@ pub fn run_corpus(
             scope.spawn(|| {
                 loop {
                     let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(case) = manifest.cases.get(index) else { break };
+                    let Some(case) = manifest.cases.get(index) else {
+                        break;
+                    };
                     let result = one(case);
                     if let Ok(mut results) = results.lock() {
                         results[index] = Some(result);
@@ -438,7 +455,11 @@ fn build_c_archive(source: &Path, scratch: &Path) -> Result<(), String> {
     let archive = source.with_file_name(format!("lib{stem}.a"));
     let _ = std::fs::remove_file(&archive);
     let mut compile = vec!["-c".to_owned(), "-O2".to_owned()];
-    compile.extend(klf_target::pic_flags(crate::host_triple()).iter().map(|flag| (*flag).to_owned()));
+    compile.extend(
+        klf_target::pic_flags(crate::host_triple())
+            .iter()
+            .map(|flag| (*flag).to_owned()),
+    );
     // The bundled clang carries no C library headers; on macOS they are the
     // SDK's, as the native link takes them (`kernel::link`).
     if let Some(sysroot) = crate::native::macos_sysroot() {
@@ -584,7 +605,13 @@ fn ran(build: &Output, program: &mut Command, root: &Path) -> Result<Observed, S
 /// recorded expectation holds wherever the package is checked out.
 fn normalized(text: &str, root: &Path) -> String {
     // Windows writes a path with `\`; the expectations are written with `/`.
-    let slashed = |text: String| if cfg!(windows) { text.replace('\\', "/") } else { text };
+    let slashed = |text: String| {
+        if cfg!(windows) {
+            text.replace('\\', "/")
+        } else {
+            text
+        }
+    };
     let prefix = slashed(format!("{}/", root.display()));
     slashed(text.to_owned())
         .replace(&prefix, "")

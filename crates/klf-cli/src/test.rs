@@ -59,13 +59,7 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
     }
     if !unit_only && (corpus.is_some() || klf_driver::has_corpus(package)) {
         let others: Vec<&Path> = languages.iter().map(Path::new).collect();
-        match klf_driver::test_package(
-            &mut session,
-            package,
-            corpus.as_deref(),
-            &target,
-            &others,
-        ) {
+        match klf_driver::test_package(&mut session, package, corpus.as_deref(), &target, &others) {
             Ok(cases) => results.extend(cases),
             Err(message) => return fail(&message),
         }
@@ -91,7 +85,10 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
     if skipped == 0 {
         klf_diag::out!("{} passed, {failed} failed", results.len() - failed);
     } else {
-        klf_diag::out!("{} passed, {failed} failed, {skipped} skipped", results.len() - failed - skipped);
+        klf_diag::out!(
+            "{} passed, {failed} failed, {skipped} skipped",
+            results.len() - failed - skipped
+        );
     }
     if failed == 0 {
         ExitCode::SUCCESS

@@ -31,7 +31,9 @@ pub(crate) fn uri(path: &Path) -> String {
     #[cfg(windows)]
     let path = path.replace('\\', "/");
     #[cfg(windows)]
-    if !path.starts_with('/') { text.push('/'); }
+    if !path.starts_with('/') {
+        text.push('/');
+    }
     for byte in path.bytes() {
         if byte.is_ascii_alphanumeric() || b"/:-._~".contains(&byte) {
             text.push(char::from(byte));

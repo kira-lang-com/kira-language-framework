@@ -17,11 +17,11 @@
 pub mod abi;
 pub mod bindgen;
 pub mod cc;
+pub mod demangle;
 pub mod descriptor;
 pub mod emit;
 pub mod layout;
 pub mod llvm;
-pub mod demangle;
 pub mod mangle;
 pub mod meta;
 pub mod module;

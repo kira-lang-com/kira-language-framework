@@ -28,12 +28,21 @@ mod tests {
     fn symbols_read_as_their_source_names() {
         for (symbol, shown) in [
             ("_kir.pick#TrapGallery", "TrapGallery.pick"),
-            ("kir.Picker#KiraUI<String>.describe", "KiraUI.Picker<String>.describe"),
-            ("_kir.ExecutorTask.cancel#dispatch", "ExecutorTask.cancel (dispatch)"),
+            (
+                "kir.Picker#KiraUI<String>.describe",
+                "KiraUI.Picker<String>.describe",
+            ),
+            (
+                "_kir.ExecutorTask.cancel#dispatch",
+                "ExecutorTask.cancel (dispatch)",
+            ),
             ("_kir.Checker.checkCall", "Checker.checkCall"),
             ("_RIDL18Geometry5parseF", "Geometry.parse"),
             ("_main", "main"),
-            ("klf_defsvc::drive::run_phase", "klf_defsvc::drive::run_phase"),
+            (
+                "klf_defsvc::drive::run_phase",
+                "klf_defsvc::drive::run_phase",
+            ),
         ] {
             assert_eq!(source_name(symbol), shown, "{symbol}");
         }

@@ -542,6 +542,10 @@ pub fn build_distribution(out: &Path, targets: &[String]) -> Result<(), String> 
         &executable,
         &out.join("bin").join(klf_target::executable("klf")),
     )?;
+    copy(
+        &executable,
+        &out.join("bin").join(klf_target::executable("tirc")),
+    )?;
 
     // The linker and its two companions, which is all of the LLVM KLF runs. The
     // provisioned tree stays where it is; the distribution carries these files

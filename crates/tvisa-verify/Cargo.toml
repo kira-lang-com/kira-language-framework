@@ -1,0 +1,18 @@
+[package]
+name = "tvisa-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tir-diag = { path = "../tir-diag" }
+tir-format = { path = "../tir-format" }
+tir-layout = { path = "../tir-layout" }
+tir-uniformity = { path = "../tir-uniformity" }
+tir-target = { path = "../tir-target" }
+tir-types = { path = "../tir-types" }
+tir-verify = { path = "../tir-verify" }
+tvisa-format = { path = "../tvisa-format" }
+
+[lints]
+workspace = true

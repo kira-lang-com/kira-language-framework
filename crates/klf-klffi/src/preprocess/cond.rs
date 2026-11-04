@@ -39,9 +39,7 @@ fn replace_defined(tokens: &[Token], macros: &Macros, line: usize) -> Result<Vec
         }
         let (name, consumed) = if tokens.get(index + 1).is_some_and(|t| t.is("(")) {
             match (tokens.get(index + 2), tokens.get(index + 3)) {
-                (Some(name), Some(close)) if name.kind == Kind::Ident && close.is(")") => {
-                    (name, 4)
-                }
+                (Some(name), Some(close)) if name.kind == Kind::Ident && close.is(")") => (name, 4),
                 _ => {
                     return Err(Fault::new(line, "`defined(` needs a macro name and `)`"));
                 }
@@ -52,7 +50,11 @@ fn replace_defined(tokens: &[Token], macros: &Macros, line: usize) -> Result<Vec
                 _ => return Err(Fault::new(line, "`defined` needs a macro name")),
             }
         };
-        let value = if macros.contains_key(&name.text) { "1" } else { "0" };
+        let value = if macros.contains_key(&name.text) {
+            "1"
+        } else {
+            "0"
+        };
         out.push(Token::new(Kind::Number, value, line));
         index += consumed;
     }
@@ -89,7 +91,11 @@ impl Parser {
             return Err(Fault::new(self.line, "`?` needs a matching `:`"));
         }
         let when_false = self.conditional()?;
-        Ok(if condition != 0 { when_true } else { when_false })
+        Ok(if condition != 0 {
+            when_true
+        } else {
+            when_false
+        })
     }
 
     fn binary(&mut self, minimum: u8) -> Result<i64, Fault> {
@@ -123,10 +129,9 @@ impl Parser {
                 }
                 Ok(value)
             }
-            (Kind::Number, text) => integer_literal(text)
-                .ok_or_else(|| {
-                    Fault::new(self.line, format!("`{text}` is not an integer constant"))
-                }),
+            (Kind::Number, text) => integer_literal(text).ok_or_else(|| {
+                Fault::new(self.line, format!("`{text}` is not an integer constant"))
+            }),
             (Kind::Ident, _) => Ok(0),
             (Kind::Literal, text) if text.starts_with('\'') => character(text, self.line),
             _ => Err(Fault::new(

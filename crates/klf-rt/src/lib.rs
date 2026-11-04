@@ -25,11 +25,11 @@ mod pagemap;
 mod service_memory;
 mod sizeclass;
 mod span;
-mod valgrind;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_threads;
+mod valgrind;
 
 pub use heap::{DestroyFn, ExitReport, Heap};
 pub use service_memory::{MAX_SERVICE_BUFFER_BYTES, ServiceMemory, copy_out};

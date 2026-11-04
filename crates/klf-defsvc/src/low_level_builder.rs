@@ -116,7 +116,12 @@ impl DefinitionServiceState {
         let Ok(index) = usize::try_from(id) else {
             return;
         };
-        let kind = if let Some(&(_, kind)) = self.recent_value_types.iter().rev().find(|(recent, _)| *recent == ty) {
+        let kind = if let Some(&(_, kind)) = self
+            .recent_value_types
+            .iter()
+            .rev()
+            .find(|(recent, _)| *recent == ty)
+        {
             kind
         } else {
             let kind = if let Some(&kind) = self.value_type_ids.get(&ty) {

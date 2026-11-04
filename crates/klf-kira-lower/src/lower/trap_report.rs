@@ -48,8 +48,13 @@ impl Lowerer<'_> {
     ) {
         let pass = self.fb.new_block(&[]);
         let fail = self.fb.new_block(&[]);
-        self.fb
-            .conditional_branch(condition, pass.clone(), Vec::new(), fail.clone(), Vec::new());
+        self.fb.conditional_branch(
+            condition,
+            pass.clone(),
+            Vec::new(),
+            fail.clone(),
+            Vec::new(),
+        );
         self.fb.switch_to(&fail);
         self.fb
             .call_foreign_void(Name::new("klfsvc_trap_operands"), operands.to_vec());

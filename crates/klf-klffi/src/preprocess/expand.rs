@@ -30,9 +30,9 @@ pub(crate) fn parse_define(text: &str, line: usize) -> Result<(String, Macro), F
     let name = text[..name_end].to_owned();
     let rest = &text[name_end..];
     if let Some(list) = rest.strip_prefix('(') {
-        let close = list
-            .find(')')
-            .ok_or_else(|| Fault::new(line, format!("missing `)` in the parameters of `{name}`")))?;
+        let close = list.find(')').ok_or_else(|| {
+            Fault::new(line, format!("missing `)` in the parameters of `{name}`"))
+        })?;
         let (params, variadic) = parse_params(&list[..close], &name, line)?;
         let body = tokenize(&list[close + 1..], line)?;
         check_body(&body, &params, &name, line)?;
@@ -83,7 +83,10 @@ fn parse_params(list: &str, name: &str, line: usize) -> Result<(Vec<String>, boo
     }
     for raw in list.split(',') {
         if variadic {
-            return Err(Fault::new(line, format!("`...` must be the last parameter of `{name}`")));
+            return Err(Fault::new(
+                line,
+                format!("`...` must be the last parameter of `{name}`"),
+            ));
         }
         let raw = raw.trim();
         if raw == "..." {
@@ -122,8 +125,8 @@ fn check_body(body: &[Token], params: &[String], name: &str, line: usize) -> Res
             }
         }
     }
-    let first_or_last_paste = body.first().is_some_and(|t| t.is("##"))
-        || body.last().is_some_and(|t| t.is("##"));
+    let first_or_last_paste =
+        body.first().is_some_and(|t| t.is("##")) || body.last().is_some_and(|t| t.is("##"));
     if first_or_last_paste {
         return Err(Fault::new(line, format!("`##` at an end of `{name}`")));
     }
@@ -173,10 +176,7 @@ pub(crate) fn expand(tokens: Vec<Token>, macros: &Macros) -> Result<Vec<Token>, 
     Ok(out)
 }
 
-fn collect_arguments(
-    input: &mut VecDeque<Token>,
-    name: &Token,
-) -> Result<Vec<Vec<Token>>, Fault> {
+fn collect_arguments(input: &mut VecDeque<Token>, name: &Token) -> Result<Vec<Vec<Token>>, Fault> {
     let mut arguments = vec![Vec::new()];
     let mut depth = 0usize;
     loop {
@@ -215,7 +215,11 @@ fn bind(
     arguments: Vec<Vec<Token>>,
     name: &Token,
 ) -> Result<Vec<Vec<Token>>, Fault> {
-    let fixed = if variadic { params.len() - 1 } else { params.len() };
+    let fixed = if variadic {
+        params.len() - 1
+    } else {
+        params.len()
+    };
     let count_ok = if variadic {
         arguments.len() >= fixed
     } else {

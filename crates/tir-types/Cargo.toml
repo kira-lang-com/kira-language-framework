@@ -1,0 +1,11 @@
+[package]
+name = "tir-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tir-core = { path = "../tir-core" }
+
+[lints]
+workspace = true

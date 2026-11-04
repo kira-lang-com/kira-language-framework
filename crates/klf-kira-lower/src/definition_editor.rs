@@ -336,7 +336,11 @@ impl Reader<'_> {
 
     fn keyword_group(&mut self, value: &Expr) -> Option<KeywordGroup> {
         let span = value.span;
-        let fields = self.record(value, "KeywordGroup", &["class", "tokenClass", "modifiers", "words"])?;
+        let fields = self.record(
+            value,
+            "KeywordGroup",
+            &["class", "tokenClass", "modifiers", "words"],
+        )?;
         Some(KeywordGroup {
             class: self.token_class_field(&fields, span)?,
             modifiers: self.field(&fields, "modifiers", span, |reader, value| {
@@ -353,7 +357,11 @@ impl Reader<'_> {
             self.report(span, "sets both `class` and `tokenClass`");
             return None;
         }
-        let name = if fields.contains_key("tokenClass") { "tokenClass" } else { "class" };
+        let name = if fields.contains_key("tokenClass") {
+            "tokenClass"
+        } else {
+            "class"
+        };
         self.field(fields, name, span, Self::token_class)
     }
 

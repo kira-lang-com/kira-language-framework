@@ -320,7 +320,10 @@ fn alternating_access_cache_preserves_bounds_and_disposal() {
     assert_eq!(heap.read(other, 8), Some(41));
     assert!(heap.free_raw(other));
     assert_eq!(heap.live_blocks(), 0);
-    assert!(!heap.free_raw(other), "a second free of the same slot is refused");
+    assert!(
+        !heap.free_raw(other),
+        "a second free of the same slot is refused"
+    );
     let next = heap.alloc_raw(16, 16);
     let after = heap.alloc_raw(16, 16);
     assert_ne!(next, after, "a refused free leaves the free list whole");

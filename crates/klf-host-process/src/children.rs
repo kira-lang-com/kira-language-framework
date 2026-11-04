@@ -237,8 +237,7 @@ pub fn spawn_environment(handle: i64, entry: &[u8]) -> i64 {
     let Some(split) = entry.iter().position(|byte| *byte == b'=') else {
         return Failure::InvalidPath as i64;
     };
-    let (Some(name), Some(value)) = (os_text(&entry[..split]), os_text(&entry[split + 1..]))
-    else {
+    let (Some(name), Some(value)) = (os_text(&entry[..split]), os_text(&entry[split + 1..])) else {
         return Failure::InvalidPath as i64;
     };
     with_spec(handle, |spec| spec.environment.push((name, value)))
@@ -521,7 +520,11 @@ fn send(pid: u32, _signal: Signal) -> Result<(), Failure> {
     let status = Command::new("taskkill")
         .args(["/F", "/PID", &pid.to_string()])
         .status()?;
-    if status.success() { Ok(()) } else { Err(Failure::Io) }
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Failure::Io)
+    }
 }
 
 /// Forgets child `handle`. A child still running is left to run.

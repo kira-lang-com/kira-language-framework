@@ -113,7 +113,11 @@ pub fn load(path: &str) -> Result<usize, String> {
         .collect();
     // A library's own DLLs sit beside it, which only an absolute path lets
     // the loader search.
-    let flags = if std::path::Path::new(path).is_absolute() { ALTERED_SEARCH_PATH } else { 0 };
+    let flags = if std::path::Path::new(path).is_absolute() {
+        ALTERED_SEARCH_PATH
+    } else {
+        0
+    };
     // SAFETY: `wide` is a NUL-terminated UTF-16 path.
     let handle = unsafe { LoadLibraryExW(wide.as_ptr(), std::ptr::null_mut(), flags) };
     if handle.is_null() {

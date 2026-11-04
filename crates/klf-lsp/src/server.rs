@@ -6,7 +6,10 @@ use crate::convert;
 use crate::handlers;
 use crate::schedule::{Finished, Scheduler, asked_again, interactive};
 use crate::views::Views;
-use klf_ide::{Analysis, Analyzer, Formatter, Interruption, Languages, Project, ProjectDiagnostic, ProjectError, ProjectResolution, Snapshot};
+use klf_ide::{
+    Analysis, Analyzer, Formatter, Interruption, Languages, Project, ProjectDiagnostic,
+    ProjectError, ProjectResolution, Snapshot,
+};
 use klf_text::{Document, Encoding};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
@@ -22,6 +25,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[path = "server/accessors.rs"]
+mod accessors;
+
+use accessors::owns;
+
 /// What a server serves.
 pub struct ServerConfig {
     /// The driver's name, used as the diagnostic source.
@@ -33,7 +41,8 @@ pub struct ServerConfig {
     /// Serves formatting when present (`KLF-FORMAT.md` section 6).
     pub formatter: Option<Arc<dyn Formatter>>,
     /// Resolves a file through the language's project hook, when present.
-    pub project_resolver: Option<Arc<dyn Fn(&Path) -> Result<ProjectResolution, ProjectError> + Send + Sync>>,
+    pub project_resolver:
+        Option<Arc<dyn Fn(&Path) -> Result<ProjectResolution, ProjectError> + Send + Sync>>,
 }
 
 /// What the client and server agreed on at `initialize`.
@@ -267,7 +276,9 @@ impl<'c> Server<'c> {
                 if let Ok(params) =
                     serde_json::from_value::<DidChangeWatchedFilesParams>(notification.params)
                 {
-                    if !params.changes.is_empty() { self.reload_projects(); }
+                    if !params.changes.is_empty() {
+                        self.reload_projects();
+                    }
                 }
             }
             "$/cancelRequest" => {
@@ -339,36 +350,80 @@ impl<'c> Server<'c> {
 
     /// The project of `path`, registered if it is new.
     fn project(&mut self, path: &Path) -> Project {
-        let resolved = self.config.project_resolver.as_ref().map(|resolve| resolve(path));
+        let resolved = self
+            .config
+            .project_resolver
+            .as_ref()
+            .map(|resolve| resolve(path));
         let diagnostics = match &resolved {
             Some(Ok(result)) => result.diagnostics.clone(),
             Some(Err(error)) => {
-                self.log(&format!("{}: project resolution failed: {}", self.config.name, error.message));
-                vec![ProjectDiagnostic { message: error.message.clone(), code: error.code, span: error.span,
-                    path: error.path.clone(), severity: klf_diag::Severity::Error }]
+                self.log(&format!(
+                    "{}: project resolution failed: {}",
+                    self.config.name, error.message
+                ));
+                vec![ProjectDiagnostic {
+                    message: error.message.clone(),
+                    code: error.code,
+                    span: error.span,
+                    path: error.path.clone(),
+                    severity: klf_diag::Severity::Error,
+                }]
             }
             None => Vec::new(),
         };
-        let diagnostic_paths: Vec<_> = diagnostics.iter().filter_map(|diagnostic| diagnostic.path.clone()).collect();
-        if diagnostics.is_empty() { self.project_errors.remove(path); }
-        else { self.project_errors.insert(path.to_path_buf(), diagnostics); }
+        let diagnostic_paths: Vec<_> = diagnostics
+            .iter()
+            .filter_map(|diagnostic| diagnostic.path.clone())
+            .collect();
+        if diagnostics.is_empty() {
+            self.project_errors.remove(path);
+        } else {
+            self.project_errors.insert(path.to_path_buf(), diagnostics);
+        }
         let project = match resolved {
             Some(Ok(result)) if result.failed => klf_ide::project::resolve(path, &[], &[]),
-            Some(Ok(ProjectResolution { project: Some(project), .. })) => project,
+            Some(Ok(ProjectResolution {
+                project: Some(project),
+                ..
+            })) => project,
             Some(Err(_)) => klf_ide::project::resolve(path, &[], &[]),
-            _ => klf_ide::project::resolve(path, &self.agreement.folders, &self.languages.root_markers()),
+            _ => klf_ide::project::resolve(
+                path,
+                &self.agreement.folders,
+                &self.languages.root_markers(),
+            ),
         };
         if self.agreement.dynamic_watch {
-            let mut patterns: Vec<String> = project.watch.iter().map(|pattern| {
-                project.root.join(pattern).to_string_lossy().replace('\\', "/")
-            }).collect();
-            patterns.extend(diagnostic_paths.iter().map(|path| path.to_string_lossy().replace('\\', "/")));
+            let mut patterns: Vec<String> = project
+                .watch
+                .iter()
+                .map(|pattern| {
+                    project
+                        .root
+                        .join(pattern)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            patterns.extend(
+                diagnostic_paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().replace('\\', "/")),
+            );
             patterns.retain(|pattern| self.watched.insert(pattern.clone()));
             if !patterns.is_empty() {
                 let id = format!("klf-watch-{}", self.watched.len());
-                let watchers: Vec<_> = patterns.iter().map(|pattern| serde_json::json!({ "globPattern": pattern })).collect();
+                let watchers: Vec<_> = patterns
+                    .iter()
+                    .map(|pattern| serde_json::json!({ "globPattern": pattern }))
+                    .collect();
                 let params = serde_json::json!({ "registrations": [{ "id": id, "method": "workspace/didChangeWatchedFiles", "registerOptions": { "watchers": watchers } }] });
-                let request = Request::new(RequestId::from(id), "client/registerCapability".to_owned(), params);
+                let request = Request::new(
+                    RequestId::from(id),
+                    "client/registerCapability".to_owned(),
+                    params,
+                );
                 let _ = self.connection.sender.send(Message::Request(request));
             }
         }
@@ -563,8 +618,16 @@ impl<'c> Server<'c> {
                 .iter()
                 .filter_map(|diagnostic| analyzed.analysis.path(diagnostic.file).cloned()),
         );
-        paths.extend(self.project_errors.iter().filter(|(input, _)| owns(project, input))
-            .flat_map(|(input, diagnostics)| diagnostics.iter().map(|diagnostic| diagnostic.path.clone().unwrap_or_else(|| input.clone()))));
+        paths.extend(
+            self.project_errors
+                .iter()
+                .filter(|(input, _)| owns(project, input))
+                .flat_map(|(input, diagnostics)| {
+                    diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.path.clone().unwrap_or_else(|| input.clone()))
+                }),
+        );
         let previous = self
             .projects
             .get_mut(project)
@@ -577,11 +640,24 @@ impl<'c> Server<'c> {
             };
             let mut diagnostics = handlers::diagnostics(self, &snapshot, &path);
             let diagnostic_path = &path;
-            for error in self.project_errors.iter().filter(|(input, _)| owns(project, input))
-                .flat_map(|(input, diagnostics)| diagnostics.iter().filter(move |error| error.path.as_ref().unwrap_or(input) == diagnostic_path)) {
+            for error in self
+                .project_errors
+                .iter()
+                .filter(|(input, _)| owns(project, input))
+                .flat_map(|(input, diagnostics)| {
+                    diagnostics.iter().filter(move |error| {
+                        error.path.as_ref().unwrap_or(input) == diagnostic_path
+                    })
+                })
+            {
                 diagnostics.push(lsp_types::Diagnostic {
-                    range: error.span.and_then(|(start, end)| snapshot.line_index(&path)
-                        .map(|index| convert::range(&index, start, end, self.agreement.encoding)))
+                    range: error
+                        .span
+                        .and_then(|(start, end)| {
+                            snapshot.line_index(&path).map(|index| {
+                                convert::range(&index, start, end, self.agreement.encoding)
+                            })
+                        })
                         .unwrap_or_default(),
                     severity: Some(match error.severity {
                         klf_diag::Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
@@ -590,7 +666,9 @@ impl<'c> Server<'c> {
                         klf_diag::Severity::Remark => lsp_types::DiagnosticSeverity::HINT,
                     }),
                     source: Some(self.config.name.clone()),
-                    code: error.code.map(|code| lsp_types::NumberOrString::String(code.to_string())),
+                    code: error
+                        .code
+                        .map(|code| lsp_types::NumberOrString::String(code.to_string())),
                     message: error.message.clone(),
                     ..lsp_types::Diagnostic::default()
                 });
@@ -603,86 +681,6 @@ impl<'c> Server<'c> {
             };
             self.notify(PublishDiagnostics::METHOD, &params);
         }
-    }
-
-    pub(crate) fn log(&self, message: &str) {
-        let params = LogMessageParams {
-            typ: MessageType::LOG,
-            message: message.to_owned(),
-        };
-        self.notify(LogMessage::METHOD, &params);
-    }
-
-    pub(crate) fn source(&self) -> &str {
-        &self.config.name
-    }
-
-    /// The project a URI's file belongs to, when one is registered.
-    pub(crate) fn project_naming(&self, uri: &str) -> Option<Project> {
-        use std::str::FromStr as _;
-        let path = convert::path(&lsp_types::Uri::from_str(uri).ok()?)?;
-        self.projects
-            .keys()
-            .find(|project| owns(project, &path))
-            .cloned()
-    }
-
-    /// A project's latest analysis, current or not.
-    pub(crate) fn latest(&self, project: &Project) -> Option<&Analyzed> {
-        self.projects.get(project)?.analyzed.as_ref()
-    }
-
-    pub(crate) fn project_count(&self) -> usize {
-        self.projects.len()
-    }
-
-    pub(crate) fn any_failure(&self) -> bool {
-        self.analyses()
-            .any(|analyzed| analyzed.analysis.failure.is_some())
-    }
-
-    /// Whether any project is still waiting out its debounce (section 8.7).
-    pub(crate) fn any_indexing(&self) -> bool {
-        self.projects
-            .keys()
-            .any(|project| !self.scheduler.settled(project))
-    }
-
-    /// The text of an open document.
-    pub(crate) fn document(&self, path: &Path) -> Option<&str> {
-        self.documents
-            .get(path)
-            .map(|(_, document)| document.text())
-    }
-
-    pub(crate) fn formatter(&self) -> Option<&Arc<dyn Formatter>> {
-        self.config.formatter.as_ref()
-    }
-
-    fn notify(&self, method: &str, params: &impl serde::Serialize) {
-        let params = serde_json::to_value(params).unwrap_or_default();
-        let _ = self
-            .connection
-            .sender
-            .send(Message::Notification(Notification::new(
-                method.to_owned(),
-                params,
-            )));
-    }
-
-    fn send(&self, response: Response) {
-        let _ = self.connection.sender.send(Message::Response(response));
-    }
-}
-
-fn owns(project: &Project, path: &Path) -> bool {
-    if project.loose {
-        project
-            .arguments
-            .first()
-            .is_some_and(|file| Path::new(file) == path)
-    } else {
-        path.starts_with(&project.root)
     }
 }
 

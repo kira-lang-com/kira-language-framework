@@ -20,7 +20,10 @@ pub(crate) fn install() {
     // SAFETY: the alternate stack is allocated once and never freed, and the
     // handler is an `extern "C"` function with the `SA_SIGINFO` signature.
     unsafe {
-        let stack = std::alloc::alloc(std::alloc::Layout::from_size_align_unchecked(HANDLER_STACK, 16));
+        let stack = std::alloc::alloc(std::alloc::Layout::from_size_align_unchecked(
+            HANDLER_STACK,
+            16,
+        ));
         if stack.is_null() {
             return;
         }
@@ -44,7 +47,11 @@ pub(crate) fn install() {
 pub(crate) fn install() {}
 
 #[cfg(unix)]
-extern "C" fn handler(signal: libc::c_int, info: *mut libc::siginfo_t, _context: *mut libc::c_void) {
+extern "C" fn handler(
+    signal: libc::c_int,
+    info: *mut libc::siginfo_t,
+    _context: *mut libc::c_void,
+) {
     // SAFETY: the kernel passes a valid `siginfo_t` to an `SA_SIGINFO` handler.
     let address = unsafe { (*info).si_addr() } as usize;
     let (name, what) = match signal {
@@ -69,7 +76,9 @@ extern "C" fn handler(signal: libc::c_int, info: *mut libc::siginfo_t, _context:
         ],
     };
     if address < 4096 {
-        report.notes.push("the address is in the first page: a null pointer was read through".to_owned());
+        report
+            .notes
+            .push("the address is in the first page: a null pointer was read through".to_owned());
     }
     eprint!("{}", report.render());
     crate::backtrace::report();

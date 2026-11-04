@@ -38,7 +38,10 @@ pub fn run_unit_tests(session: &mut Session, package: &Path) -> Result<Vec<CaseR
     let tests = test_sources(&package.join("tests"))?;
     if crate::kira_frontend::is_package(package) && has_kira_tests(&package.join("tests"))? {
         if !tests.is_empty() {
-            return Err(format!("{} still has KCore unit tests; migrate them to Kira before running the frontend tests", package.display()));
+            return Err(format!(
+                "{} still has KCore unit tests; migrate them to Kira before running the frontend tests",
+                package.display()
+            ));
         }
         return crate::kira_unit_tests::run(session, package);
     }
@@ -95,8 +98,13 @@ fn has_kira_tests(directory: &Path) -> Result<bool, String> {
     let entries = std::fs::read_dir(directory)
         .map_err(|error| format!("cannot read {}: {error}", directory.display()))?;
     for entry in entries {
-        let entry = entry.map_err(|error| format!("cannot read {}: {error}", directory.display()))?;
-        if entry.path().extension().is_some_and(|extension| extension == "kira") {
+        let entry =
+            entry.map_err(|error| format!("cannot read {}: {error}", directory.display()))?;
+        if entry
+            .path()
+            .extension()
+            .is_some_and(|extension| extension == "kira")
+        {
             return Ok(true);
         }
     }

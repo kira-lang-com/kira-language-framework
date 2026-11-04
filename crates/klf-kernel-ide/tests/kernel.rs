@@ -36,8 +36,16 @@ fn kcore_and_legacy_sources_share_the_kcore_editor_identity() {
         let spec = languages.spec(std::path::Path::new(path));
         assert_eq!(spec.display_name, "KCore");
         assert_eq!(spec.scope, "source.kcore");
-        assert!(spec.root_markers.iter().any(|marker| marker == "language.kcore"));
-        assert!(spec.root_markers.iter().any(|marker| marker == "language.klfd"));
+        assert!(
+            spec.root_markers
+                .iter()
+                .any(|marker| marker == "language.kcore")
+        );
+        assert!(
+            spec.root_markers
+                .iter()
+                .any(|marker| marker == "language.klfd")
+        );
     }
 }
 
@@ -47,14 +55,20 @@ fn legacy_klfk_source_is_analyzed_as_kcore() {
     let analysis = KernelAnalyzer.analyze(
         &AnalysisRequest {
             arguments: vec![path.display().to_string()],
-            documents: vec![(path.clone(), "function answer() -> Int { return 42 }".to_owned())],
+            documents: vec![(
+                path.clone(),
+                "function answer() -> Int { return 42 }".to_owned(),
+            )],
             ..AnalysisRequest::default()
         },
         &Cancellation::new(),
     );
     let file = analysis.file(&path).expect("legacy source is analyzed");
     let outline = analysis.facts.document_symbols(file);
-    assert_eq!(analysis.facts.symbol(outline[0].entity).unwrap().name, "answer");
+    assert_eq!(
+        analysis.facts.symbol(outline[0].entity).unwrap().name,
+        "answer"
+    );
 }
 
 #[test]

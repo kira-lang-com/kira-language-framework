@@ -112,7 +112,9 @@ impl Lowerer<'_> {
         let zero = self.fb.const_int(Type::Integer(64), 0);
         let none = self.fb.heap_alloc_array(Type::Integer(8), zero.clone());
         let empty = self.fb.convert(ConvertKind::Bitcast, none, Type::Pointer);
-        let len = self.fb.call_foreign(service.clone(), vec![empty, zero.clone()]);
+        let len = self
+            .fb
+            .call_foreign(service.clone(), vec![empty, zero.clone()]);
         let known = self
             .fb
             .compare(IntegerPredicate::SignedGe, len.clone(), zero);
@@ -127,9 +129,7 @@ impl Lowerer<'_> {
         let copied = self
             .fb
             .call_foreign(service, vec![data.clone(), len.clone()]);
-        let whole = self
-            .fb
-            .compare(IntegerPredicate::Eq, copied, len.clone());
+        let whole = self.fb.compare(IntegerPredicate::Eq, copied, len.clone());
         self.trap_unless(
             whole,
             "the current directory changed while it was read",

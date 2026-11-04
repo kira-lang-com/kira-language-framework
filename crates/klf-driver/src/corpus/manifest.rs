@@ -91,7 +91,10 @@ pub fn read_corpora(package: &Path, only: Option<&str>) -> Result<Vec<CorpusMani
     paths.sort();
     if paths.is_empty() {
         return Err(match only {
-            Some(name) => format!("no corpus manifest {}/{name}.kcore or {name}.klfd", directory.display()),
+            Some(name) => format!(
+                "no corpus manifest {}/{name}.kcore or {name}.klfd",
+                directory.display()
+            ),
             None => format!("{} holds no corpus manifests", directory.display()),
         });
     }

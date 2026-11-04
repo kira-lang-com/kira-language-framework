@@ -1,0 +1,16 @@
+[package]
+name = "tvisa-format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tir-core = { path = "../tir-core" }
+tir-diag = { path = "../tir-diag" }
+tir-format = { path = "../tir-format" }
+tir-target = { path = "../tir-target" }
+tir-types = { path = "../tir-types" }
+zstd = "0.13"
+
+[lints]
+workspace = true

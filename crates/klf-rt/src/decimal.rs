@@ -175,14 +175,26 @@ pub fn perform(operation: u64, left: [u64; 2], right: [u64; 2]) -> [u64; 2] {
         return [0, error_second(DecimalError::Parse)];
     };
     match operation {
-        NumberOp::ToInt => match i64::try_from(first.integer_part()) {
-            Ok(value) => [value as u64, 0],
-            Err(_) => [0, error_second(DecimalError::Overflow)],
-        },
-        NumberOp::ToUnsigned => match u64::try_from(first.integer_part()) {
-            Ok(value) => [value, 0],
-            Err(_) => [0, error_second(DecimalError::Overflow)],
-        },
+        NumberOp::ToInt => {
+            let value = first.integer_part();
+            if value < i128::from(i64::MIN) {
+                [i64::MIN as u64, 0]
+            } else if value > i128::from(i64::MAX) {
+                [i64::MAX as u64, 0]
+            } else {
+                [value as i64 as u64, 0]
+            }
+        }
+        NumberOp::ToUnsigned => {
+            let value = first.integer_part();
+            if value < 0 {
+                [0, 0]
+            } else if value > i128::from(u64::MAX) {
+                [u64::MAX, 0]
+            } else {
+                [value as u64, 0]
+            }
+        }
         NumberOp::ToFloat => [first.to_f64().to_bits(), 0],
         NumberOp::Negate => words(first.checked_neg()),
         NumberOp::Complement => words(first.whole().and_then(|value| narrow(!value, 0))),

@@ -219,11 +219,8 @@ fn debug_map(file: &mut File, at: u32, count: u32, sixty_four: bool) -> bool {
     let Some(size) = read.checked_mul(entry) else {
         return false;
     };
-    table(file, u64::from(at), size).is_some_and(|entries| {
-        entries
-            .chunks_exact(entry)
-            .any(|symbol| symbol[4] == N_OSO)
-    })
+    table(file, u64::from(at), size)
+        .is_some_and(|entries| entries.chunks_exact(entry).any(|symbol| symbol[4] == N_OSO))
 }
 
 /// The name a section header starts with, up to its padding.

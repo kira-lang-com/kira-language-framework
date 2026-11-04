@@ -66,7 +66,16 @@ impl Lowerer<'_> {
     /// or -1. `scalarAliases` is "true" or "false" and says whether the scalar
     /// pointer declarations (`float_ptr` and the like) are written.
     fn lower_read_header(&mut self, args: &[Arg], span: Span) -> Option<(Name, FeType)> {
-        let [session, origin, path, library, selection, includes, scalar_aliases] = args else {
+        let [
+            session,
+            origin,
+            path,
+            library,
+            selection,
+            includes,
+            scalar_aliases,
+        ] = args
+        else {
             self.session.report(type_error(
                 span,
                 "`readHeader` takes a session, origin file, header path, library, selection, include directories and scalar pointer aliases",

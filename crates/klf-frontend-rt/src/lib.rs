@@ -60,9 +60,9 @@ mod ridl_sources;
 mod ridl_surface;
 mod ridl_witnesses;
 mod run;
-mod session_inputs;
 mod runtime;
 mod scratch;
+mod session_inputs;
 mod shader;
 mod shader_editor;
 mod source_closure;
@@ -238,7 +238,11 @@ pub unsafe extern "C" fn klffe_main(argc: c_int, argv: *const *const c_char) -> 
     // SAFETY: the caller promises `argv` holds `argc` NUL-terminated strings.
     let arguments = unsafe { collect_arguments(argc, argv) };
     #[cfg(windows)]
-    let program = std::env::args_os().next().unwrap_or_default().to_string_lossy().into_owned();
+    let program = std::env::args_os()
+        .next()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     #[cfg(not(windows))]
     // SAFETY: as above.
     let program = unsafe { program_name(argc, argv) };
@@ -444,7 +448,8 @@ fn build(
         .target
         .clone()
         .unwrap_or_else(|| metadata.target.clone());
-    let test_compile_only = std::env::var_os("KLF_TEST_COMPILE_ONLY").as_deref() == Some(std::ffi::OsStr::new("1"));
+    let test_compile_only =
+        std::env::var_os("KLF_TEST_COMPILE_ONLY").as_deref() == Some(std::ffi::OsStr::new("1"));
     if !test_compile_only && matches!(invocation.emit.as_str(), "bin" | "lib" | "shared" | "run") {
         toolchain::check_target(&triple).map_err(Failure::Driver)?;
     }
@@ -593,8 +598,13 @@ fn build(
         return Ok(0);
     }
     if invocation.emit == "ridl" {
-        let written =
-            write_contract(&module, &metadata.name, &session, &output, invocation.ridl_source);
+        let written = write_contract(
+            &module,
+            &metadata.name,
+            &session,
+            &output,
+            invocation.ridl_source,
+        );
         if written.is_ok() {
             display.end();
             klf_diag::out!("Built: Ok {}", output.display());
@@ -603,7 +613,13 @@ fn build(
     }
     if invocation.emit == "shared" {
         if let Some(contract) = &invocation.contract {
-            write_contract(&module, &metadata.name, &session, contract, invocation.ridl_source)?;
+            write_contract(
+                &module,
+                &metadata.name,
+                &session,
+                contract,
+                invocation.ridl_source,
+            )?;
         }
         output::emit_shared(&module, &output, &metadata.name).map_err(Failure::Driver)?;
         display.end();

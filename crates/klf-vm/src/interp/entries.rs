@@ -207,7 +207,10 @@ fn bound(slot: usize) -> Binding {
         .cloned()
         .flatten();
     let Some(binding) = binding else {
-        eprint!("{}", klf_diag::report::trap_description("KLF-VM-0007").render());
+        eprint!(
+            "{}",
+            klf_diag::report::trap_description("KLF-VM-0007").render()
+        );
         std::process::exit(1);
     };
     binding

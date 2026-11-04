@@ -261,9 +261,15 @@ fn punct_end(chars: &[char], start: usize) -> usize {
 /// as a signed 64-bit integer, or `None` when the text is not one.
 pub(crate) fn integer_literal(text: &str) -> Option<i64> {
     let digits = text.trim_end_matches(['u', 'U', 'l', 'L']);
-    let value = if let Some(hex) = digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")) {
+    let value = if let Some(hex) = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
         u64::from_str_radix(hex, 16).ok()?
-    } else if let Some(binary) = digits.strip_prefix("0b").or_else(|| digits.strip_prefix("0B")) {
+    } else if let Some(binary) = digits
+        .strip_prefix("0b")
+        .or_else(|| digits.strip_prefix("0B"))
+    {
         u64::from_str_radix(binary, 2).ok()?
     } else if digits.len() > 1 && digits.starts_with('0') {
         u64::from_str_radix(&digits[1..], 8).ok()?

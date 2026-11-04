@@ -100,7 +100,13 @@ impl RuntimeDetail {
     /// then the text in hexadecimal so it may hold any byte.
     #[must_use]
     pub fn protocol_line(&self) -> String {
-        let mut line = format!("DIAGD {} {} {} {} ", self.kind.code(), self.file, self.start, self.end);
+        let mut line = format!(
+            "DIAGD {} {} {} {} ",
+            self.kind.code(),
+            self.file,
+            self.start,
+            self.end
+        );
         for byte in self.text.bytes() {
             line.push_str(&format!("{byte:02x}"));
         }

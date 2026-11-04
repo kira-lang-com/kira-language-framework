@@ -37,7 +37,11 @@ impl OptimizerCache {
             identity.extend_from_slice(format!(" {modified} {}", built.len()).as_bytes());
         }
         let mut artifact = Vec::new();
-        for part in [module.as_bytes(), file.as_encoded_bytes(), triple.as_bytes()] {
+        for part in [
+            module.as_bytes(),
+            file.as_encoded_bytes(),
+            triple.as_bytes(),
+        ] {
             artifact.extend_from_slice(part);
             artifact.push(0);
         }

@@ -18,11 +18,9 @@ pub(crate) fn program_exports(module: &Module) -> Vec<&str> {
         if name == "main" || names.contains(&name) {
             continue;
         }
-        if module
-            .functions
-            .iter()
-            .any(|function| function.name.as_str() == name && !function.foreign && !function.blocks.is_empty())
-        {
+        if module.functions.iter().any(|function| {
+            function.name.as_str() == name && !function.foreign && !function.blocks.is_empty()
+        }) {
             names.push(name);
         }
     }

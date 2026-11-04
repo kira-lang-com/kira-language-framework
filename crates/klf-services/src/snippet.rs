@@ -8,9 +8,9 @@
 //! conflict reports do) is split into those parts by `split_message`.
 
 use crate::Session;
-use std::fmt::Write as _;
 use klf_diag::{Diagnostic, Severity};
 use klf_source::Span;
+use std::fmt::Write as _;
 
 use crate::{ResolvedRuntimeDiagnostic, diagnostic_location, severity_word};
 
@@ -97,7 +97,9 @@ pub fn position(text: &str, offset: u32) -> (usize, usize) {
 /// `offset` as a byte index into `text`: at most the text's length, and on a
 /// character boundary at or before the requested place.
 fn boundary(text: &str, offset: u32) -> usize {
-    let mut offset = usize::try_from(offset).unwrap_or(usize::MAX).min(text.len());
+    let mut offset = usize::try_from(offset)
+        .unwrap_or(usize::MAX)
+        .min(text.len());
     while !text.is_char_boundary(offset) {
         offset -= 1;
     }
@@ -122,7 +124,10 @@ fn caret_span(text: &str, start: u32, end: u32) -> (usize, usize, usize) {
         .find('\n')
         .map_or(text.len(), |newline| line_begin + newline);
     let to = boundary(text, end).max(from).min(line_end);
-    let width = text.get(from..to).map_or(0, |range| range.chars().count()).max(1);
+    let width = text
+        .get(from..to)
+        .map_or(0, |range| range.chars().count())
+        .max(1);
     (line, column, width)
 }
 
@@ -138,7 +143,11 @@ pub fn render(diagnostic: &Rendered) -> String {
         .iter()
         .map(|excerpt| caret_span(&excerpt.text, excerpt.start, excerpt.end))
         .collect();
-    let width = shown.iter().map(|(line, _, _)| digits(*line)).max().unwrap_or(1);
+    let width = shown
+        .iter()
+        .map(|(line, _, _)| digits(*line))
+        .max()
+        .unwrap_or(1);
     let pad = " ".repeat(width);
     // The primary place leads the headline as `path:line:column: error[code]:`,
     // the form the corpus runner and the editors read; a secondary place gets
@@ -283,7 +292,11 @@ pub fn generated_origin_notes(session: &Session, file: klf_core::FileId) -> Vec<
     let Some((origin, _)) = name.rsplit_once(GENERATED_MARKER) else {
         return Vec::new();
     };
-    if !session.files().iter().any(|source| source.name().as_str() == origin) {
+    if !session
+        .files()
+        .iter()
+        .any(|source| source.name().as_str() == origin)
+    {
         return Vec::new();
     }
     vec![format!(
@@ -303,7 +316,13 @@ pub fn session_diagnostic(session: &Session, diagnostic: &Diagnostic) -> String 
     for label in &diagnostic.labels {
         let is_primary = !primary_done && Some(label.span) == primary;
         primary_done |= is_primary;
-        push_excerpt(session, &mut excerpts, label.span, &label.message, is_primary);
+        push_excerpt(
+            session,
+            &mut excerpts,
+            label.span,
+            &label.message,
+            is_primary,
+        );
     }
     if !primary_done {
         if let Some(span) = primary {
@@ -384,7 +403,13 @@ mod tests {
             severity: Severity::Error,
             code: "3061".to_owned(),
             headline: "call to an undefined function `missingThing`".to_owned(),
-            excerpts: vec![excerpt(SOURCE, start, start + 12, "no function with this name is declared", true)],
+            excerpts: vec![excerpt(
+                SOURCE,
+                start,
+                start + 12,
+                "no function with this name is declared",
+                true,
+            )],
             notes: Vec::new(),
             helps: Vec::new(),
         });
@@ -443,7 +468,13 @@ mod tests {
                        = note: they differ in\n    against\n  = help: name it once";
         let (headline, notes, helps) = split_message(message);
         assert_eq!(headline, "defines `f` in more than one unit");
-        assert_eq!(notes, vec!["unit `a` defines it".to_owned(), "they differ in\n    against".to_owned()]);
+        assert_eq!(
+            notes,
+            vec![
+                "unit `a` defines it".to_owned(),
+                "they differ in\n    against".to_owned()
+            ]
+        );
         assert_eq!(helps, vec!["name it once".to_owned()]);
     }
 

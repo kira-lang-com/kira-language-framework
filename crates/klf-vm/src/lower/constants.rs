@@ -198,7 +198,9 @@ fn merge<'a>(slot: &mut Option<State<'a>>, next: State<'a>) -> bool {
     let mut others = next.known.iter().peekable();
     current.known.retain(|&(register, constant)| {
         while others.next_if(|&&(other, _)| other < register).is_some() {}
-        others.next_if(|&&(other, value)| other == register && value == constant).is_some()
+        others
+            .next_if(|&&(other, value)| other == register && value == constant)
+            .is_some()
     });
     current.known.len() != before
 }

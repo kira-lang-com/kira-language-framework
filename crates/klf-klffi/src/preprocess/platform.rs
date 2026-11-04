@@ -62,7 +62,9 @@ fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn architecture_macros(architecture: &str) -> Option<(&'static [(&'static str, &'static str)], u8)> {
+fn architecture_macros(
+    architecture: &str,
+) -> Option<(&'static [(&'static str, &'static str)], u8)> {
     Some(match architecture {
         "x86_64" => (&[("__x86_64__", "1"), ("__amd64__", "1")], 64),
         "aarch64" => (&[("__aarch64__", "1")], 64),

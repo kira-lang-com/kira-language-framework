@@ -102,7 +102,11 @@ impl State<'_, '_> {
         }
         let name = self.identifier(args, line, directive)?;
         let defined = self.macros.contains_key(&name);
-        Ok(if directive == "ifdef" { defined } else { !defined })
+        Ok(if directive == "ifdef" {
+            defined
+        } else {
+            !defined
+        })
     }
 
     fn truth_of(&self, args: &str, line: usize) -> Result<bool, HeaderError> {
@@ -124,8 +128,8 @@ impl State<'_, '_> {
     fn define(&mut self, line: usize, args: &str) -> Result<(), HeaderError> {
         let (name, mut definition) = parse_define(args, line).map_err(|fault| self.fault(fault))?;
         if definition.params.is_none() {
-            let expanded = expand(definition.body.clone(), &self.macros)
-                .map_err(|fault| self.fault(fault))?;
+            let expanded =
+                expand(definition.body.clone(), &self.macros).map_err(|fault| self.fault(fault))?;
             definition.value = render(&expanded);
         }
         if !self.defined.contains(&name) {
@@ -190,9 +194,7 @@ impl State<'_, '_> {
     /// for a quoted name, then along the include directories.
     fn locate(&mut self, name: &str, quoted: bool) -> Option<(PathBuf, String)> {
         let mut candidates = Vec::new();
-        if quoted
-            && let Some(directory) = self.includes.last().and_then(|path| path.parent())
-        {
+        if quoted && let Some(directory) = self.includes.last().and_then(|path| path.parent()) {
             candidates.push(directory.join(name));
         }
         candidates.extend(

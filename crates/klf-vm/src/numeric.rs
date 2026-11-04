@@ -218,6 +218,31 @@ pub(crate) fn integer_compare(predicate: u8, lhs: u64, rhs: u64, width: WidthCod
 pub(crate) fn convert_integer(op: Opcode, value: u64, flags: u8) -> Option<u64> {
     let source = flags_width(flags)?;
     let dest = flags_width(flags >> 3)?;
+    if flags & (1 << 6) != 0 {
+        let signed_source = matches!(op, Opcode::SExt);
+        let signed_dest = flags & (1 << 7) != 0;
+        let dest_bits = dest.bits();
+        let clamped = if signed_source {
+            let number = signed_value(value, source);
+            if signed_dest {
+                let minimum = -(1i128 << (dest_bits - 1));
+                let maximum = (1i128 << (dest_bits - 1)) - 1;
+                number.max(minimum).min(maximum) as u128
+            } else if number < 0 {
+                0
+            } else {
+                (number as u128).min(mask(dest))
+            }
+        } else {
+            let number = u128::from(value) & mask(source);
+            if signed_dest {
+                number.min((1u128 << (dest_bits - 1)) - 1)
+            } else {
+                number.min(mask(dest))
+            }
+        };
+        return Some((clamped & mask(dest)) as u64);
+    }
     let result = match op {
         Opcode::Trunc => (u128::from(value) & mask(source)) & mask(dest),
         Opcode::ZExt => u128::from(value) & mask(source),
@@ -278,9 +303,10 @@ pub(crate) fn float_to_int_saturating(signed: bool, value: u64, flags: u8) -> Op
     if signed {
         let min = -(1i128 << (bits - 1));
         let max = (1i128 << (bits - 1)) - 1;
+        let upper = (1u128 << (bits - 1)) as f64;
         let clamped = if float < min as f64 {
             min
-        } else if float > max as f64 {
+        } else if float >= upper {
             max
         } else {
             float as i128
@@ -288,9 +314,10 @@ pub(crate) fn float_to_int_saturating(signed: bool, value: u64, flags: u8) -> Op
         Some((clamped as u128 & mask(dest)) as u64)
     } else {
         let max = mask(dest);
+        let upper = (1u128 << bits) as f64;
         let clamped = if float < 0.0 {
             0
-        } else if float > max as f64 {
+        } else if float >= upper {
             max
         } else {
             float as u128

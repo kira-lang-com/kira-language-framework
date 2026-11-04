@@ -14,11 +14,11 @@ use cranelift::codegen::isa::{OwnedTargetIsa, TargetIsa};
 use cranelift::codegen::settings::{self, Configurable};
 use cranelift_module::{Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
+use debug_info::DebugTables;
 use klf_kir::{Module as KirModule, Type};
 use lower::{FnLowerer, ModuleTables};
 use runtime::Runtime;
 use std::fmt;
-use debug_info::DebugTables;
 use unwind::UnwindTables;
 
 pub use cache::CodeCache;
@@ -131,11 +131,7 @@ pub fn local_symbol(name: &str) -> String {
 /// The declarations of a [`build`]: each function's id, whether it is
 /// exported under a symbol of its own, and the symbol and linkage it was
 /// declared with, by position.
-type Declarations<'a> = (
-    lower::IdMap<'a>,
-    Vec<bool>,
-    Vec<Option<(String, Linkage)>>,
-);
+type Declarations<'a> = (lower::IdMap<'a>, Vec<bool>, Vec<Option<(String, Linkage)>>);
 
 /// Declares every function of `module` that has a body or that something
 /// names, with the linkage `symbol_for` gives it.
@@ -254,7 +250,9 @@ fn build<'a>(
             // A function exported under a symbol of its own can be called
             // from outside, and so back into a cycle.
             let counts_depth = recursive.contains(&position) || exported[position];
-            let key = items.as_ref().and_then(|items| items.key(function, counts_depth));
+            let key = items
+                .as_ref()
+                .and_then(|items| items.key(function, counts_depth));
             if let Some((key, code)) = key.and_then(|key| Some((key, earlier?.get(&key)?)))
                 && let Some(recalled) = reuse::recalled(shared, id, key, code)
             {
@@ -274,13 +272,7 @@ fn build<'a>(
                 layouts,
                 unwind: *pending,
             };
-            let mut lowerer = FnLowerer::new(
-                shared,
-                &mut clif,
-                builder,
-                &tables,
-                counts_depth,
-            );
+            let mut lowerer = FnLowerer::new(shared, &mut clif, builder, &tables, counts_depth);
             if let Err(error) = lowerer.lower(function) {
                 drop(lowerer);
                 // A function given up halfway leaves the worker's builder
@@ -291,8 +283,9 @@ fn build<'a>(
             }
             let places = std::mem::take(&mut lowerer.places);
             lowerer.builder.finalize(shared.target_config());
-            let mut compiled = compile::compile(isa, earlier, unwinding, context, id, clif, &places)
-                .map_err(|e| err(format!("compile `{}`: {e}", function.name)))?;
+            let mut compiled =
+                compile::compile(isa, earlier, unwinding, context, id, clif, &places)
+                    .map_err(|e| err(format!("compile `{}`: {e}", function.name)))?;
             if let Some(key) = key
                 && let Some(code) = reuse::remembered(shared, &compiled)
             {
@@ -343,7 +336,10 @@ fn declare_shims<'a>(
             _ => None,
         });
     for function in referenced {
-        let needs = index.functions.get(function).is_some_and(|declared| shimmed(declared));
+        let needs = index
+            .functions
+            .get(function)
+            .is_some_and(|declared| shimmed(declared));
         if !needs || shims.contains_key(function) {
             continue;
         }
@@ -351,7 +347,11 @@ fn declare_shims<'a>(
             continue;
         };
         let id = object
-            .declare_function(&klf_kir::c_shim_symbol(function), Linkage::Import, signature)
+            .declare_function(
+                &klf_kir::c_shim_symbol(function),
+                Linkage::Import,
+                signature,
+            )
             .map_err(|e| err(format!("declare the C entry of `@{function}`: {e}")))?;
         shims.insert(function, id);
     }
@@ -493,7 +493,11 @@ fn program_object(
     let module = legal.as_ref().unwrap_or(module);
     let export_map: std::collections::HashMap<&str, &str> = exports.iter().copied().collect();
     for (name, _) in exports {
-        if !module.functions.iter().any(|f| f.name.as_str() == *name && !f.foreign) {
+        if !module
+            .functions
+            .iter()
+            .any(|f| f.name.as_str() == *name && !f.foreign)
+        {
             return Err(err(format!("export names unknown function `{name}`")));
         }
     }
@@ -644,7 +648,13 @@ pub fn emit_frontend_registry(triple: &str, count: usize) -> Result<Vec<u8>, Emi
     let (mut object, isa) = new_module(triple)?;
     let mut tables = unwind::supported(&*isa).then(UnwindTables::default);
     lower::emit_registry(&mut object, count, tables.as_mut())?;
-    finish_with(object, tables, DebugTables::default(), "klf registry", &*isa)
+    finish_with(
+        object,
+        tables,
+        DebugTables::default(),
+        "klf registry",
+        &*isa,
+    )
 }
 
 fn is_void(ty: &Type) -> bool {

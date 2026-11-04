@@ -25,7 +25,9 @@ pub(crate) struct Holder<'a> {
 pub(crate) fn source_name(name: &str) -> String {
     let name = strip_digit_suffix(name);
     if let Some((base, rest)) = name.split_once('$') {
-        let arguments = rest.split_once('#').map_or(rest, |(arguments, _)| arguments);
+        let arguments = rest
+            .split_once('#')
+            .map_or(rest, |(arguments, _)| arguments);
         return format!("{base}<{arguments}>");
     }
     if let Some((base, number)) = name.rsplit_once("_G")
@@ -41,7 +43,9 @@ pub(crate) fn source_name(name: &str) -> String {
 fn strip_digit_suffix(name: &str) -> &str {
     match name.rsplit_once('#') {
         Some((base, suffix))
-            if !base.is_empty() && !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) =>
+            if !base.is_empty()
+                && !suffix.is_empty()
+                && suffix.bytes().all(|b| b.is_ascii_digit()) =>
         {
             base
         }
@@ -153,7 +157,11 @@ fn field_list(declaration: &TypeDeclaration) -> String {
         .iter()
         .map(|field| format!("`{}`", field.name.as_str()))
         .collect();
-    if names.is_empty() { "none".to_owned() } else { names.join(", ") }
+    if names.is_empty() {
+        "none".to_owned()
+    } else {
+        names.join(", ")
+    }
 }
 
 fn case_list(declaration: &TypeDeclaration) -> String {
@@ -168,7 +176,11 @@ fn case_list(declaration: &TypeDeclaration) -> String {
             }
         })
         .collect();
-    if names.is_empty() { "none".to_owned() } else { names.join(", ") }
+    if names.is_empty() {
+        "none".to_owned()
+    } else {
+        names.join(", ")
+    }
 }
 
 /// ` at path:line:column` for `span`, nothing when the session does not hold
@@ -191,7 +203,10 @@ fn difference(session: &Session, left: &Function, right: &Function) -> String {
         ("whether it is foreign", left.foreign == right.foreign),
         ("generic parameters", left.generics == right.generics),
         ("attributes", left.attributes == right.attributes),
-        ("parameters", crate::drive::same_parameters(&left.parameters, &right.parameters)),
+        (
+            "parameters",
+            crate::drive::same_parameters(&left.parameters, &right.parameters),
+        ),
         ("result type", left.result == right.result),
         ("failure type", left.failure == right.failure),
     ];
@@ -226,7 +241,10 @@ fn block_difference(
     anonymous: &mut Vec<(String, String)>,
 ) -> Option<String> {
     if left.name != right.name {
-        return Some(format!("block names: `{}` against `{}`", left.name, right.name));
+        return Some(format!(
+            "block names: `{}` against `{}`",
+            left.name, right.name
+        ));
     }
     if !crate::drive::same_parameters(&left.parameters, &right.parameters) {
         return Some(format!("the parameters of block `{}`", left.name));
@@ -239,7 +257,12 @@ fn block_difference(
             right.instructions.len()
         ));
     }
-    for (index, (one, other)) in left.instructions.iter().zip(&right.instructions).enumerate() {
+    for (index, (one, other)) in left
+        .instructions
+        .iter()
+        .zip(&right.instructions)
+        .enumerate()
+    {
         if one.results == other.results
             && crate::drive::same_operation(&one.operation, &other.operation, anonymous)
         {
@@ -260,8 +283,14 @@ fn block_difference(
 fn instruction_place(session: &Session, instruction: &Instruction) -> String {
     match &instruction.debug_location {
         Some(at) => format!(" (from {}:{}:{})", at.file, at.line, at.column),
-        None => place(session, instruction.span).replacen(" at ", " (from ", 1)
-            + if session.has_file(instruction.span.file) { ")" } else { "" },
+        None => {
+            place(session, instruction.span).replacen(" at ", " (from ", 1)
+                + if session.has_file(instruction.span.file) {
+                    ")"
+                } else {
+                    ""
+                }
+        }
     }
 }
 
@@ -269,8 +298,16 @@ fn shown(instruction: &Instruction) -> String {
     let mut text = if instruction.results.is_empty() {
         debug_text(&instruction.operation)
     } else {
-        let results: Vec<&str> = instruction.results.iter().map(klf_core::Name::as_str).collect();
-        format!("{} = {}", results.join(", "), debug_text(&instruction.operation))
+        let results: Vec<&str> = instruction
+            .results
+            .iter()
+            .map(klf_core::Name::as_str)
+            .collect();
+        format!(
+            "{} = {}",
+            results.join(", "),
+            debug_text(&instruction.operation)
+        )
     };
     if text.chars().count() > SHOWN {
         text = text.chars().take(SHOWN).collect::<String>() + "…";
@@ -285,8 +322,8 @@ fn debug_text(value: &impl Debug) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use klf_kir::{EnumVariant, Field, LayoutRule, Policy, TypeKind};
     use klf_core::FileId;
+    use klf_kir::{EnumVariant, Field, LayoutRule, Policy, TypeKind};
 
     fn span() -> Span {
         Span::new(FileId::from_u32(0), 0, 1)
@@ -318,7 +355,10 @@ mod tests {
 
     #[test]
     fn a_generic_instance_shows_its_arguments_and_no_unit() {
-        assert_eq!(source_name("textOf$Array<UN8>#Network"), "textOf<Array<UN8>>");
+        assert_eq!(
+            source_name("textOf$Array<UN8>#Network"),
+            "textOf<Array<UN8>>"
+        );
         assert_eq!(source_name("textOf$Array<UN8>"), "textOf<Array<UN8>>");
     }
 
@@ -331,7 +371,10 @@ mod tests {
 
     #[test]
     fn a_name_with_no_instance_marker_is_left_alone() {
-        assert_eq!(source_name("ambientStateViewLogCount"), "ambientStateViewLogCount");
+        assert_eq!(
+            source_name("ambientStateViewLogCount"),
+            "ambientStateViewLogCount"
+        );
     }
 
     #[test]
@@ -349,15 +392,27 @@ mod tests {
         let left = enum_named("Gate", &["Grant"]);
         let mut right = enum_named("Gate", &["Grant"]);
         right.kind = TypeKind::Struct;
-        assert_eq!(type_difference(&left, &right), "their kind: Enum against Struct");
+        assert_eq!(
+            type_difference(&left, &right),
+            "their kind: Enum against Struct"
+        );
     }
 
     #[test]
     fn different_fields_name_both_field_lists() {
         let mut left = enum_named("Point", &[]);
         left.kind = TypeKind::Struct;
-        left.fields = vec![Field::new(klf_core::Name::new("x"), klf_kir::Type::Nominal(klf_core::Name::new("Number"), Vec::new()))];
-        let right = TypeDeclaration { fields: Vec::new(), ..left.clone() };
-        assert_eq!(type_difference(&left, &right), "their fields: `x` against none");
+        left.fields = vec![Field::new(
+            klf_core::Name::new("x"),
+            klf_kir::Type::Nominal(klf_core::Name::new("Number"), Vec::new()),
+        )];
+        let right = TypeDeclaration {
+            fields: Vec::new(),
+            ..left.clone()
+        };
+        assert_eq!(
+            type_difference(&left, &right),
+            "their fields: `x` against none"
+        );
     }
 }

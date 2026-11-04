@@ -61,7 +61,11 @@ fn identity(metadata: &fs::Metadata) -> (i64, i64, i64) {
 
 #[cfg(not(unix))]
 fn identity(metadata: &fs::Metadata) -> (i64, i64, i64) {
-    let mode = if metadata.permissions().readonly() { 0o444 } else { 0o644 };
+    let mode = if metadata.permissions().readonly() {
+        0o444
+    } else {
+        0o644
+    };
     (mode, 0, 0)
 }
 

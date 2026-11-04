@@ -209,15 +209,29 @@ pub fn pic_flags(target: &str) -> &'static [&'static str] {
 /// `libname.a`, or `name.lib` on MSVC.
 #[must_use]
 pub fn static_library(name: &str, target: &str) -> String {
-    if is_msvc(target) { format!("{name}.lib") } else { format!("lib{name}.a") }
+    if is_msvc(target) {
+        format!("{name}.lib")
+    } else {
+        format!("lib{name}.a")
+    }
 }
 
 /// What a Rust static library needs from Windows when linked with MSVC, as
 /// `rustc --print native-static-libs` lists it, and the DLL C runtime it was
 /// compiled for in place of the static one clang would pick.
 pub const MSVC_SYSTEM_LIBRARIES: [&str; 12] = [
-    "-lpsapi", "-lshell32", "-luser32", "-ladvapi32", "-lbcrypt", "-lkernel32",
-    "-lntdll", "-luserenv", "-lws2_32", "-ldbghelp", "-lmsvcrt", "-Wl,/NODEFAULTLIB:libcmt",
+    "-lpsapi",
+    "-lshell32",
+    "-luser32",
+    "-ladvapi32",
+    "-lbcrypt",
+    "-lkernel32",
+    "-lntdll",
+    "-luserenv",
+    "-lws2_32",
+    "-ldbghelp",
+    "-lmsvcrt",
+    "-Wl,/NODEFAULTLIB:libcmt",
 ];
 
 /// The RIDL LLVM release this KLF links with, published by
@@ -239,14 +253,18 @@ pub fn llvm_host_key() -> &'static str {
     }
 }
 
-/// The newest RIDL LLVM installed, `~/.klf/llvm-ridl/<version>`: the tree
-/// holding `bin/clang` and the `lib` beside it. Versions order by their
-/// numbers, so `23.1.0` is newer than `9.0.0`.
+/// The newest RIDL LLVM installed, `$KLFD_HOME/llvm-ridl/<version>` or
+/// `~/.klf/llvm-ridl/<version>`: the tree holding `bin/clang` and its `lib`.
+/// Versions order by their numbers, so `23.1.0` is newer than `9.0.0`.
 #[must_use]
 pub fn llvm_root() -> Option<std::path::PathBuf> {
     let clang = executable("clang");
+    let home = std::env::var_os("KLFD_HOME")
+        .filter(|home| !home.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".klf")))?;
     let mut installed: Vec<(Vec<u64>, std::path::PathBuf)> =
-        std::fs::read_dir(home_dir()?.join(".klf/llvm-ridl"))
+        std::fs::read_dir(home.join("llvm-ridl"))
             .ok()?
             .flatten()
             .map(|entry| entry.path())

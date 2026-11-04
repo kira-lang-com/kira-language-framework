@@ -2,8 +2,10 @@
 //!
 //! ```sh
 //! cargo xtask release OUT VERSION  # this host's packed distribution, as CI publishes it
+//! cargo xtask bootstrap-kira       # install KLF, Kira and knvm from this monorepo
 //! ```
 
+mod bootstrap;
 mod paths;
 mod process;
 mod release;
@@ -14,6 +16,7 @@ fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let outcome = match arguments.first().map(String::as_str) {
         Some("release") => release::command(&arguments[1..]),
+        Some("bootstrap-kira") => bootstrap::command(&arguments[1..]),
         _ => Err(USAGE.to_owned()),
     };
     match outcome {
@@ -25,4 +28,4 @@ fn main() -> ExitCode {
     }
 }
 
-const USAGE: &str = "usage: cargo xtask release OUT VERSION";
+const USAGE: &str = "usage:\n  cargo xtask release OUT VERSION\n  cargo xtask bootstrap-kira";

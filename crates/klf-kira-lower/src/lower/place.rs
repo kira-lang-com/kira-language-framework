@@ -116,9 +116,8 @@ impl Lowerer<'_> {
         let within = self
             .fb
             .compare(IntegerPredicate::UnsignedLt, index.clone(), count.clone());
-        let note = format!(
-            "a {indexed} index must be at least 0 and less than the {indexed}'s count"
-        );
+        let note =
+            format!("a {indexed} index must be at least 0 and less than the {indexed}'s count");
         let text = super::trap_report::TrapText {
             code: "KLF-RT-0005",
             headline: "index out of range: the index is {0} but the count is {1}",

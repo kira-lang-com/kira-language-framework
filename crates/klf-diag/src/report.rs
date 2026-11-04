@@ -71,7 +71,11 @@ impl Report {
             .map_or(1, |place| place.line.to_string().len());
         let pad = " ".repeat(digits);
         if let Some(place) = &self.place {
-            let _ = writeln!(out, "{pad}--> {}:{}:{}", place.path, place.line, place.column);
+            let _ = writeln!(
+                out,
+                "{pad}--> {}:{}:{}",
+                place.path, place.line, place.column
+            );
             if let Some(source) = &place.source_line {
                 let label = if place.label.is_empty() {
                     String::new()
@@ -130,7 +134,9 @@ pub fn outcome_line(rendered: &str) -> String {
     match report_code(rendered) {
         Some(code) => {
             let headline = rendered.lines().next().unwrap_or_default();
-            let headline = headline.split_once("]: ").map_or(headline, |(_, rest)| rest);
+            let headline = headline
+                .split_once("]: ")
+                .map_or(headline, |(_, rest)| rest);
             format!("{code}: {headline}")
         }
         None => rendered.replace('\n', " "),

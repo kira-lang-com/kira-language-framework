@@ -64,7 +64,10 @@ impl DefinitionServiceState {
     }
 
     /// The first entry of `sources` `selector` names.
-    pub(crate) fn selected_source(&self, selector: SourceSelector) -> Option<&(FileId, String, Arc<str>)> {
+    pub(crate) fn selected_source(
+        &self,
+        selector: SourceSelector,
+    ) -> Option<&(FileId, String, Arc<str>)> {
         let hash = match selector {
             SourceSelector::File(file) => return self.source_entry(file),
             SourceSelector::Hash(hash) => hash,
@@ -193,7 +196,10 @@ impl SourceSelector {
 }
 
 /// The selector and byte range of a negative span.
-pub(crate) fn selected_span(raw_start: i64, raw_end: u64) -> Option<(SourceSelector, usize, usize)> {
+pub(crate) fn selected_span(
+    raw_start: i64,
+    raw_end: u64,
+) -> Option<(SourceSelector, usize, usize)> {
     let encoded = raw_start.unsigned_abs();
     let start = usize::try_from(encoded & u64::from(u32::MAX)).ok()?;
     let end = usize::try_from(raw_end & u64::from(u32::MAX)).ok()?;

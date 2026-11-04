@@ -67,7 +67,10 @@ fn build_runtime() -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR")
         .map_or_else(|| workspace_root().join("target"), PathBuf::from)
         .join("release")
-        .join(klf_target::static_library("klf_native_rt", klf_target::host_triple()))
+        .join(klf_target::static_library(
+            "klf_native_rt",
+            klf_target::host_triple(),
+        ))
 }
 
 /// Lower `source`'s `entry` to a native object with Cranelift, link and run it.

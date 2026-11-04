@@ -345,7 +345,13 @@ fn report_diagnostic(
                 let _ = writeln!(
                     buffer,
                     "DIAGS {} {} {} {} {} {} {}",
-                    record.code, record.start, record.end, record.file, record.origin, subject_start, subject_end
+                    record.code,
+                    record.start,
+                    record.end,
+                    record.file,
+                    record.origin,
+                    subject_start,
+                    subject_end
                 );
             }
             None => {

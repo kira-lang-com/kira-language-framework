@@ -98,7 +98,10 @@ fn thread_stack_floor() -> Option<usize> {
     // SAFETY: both read the calling thread's own attributes.
     let (top, size) = unsafe {
         let thread = pthread_self();
-        (pthread_get_stackaddr_np(thread), pthread_get_stacksize_np(thread))
+        (
+            pthread_get_stackaddr_np(thread),
+            pthread_get_stacksize_np(thread),
+        )
     };
     (top > size && size > STACK_MARGIN).then(|| top - size)
 }
@@ -108,7 +111,11 @@ fn thread_stack_floor() -> Option<usize> {
     unsafe extern "C" {
         fn pthread_self() -> usize;
         fn pthread_getattr_np(thread: usize, attributes: *mut [u64; 16]) -> i32;
-        fn pthread_attr_getstack(attributes: *const [u64; 16], address: *mut usize, size: *mut usize) -> i32;
+        fn pthread_attr_getstack(
+            attributes: *const [u64; 16],
+            address: *mut usize,
+            size: *mut usize,
+        ) -> i32;
         fn pthread_attr_destroy(attributes: *mut [u64; 16]) -> i32;
     }
     let mut attributes = [0u64; 16];

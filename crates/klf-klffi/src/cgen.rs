@@ -8,10 +8,10 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::cdecl::{Known, declaration, top_level};
-use crate::names::{parameter_name, unbindable_name};
 use crate::model::{
     Annotation, AnnotationKind, FfiConstant, FfiFunction, FfiItem, FfiModule, FfiStruct, FfiType,
 };
+use crate::names::{parameter_name, unbindable_name};
 use crate::preprocess::{
     Define, Environment, HeaderError, Preprocessed, integer_literal, preprocess,
 };
@@ -84,7 +84,12 @@ pub fn generate_withholding(
 
     let mut aliases = alias_declarations(&items);
     aliases.append(&mut items);
-    Ok((FfiModule { items: settle(aliases) }, remarks))
+    Ok((
+        FfiModule {
+            items: settle(aliases),
+        },
+        remarks,
+    ))
 }
 
 /// Drops the `@FFI.Alias` of an opaque tag that a struct body defines, and
@@ -141,7 +146,10 @@ fn without_decorations(text: &str) -> Result<String, Fault> {
     while index < tokens.len() {
         let token = &tokens[index];
         let word = token.kind == Kind::Ident;
-        if word && GROUPED.contains(&token.text.as_str()) && tokens.get(index + 1).is_some_and(|t| t.is("(")) {
+        if word
+            && GROUPED.contains(&token.text.as_str())
+            && tokens.get(index + 1).is_some_and(|t| t.is("("))
+        {
             index = after_group(&tokens, index + 1);
             continue;
         }
@@ -291,7 +299,10 @@ fn prototype(
 
 /// The `(name, type)` of each parameter of a prototype or callback. A C array
 /// parameter decays to a pointer to its element, as C passes it.
-pub(crate) fn parse_params(text: &str, known: &mut Known) -> Result<Vec<(String, FfiType)>, String> {
+pub(crate) fn parse_params(
+    text: &str,
+    known: &mut Known,
+) -> Result<Vec<(String, FfiType)>, String> {
     let text = text.trim();
     if text.is_empty() || text == "void" {
         return Ok(Vec::new());

@@ -1,7 +1,7 @@
 # KLF implementation status
 
-This file records only behavior present in the current tree and covered by an
-executable test. The normative requirements remain in `KLF-RIDL.md`.
+This file records behavior present in the current tree and its validation
+evidence. The normative requirements remain in the applicable specification.
 
 ## What remains (audited against the tree, 2026-10-17)
 
@@ -57,9 +57,8 @@ Still open, by spec section:
   function is left as it was and its backend refuses it.
 - 13, 23: descriptor-based generics for separately compiled code; the engine
   monomorphizes.
-- 14.1: generic specialization of hot polymorphic calls, devirtualization of
-  `call.vtable` (section 12.11 does not say whether the receiver is passed
-  to the slot's function, nor when `@Vtable` is the object's own),
+- 14.1: generic specialization of hot polymorphic calls and devirtualization
+  of `call.vtable`,
   uniqueness-check elision for a reference other than a fresh allocation
   (a check that passed proves nothing later: a `weak.load` or `from.raw`
   elsewhere can raise the count without using the reference).
@@ -121,6 +120,74 @@ Still open, by spec section:
   served and gives it no behaviour), and shader outs printing through the
   engine (section 8 leaves it out of this version).
 - `KLF-KSL.md`: S8, hardware parity suites in CI.
+
+## TIR and TVISA migration status (audited 2026-11-04)
+
+TIR has substantial format, text parsing, binary verification, DEBUG, symbol
+space, and package analysis/writing/signing work. This does not establish a
+complete T0 or T1 milestone. Still open are semantic `tirc canonicalize`, a
+pinned developer trust root, Kira frontend lowering, `tirc build`, the TIR
+interpreter, and TIR-to-TVISA lowering. T4 is only starting: KLF now exposes a
+module/function/block text builder with partial methods for constants,
+integer/floating arithmetic, conversions, aggregates, memory, ownership,
+calls, and control flow. The module builder can also run the text verifier on
+finished modules. Ownership canonicalization, full instruction coverage, and
+migration of definition services and Kira definitions remain open.
+
+TVISA has broad V0 format and verifier coverage for TYPES, constants, DATA,
+imports, CODE decoding, variants, IMAGE, DEBUG, runtime and GPU records. Typed
+text models and text-to-binary encoders now cover several tables, including
+TYPES, DATA, imports, variants, IMAGE/runtime metadata and GPU entries. V0 is
+not claimed complete; full text assembly/disassembly, whole-image assembly,
+CODE body assembly, TIR lowering, and V1+ backends remain open. No percentage is
+recorded because neither specification's full conformance gates have passed.
+
+The 2026-11-04 `cargo xtask bootstrap-kira` run from this CloudStorage checkout
+completed with Cargo's default target directory. It installed KLF and Kira
+`26.10.4` on the dev channel and refreshed knvm. `kira --version`, `knvm list`,
+and `klf tirc --help` verified the installed commands; no tests were run.
+
+The text verifier now checks implicit `try.call` result/error edge parameter
+shapes and types, checks the `invoke` normal result edge, and requires its
+unwind target to begin with `landingpad`. The binary verifier also rejects
+parameters on an `invoke` unwind target. TIR sections 12.11 and 22.5 and
+decision D-487 now state the shared text/binary contract. `cargo fmt -p
+tir-verify` and `cargo check -p tir-verify` pass using the default Cargo target
+directory; tests were not run. D-488 records the already-implemented
+`const.bytes` escape contract. These are verifier/documentation slices; the
+TIR and TVISA conformance milestones remain incomplete.
+
+The text and binary verifiers now infer direct generic `try.call` and `invoke`
+type arguments from actual argument types, validate specialized argument and
+implicit-edge types, and reject unresolved generic parameters. Direct generic
+`call` and `tail.call` require their explicit type arguments. TIR sections
+12.11 and 22.5 and decision D-492 record the rule. `cargo fmt -p tir-verify`
+and `cargo check -p tir-verify` pass with the default Cargo target; tests were
+not run.
+
+TVISA Appendix A.1 now specifies each GPU-entry text field and nested record
+shape used by the existing parser, verifier, and text encoder; D-489 records
+the syntax decision. `cargo check -p tvisa-format -p tvisa-verify` passes with
+the default target directory; tests were not run. Whole-image assembly and
+remaining V0 conformance work are still open.
+
+The TVISA text verifier now matches binary specialization-constant type and
+`float64` capability restrictions. It validates scalar and vector defaults,
+including lane count, integer range, and exact floating-point representation.
+`cargo fmt -p tvisa-verify` and `cargo check -p tvisa-verify` pass with Cargo's
+default target directory; tests were not run.
+
+The TVISA text verifier also rejects empty node output names as required by
+section 21.2 and the binary record decoder. Formatting and `cargo check -p
+tvisa-verify` pass with Cargo's default target directory; tests were not run.
+
+TVISA indexed stage semantics now accept the full unsigned 64-bit range used
+by the encoder and binary ULEB field; the text verifier no longer applies an
+unwritten 32-bit limit. Formatting and `cargo check -p tvisa-verify` pass with
+Cargo's default target directory; tests were not run.
+
+The existing TIR text parser and layout engine accept explicit bitfields as
+@byte_offset:bit_offset:width; D-490 records the syntax choice.
 
 ## M0 — KIR model, text format, raw verifier
 
@@ -3337,3 +3404,1802 @@ stays negative instead of becoming `i64::MAX`. The scoped VM service test runs
 KIR calls with negative arguments, and the session test checks that a source
 content hash resolves a diagnostic to its registered file. Source hashes are
 31-bit positive values; they do not depend on negative hash representations.
+
+### 2026-11-01 update: TVISA textual data and relocation verification
+
+`tvisa-verify` checks text data kinds, power-of-two byte alignment, initializer
+kind, aggregate byte ranges, relocation widths and bounds, relocation overlap,
+read-only relocation kinds, target symbol spaces, and function tags for
+`CODE64`/`IMPORTCODE64`. The TVISA text grammar now defines aggregates as an
+explicit total size and ordered hex byte ranges, with omitted ranges zeroed
+(D-405). Defined function and data items reject import linkage (D-406). Scoped
+`cargo check -p tvisa-format -p tvisa-verify` passes.
+
+This covers textual VFY-0009 checks. Binary DATA decoding and verification,
+the ANALYSIS/ASM cross-checks of VFY-0050, and the remaining TIR/TVISA
+milestones are still outstanding; no conformance tests were run for this
+update.
+
+### 2026-11-01 update: TVISA binary DATA and relocation verification
+
+`tvisa-format` now decodes and encodes counted DATA records, including names,
+linkage, kinds, byte alignment, payloads, debug indexes and tagged relocations.
+The format readers also resolve the import counts, function records and
+variant/dispatch index needed to validate relocation symbol spaces. Binary
+VFY-0009/0010 checks relocation bounds and overlap, read-only restrictions,
+target index ranges, TLS data kinds, import-vs-definition use, dispatch-set
+targets, function kinds and code-pointer tags. Text relocation addends now
+accept signed 64-bit values, matching the binary SLEB field. Decisions D-407
+through D-410 record the completed encoding choices. `cargo check -p
+tvisa-format -p tvisa-verify` passes after formatting. No conformance tests
+were run.
+
+The rest of binary TVISA verification, the ANALYSIS/ASM cross-checks of
+VFY-0050, and the remaining TIR/TVISA milestones are still outstanding.
+
+### 2026-11-01 update: TVISA binary variant verification
+
+Binary VARIANTS records now retain their member architecture, feature names
+and function indexes. SIGNATURES summaries retain the matching function
+variant and signature index. `tvisa-verify` checks variant-member indexes,
+CPU target kinds, member/function architecture and feature agreement, common
+signature indexes, unique membership, known architecture features, header
+variant flags, and the portable-or-three-base rule for images without
+assembly. Architecture code 4 is now explicitly `wasm`, following TIR's
+platform variant code; D-411 records this correction to D-410. Scoped
+`cargo check -p tvisa-format -p tvisa-verify` passes without warnings. No
+tests were run. Binary all-three validation for sets containing assembly
+still needs instruction-to-ASM association; full TYPES signature-index bounds,
+the remaining binary VFY rules, VFY-0050 and the broader TIR/TVISA scope
+remain outstanding.
+
+Binary function-record verification now checks that address-taken functions
+carry type tags, exported functions are address-taken, and GPU function
+records do not claim CPU address-taken tags. Tag reserved-value validation is
+also enforced while decoding SIGNATURES and IMPORTS. `func.ref` instruction
+checks still require decoding binary CODE. Function records retain trust and
+frame-slot metadata; VFY-0008 checks CPU, GPU-thread, and entry-only
+threadgroup slot address spaces. Header GPU, assembly, sandboxed and
+unmanaged flags are compared with the decoded records and sections, and GPU
+entry functions require a GPU section. Scoped `cargo check` passes; no tests
+were run.
+
+### 2026-11-01 update: TVISA TYPES decoding
+
+`TvisaImage` now decodes the three counted TYPES parts: topologically ordered
+value types, signatures, and C aggregate descriptors. The reader checks the
+TVISA type-tag subset, payload codes, type/signature/descriptor indexes,
+signature item shapes and limits, calling-convention restrictions, alignment,
+and descriptor flags. Defined and imported function records must reference
+an existing signature. D-412 records the missing part and item framing. The
+scoped TVISA format/verifier cargo check passes; no tests were run. Full type
+shape and member byte-range validation, binary CODE decoding, and the other
+remaining verifier and compiler stages are still outstanding.
+
+### 2026-11-01 update: TVISA CODE body ownership headers
+
+Bounded format validation now reads each FUNCINDEX range's CODE header,
+checks that its function-space index matches imports followed by defined
+functions, and rejects bodies with zero blocks or impossible block/value
+counts. D-413 fixes the previously unspecified relation between the body
+index and section 6.4. The binary function-record pass also checks frame-slot
+address spaces, trust/GPU/assembly/C-function header flags, exported
+address-taken rules, and GPU section presence for entries. Scoped `cargo check`
+passes without warnings. No tests were run. Instruction decoding and full
+binary CFG and operand verification remain outstanding. `verify_binary_image`
+now runs the implemented DATA, function-record and variant-set checks through
+one entry point while instruction-level rules are unfinished.
+
+### 2026-11-01 update: GPU barrier default scope
+
+The TIR and TVISA specifications now state that `gpu.barrier` without a scope
+clause uses threadgroup scope (D-414). The TIR uniformity pass already enforced
+threadgroup-uniform control flow for an omitted scope, and the TVISA verifier
+shares the TIR GPU synchronization clause validator. No tests were run.
+
+### 2026-11-01 update: TVISA TYPES shape and extent checks
+
+The binary TYPES decoder now validates fixed-vector and scalable-vector element
+shapes, the 512-byte vector limit, texture component types, and signature group
+member types, extents and overlap. C aggregate descriptors validate bit-field
+storage widths, member extents, member ordering, and non-union overlap. The
+decoded API retains value-type payloads, signature items, group members, and C
+aggregate members for later instruction and ABI verification. Function records
+also retain semantics, personality, alignment, placement, and debug-scope
+fields; binary verification checks target kinds against signature conventions
+and the sandboxed attribute against the recorded trust class. Scoped formatting
+and type checking pass without warnings. No tests were run.
+
+### 2026-11-01 update: TVISA binary GPU entry records
+
+`tvisa-format` now decodes and encodes concatenated GPU entry records, retains
+stage interfaces and specialization defaults, and validates record-local
+fields, type indexes, stage kinds, mesh limits, capability bits, node metadata,
+ray depth, and fragment flags. The binary verifier checks entry function
+indexes and target kinds, and requires a record for each entry function.
+Visible records must name exported target-1 GPU functions. Scoped formatting
+and `cargo check -p tvisa-format -p tvisa-verify` pass without warnings.
+Binary instruction decoding remains open; no tests were run. D-415 resolves the `visible`
+record's target-1 exception to the target-2 rule for ordinary entry kinds.
+
+### 2026-11-01 update: TIR byte constants and explicit bit-fields
+
+TIR `const.bytes` encodes ordinary Unicode and `\u{...}` escapes as UTF-8,
+supports `\xNN` for a raw byte, and rejects malformed or unknown escapes
+(D-472). It checks the decoded bytes against the type layout and trivial
+copy/destroy policy (D-394). Explicit-layout field parsing accepts
+`@byte_offset:bit_offset:width`; the layout engine checks integer storage,
+bit ranges, extent, and overlap (D-396). The `tir-core::Field` model retains
+explicit bit offsets and widths. Scoped TIR format/verifier checking
+has passed with `cargo check -p tir-format -p tir-verify`; no tests were run.
+
+### 2026-11-01 update: TVISA binary GPU entry signatures
+
+Binary VFY-0022 now checks GPU entry signature conventions and rejects
+failing, variadic, or noreturn entry signatures. Fragment input value types
+must occur in the signature in recorded field order. Vertex and fragment
+result leaves must match recorded stage outputs, including group member
+offsets when the signature retains grouped layout. Non-output stages must
+return unit. `cargo check -p tvisa-format -p tvisa-verify` passes without
+warnings; no tests were run. Binary CODE decoding and instruction-level
+verification remain outstanding.
+
+### 2026-11-01 update: TVISA specialization constant records
+
+TVISA CONSTANTS now decodes concatenated type-directed records, with fixed
+width integer bit patterns, raw float bits, and lane-ordered fixed-vector
+payloads. Nonzero scalar padding bits, invalid types, truncated values, and an
+empty present section are rejected. Binary GPU entry verification checks each
+specialization default index and its type, enforces GPU numeric type limits,
+and requires the `float64` capability for `f64`. D-416 clarifies this encoding
+and the scalar/vector specialization types. Formatting and scoped checks pass
+for `tvisa-format`, `tvisa-verify`, `tir-format`, and `tir-verify`; no tests
+were run.
+
+Text TVISA `gpu.spec_const` verification now checks scalar literals and each
+fixed-vector lane against the declared type, including integer range and
+floating-point representability. D-417 fixes the default spelling as an
+untyped scalar or bracketed vector value. `cargo check -p tvisa-verify` passes;
+no tests were run.
+
+TIR `gpu.spec_const` now verifies its declared GPU numeric type and checks the
+scalar default or every fixed-vector lane for integer range, boolean spelling,
+or exact floating-point representability. The shared numeric-literal checker
+keeps TIR and TVISA behavior aligned, including the OCP narrow vector formats.
+D-418 records the supported GPU specialization type subset. Scoped formatting
+and `cargo check` pass for the affected TIR and TVISA crates; no tests were run.
+
+TVISA GPU-entry text parsing now rejects trailing commas in arrays and objects,
+and its numeric entry fields accept the shared TIR integer spellings, including
+radix prefixes, separators, and uppercase hexadecimal, including indexes inside
+stage semantic names. Scoped formatting and
+`cargo check` pass; no tests were run.
+
+Text GPU-entry verification now applies the same function-signature checks as
+binary entries: stage inputs must occur in parameter order, vertex and fragment
+results must match stage outputs and grouped offsets, and other entry stages
+must return unit. Entry signatures also reject failing, variadic, and noreturn
+flags, matching binary VFY-0022. The scoped TIR/TVISA `cargo check` passes
+without warnings; no tests were run. Binary CODE instruction decoding and the
+remaining verifier milestones are still open.
+
+TIR and TVISA now specify that `gpu.memfence` defaults to device scope, using
+TIR's existing default for GPU fences; `gpu.barrier` keeps its threadgroup
+default (D-419). This closes the omitted-scope ambiguity without changing the
+default scope field encoding.
+
+Binary TVISA verification now checks every identifier in RUNTIME against the
+defined runtime-entry registry. The scoped TIR/TVISA `cargo check` passes
+without warnings; no tests were run. Checking each binary `call.runtime` site's
+signature still depends on CODE instruction decoding.
+
+TVISA's logical contents now distinguish ANALYSIS data from the assembly
+inventory in ASM and per-entry GPU capabilities in GPU records, matching the
+section encodings and VFY-0050 inputs.
+
+FUNCINDEX now requires nonempty body ranges to partition CODE with no overlaps,
+gaps or trailing bytes, and canonical images keep them in function order
+(D-420). CODE body headers enforce the section 24.7 limits of fewer than 2^24
+blocks and fewer than 2^32 values per function. Binary records also enforce
+the per-image function and data index-space limits and the per-function frame
+slot limit. The TIR/TVISA scoped `cargo check` passes without warnings; no
+tests were run. Parsing block headers beyond the existing body ownership
+header and decoding instructions remain open.
+
+GPU specialization-constant IDs are now consistently checked as unsigned
+32-bit TIR integer literals in TIR instructions and TVISA entry records, matching
+their binary type (D-421).
+
+TIR's CFI rule now separates CPU indirect-call landing pads and tags from GPU
+visible-table calls, which use `gpu.call.vft`'s typed table and have no CPU tag
+(D-422). This aligns TIR with TVISA's existing GPU CFI rule.
+
+TIR Appendix A.1 now defines the integer syntax used throughout its grammar;
+TVISA text integer fields use the corresponding unsigned forms. The shared
+numeric parser rejects separators before the first digit and after a radix
+prefix. TIR type, layout, entry and profile parsing; TVISA numeric fields;
+tensor-query dimensions; and portable-intrinsic IDs now share the grammar's
+radix and separator rules (D-423). Scoped formatting and the TIR/TVISA
+`cargo check` pass without warnings; no tests were run.
+
+TIR and TVISA now count first-block parameters once in value numbering
+(D-424). `const.int` uses its type width for the binary bit payload (D-425),
+and other integer immediates have an explicit sign byte plus ULEB128 magnitude
+(D-426). `tir-format::leb` provides minimal 128-bit ULEB reading and writing
+checked sign-and-magnitude immediate reading and writing, plus fixed-width
+integer bit payload reading and writing with unused high-bit validation.
+`numeric_literals::integer_literal_bits` maps validated signed or unsigned
+spellings to the corresponding fixed-width two's-complement payload.
+Scoped formatting and the TIR/TVISA `cargo check` pass without warnings; no
+tests were run. Binary instruction decoding remains open.
+
+Binary TVISA symbol operands now follow the shared index spaces from section
+6.4: function and data imports precede definitions, variant and dispatch sets
+share space 2, and space 3 is reserved (D-431). CODE call decoding resolves
+function imports through the unified function index; binary CODE verification
+checks function/data/entry operands, TLS and GPU-constant restrictions, and
+direct-call target conventions. Exported GPU-visible functions no longer need
+CPU `address_taken` tags, matching D-422. Scoped formatting and
+`cargo check -p tvisa-format -p tvisa-verify` pass; no tests were run. CODE
+instruction coverage, full type inference, and the remaining TIR/TVISA
+milestones remain outstanding.
+
+TVISA now decodes `const.sampler` as a fixed 23-byte descriptor, infers the
+sampler handle type, rejects it in CPU functions, and validates descriptor
+enumerations in binary CODE. Text TVISA checks field names, duplicate fields,
+enumeration values, anisotropy range, and exact `f32` LOD literals. D-432 sets
+the defaults and canonical byte layout. The scoped format/verifier
+`cargo check` passes; no tests were run. Other binary GPU and assembly
+instructions remain to be decoded and verified.
+
+TVISA now decodes the 0x420 derivative/quad and 0x440 subgroup opcodes, infers
+their result types, and checks float, predicate, lane, ballot and reduction
+operand types. Subgroup reductions and scans carry explicit operator and
+cluster ULEBs; D-434 records the mapping. Text verification checks required
+operators and cluster bounds. The scoped format/verifier `cargo check` passes;
+no tests were run. GPU textures, ray tracing, mesh, cooperative matrix, tensor,
+tile and work-graph binary instructions remain open.
+
+Binary GPU entry verification now walks direct-call and variant-set reachability
+from each entry. It rechecks stage-specific builtins and `gpu.call.vft` stage
+availability, requires the mapped capabilities for printf, fragment features,
+compute derivatives, sampler feedback, sparse texture operations, cooperative
+reduction, work graphs and shading rate, and compares reachable specialization
+constant declarations with the entry record, including conflicting IDs. Every
+inferred value type in reachable functions now contributes type-derived GPU
+capabilities, including types introduced by instruction results. Scoped
+formatting and `cargo check -p tvisa-format -p tvisa-verify` pass; no tests
+were run.
+
+TVISA now decodes object/mesh, tile imageblock and work-graph instructions,
+infers their address/count/boolean results, checks index and pointer types, and
+enforces stage availability in both text and binary entry verification. D-435
+fixes tile positions as `vec<2 x i32>` and records the node launch selector.
+Scoped formatting and `cargo check -p tvisa-format -p tvisa-verify` pass; no
+tests were run. Texture and ray-tracing CODE encodings remain open.
+
+TVISA now decodes the 0x500 ray-query, trace, hit-object and reorder opcodes,
+infers scalar, vector, matrix and hit-object results, validates their operand
+types, and enforces intersection/any-hit stage restrictions. The binary entry
+walk also requires the `triangle_vertex_positions` capability for `rt.get`.
+D-436 records the attribute codes and selector fields; TVISA's multiple-result
+table includes matrix attributes for all three query/trace readers. Scoped
+formatting and `cargo check -p tvisa-format -p tvisa-verify` pass; no tests were
+run. Texture, cooperative-matrix and tensor CODE instructions remain open.
+
+### 2026-11-01 update: TVISA texture, cooperative-matrix and tensor CODE
+
+The 0x480–0x48D texture opcodes and 0x560–0x56B cooperative-matrix and tensor
+opcodes now decode their operands and selectors, infer result types, and verify
+binary and textual operands. Texture checks cover coordinate shapes, access,
+sampler use, offsets, comparison and gather types, sparse results, queries and
+stage capabilities. Cooperative checks cover matrix roles and dimensions,
+layout selectors, MMA modifiers, reductions, tensor coordinates and queries;
+text parsing also enforces the documented field and comma forms. D-437 records
+the texture operand layout. `cargo fmt` and `cargo check -p tvisa-format -p
+tvisa-verify` pass without warnings; no tests were run.
+
+### 2026-11-02 update: TVISA vector type verification
+
+Binary result inference now derives vector types for shuffle, concatenation,
+split, table lookup and mask construction, and `tvisa-verify` checks operands
+and selectors across the 0x0C0–0x0D7 vector range. Text verification checks
+optional zip/unzip/slide/split choices and both scatter address forms; store
+and scatter are recorded as no-result instructions. TIR section 22.5 now fixes
+the vector operand, mask-bit, selector and result encodings (D-439), and TVISA
+points to those rules. `rustfmt` and `cargo check --offline -p tvisa-verify`
+pass; no tests were run.
+
+Binary TVISA atomic verification now checks pointer/value shapes, supported
+atomic storage widths, compare-exchange type agreement, RMW operation/type
+compatibility, selector ranges and `weak` placement. TIR section 22.5 defines
+the atomic operand fields and operation selector (D-440). The retained raw and
+MMIO memory instructions now receive binary type checks for pointers, values,
+integer sizes and MMIO widths; TIR section 22.5 also defines their operands,
+alignments and prefetch/I/O-fence selector fields (D-441). TVISA now lists its
+platform-interoperation opcodes. `rustfmt` and the scoped offline cargo check
+pass; no tests were run.
+
+Binary TVISA atomic verification now checks pointer/value shapes, supported
+atomic storage widths, compare-exchange type agreement, RMW operation/type
+compatibility, selector ranges and `weak` placement. TIR section 22.5 defines
+the atomic operand fields and operation selector (D-440), and TVISA references
+those rules. Scoped formatting and `cargo check -p tvisa-verify` pass; no tests
+were run.
+
+TVISA DATA now carries the per-CPU global attribute independently in kind-byte
+bit 3, and the verifier restricts it to kernel CPU data (D-442). Binary import
+records now distinguish platform libraries and weak imports; binary symbol
+verification checks `kernel.percpu.addr` and `foreign.*` indexes, kinds, target
+functions and C ABI requirements. Text TVISA recognizes and type-infers these
+instructions and checks per-CPU data and C ABI references. Scoped formatting
+and offline `cargo check -p tvisa-format -p tvisa-verify` pass; no tests were
+run.
+
+TIR and TVISA text verification now checks atomic order and scope modifiers,
+including load/store restrictions, compare-exchange failure-order compatibility,
+CPU/GPU scope sets, and GPU atomic address spaces. Binary TVISA verification
+enforces the same order/scope fields, rejects unrelated modifier bits, and
+checks GPU atomic pointers. D-444 records the defaults and constraints.
+`cargo fmt --all` and `cargo check --offline -p tir-verify -p tvisa-verify`
+pass; no tests were run.
+
+### 2026-11-02 update: binary verifier CLI routing
+
+`tirc check` now recognizes TVISA binary images by their `TVIS` magic, runs the
+section decoder and the existing binary verifier, and reports binary
+diagnostics by byte offset. TIRB checks now run the MODULE and IMPORTS record
+decoders before reporting that TYPES and CODE verification remain
+unimplemented. The CLI and verifier crates pass scoped formatting and
+`cargo check --offline -p tir-verify -p klf-cli`; no tests were run. Full TIR
+binary verification and the remaining TVISA conformance work are outstanding.
+
+TIR and TVISA define ASM record and instruction encodings (D-449). `tvisa-format`
+decodes and validates ASM string pairs, checks their first-use order and
+references from `asm` and `asm.goto`, and includes `asm.goto` edges in binary
+CFG verification. Binary verification checks function and image assembly
+flags, architecture-variant placement, privileged assembly profile, and the
+per-variant-set base coverage rule. Text and binary verification parse
+architecture-specific assembly constraints, check LLVM output/input/clobber
+ordering and tied operands, and match explicit input/output counts.
+
+TIR and TVISA ANALYSIS record layouts are now specified (D-455). `tvisa-format`
+decodes ANALYSIS trust/reason records, sandbox region indexes, indirect-call
+type pairs and the per-instruction assembly inventory. Binary verification
+cross-checks trust classes and the instruction-derived reason bits, and
+recomputes the indirect-call and assembly inventories from CODE. TIR binary
+ANALYSIS decoding and a complete binary trust-reason recomputation remain
+open. Scoped formatting and `cargo check --offline -p tvisa-format -p
+tvisa-verify -p klf-cli` pass; no tests were run.
+
+Binary VFY-0050 now recomputes the used `call.runtime` identifier set from
+CODE and requires the RUNTIME section to match it, including omission when no
+runtime calls exist. `rustfmt` and `cargo check --offline -p tvisa-verify -p
+klf-cli` pass; no tests were run.
+
+### 2026-11-02 update: TIR binary TYPES schema and decoder
+
+TIR section 22.4 now defines counted nominal declarations, topologically
+ordered type entries, and nominal definitions, including field offsets,
+enum payloads, policy tags, and the optional function-error type sentinel
+(D-450). `tir-format` decodes the complete TYPES section and rejects invalid
+tags, out-of-range strings/references, non-topological entries, invalid layout
+and policy fields, duplicate or misordered definitions, and trailing bytes.
+Scoped formatting and an offline `cargo check` pass; full cross-section TIR
+verification and CODE decoding remain open.
+
+### 2026-11-02 update: TIR binary CONSTANTS schema and decoder
+
+TIR section 22.4 now defines counted typed constant records and recursive value
+forms, including the active member of `explicit` unions (D-451). `tir-format`
+decodes scalar bit patterns, zero and byte values, strings, aggregates, enum
+variants, union members, null pointers and sampler descriptors against TYPES.
+`tir-verify` checks byte-constant sizes with the TIR layout engine and maps
+`kind explicit` to union layout semantics. Scoped formatting and an offline
+`cargo check` pass; CODE decoding and complete cross-section verification
+remain open.
+
+### 2026-11-02 update: TIR binary GLOBALS schema and decoder
+
+TIR section 22.4 now defines GLOBALS count, linkage and address-space tags,
+storage flags, alignment sentinel and initializer reference (D-452).
+`tir-format` decodes globals in declaration order, rejects duplicate names,
+reserved bits, invalid alignments and out-of-range references, and checks that
+initializers match the declared type. `tirc check` includes GLOBALS in binary
+record verification. Scoped formatting and offline `cargo check` pass; profile
+rules and CODE decoding remain open.
+
+### 2026-11-02 update: TIR binary SIGNATURES schema and decoder
+
+TIR section 22.4 now specifies signature boundaries, callable modifiers,
+generic bounds, engine/semantics/target and variant codes, coroutine and
+instance types, entry kinds, and platform exports (D-453). `tir-format`
+decodes and checks function type entries, attribute codes, generic type
+references, and `frame @f` indexes. `tirc check` includes SIGNATURES in binary
+record verification. `tir-verify` cross-checks initializer, finalizer, import
+and nominal-policy function references and enforces the kernel-only per-CPU
+rule. Scoped formatting and offline `cargo check` pass; broader profile
+validation and CODE decoding remain open.
+
+### 2026-11-02 update: TIR binary CODE body framing
+
+TIR section 22.4 now specifies the function count, body-size boundary, block
+count limit and signature ordering (D-454). `tir-format` validates function
+indexes, increasing order, body bounds and block-count framing. `tirc check`
+now reports this boundary separately; block and instruction decoding and
+verification remain open. Scoped formatting and offline `cargo check` pass.
+
+### 2026-11-02 update: TIR binary ANALYSIS framing
+
+TIR section 22.4 now requires ANALYSIS, and section 22.5 defines block headers,
+parameter convention/context bytes, loop metadata and instruction counts (D-456).
+`tir-format` decodes ANALYSIS records and ASM string pairs, checking record
+ordering, indexes, effects and trailing bytes. `tirc check` now includes this
+decoder. Instruction-level ANALYSIS recomputation and TIR CODE decoding remain
+open. Scoped formatting and offline `cargo check` pass; no tests were run.
+
+TIR CODE decodes length-bounded block headers, parameter convention/context
+records, loop targets and instruction counts; entry-block parameters are checked
+against SIGNATURES. Opcode coverage includes integer and floating arithmetic,
+conversions, constants, vectors, aggregates, address and memory operations,
+ownership, atomics, target and portable intrinsics, assembly, metadata,
+heap/reference operations, platform operations, guard/deopt, and core
+branch/return terminators including indirect branches and enum switches; TIR
+unwinding records decode landingpad clauses and payload/typeid operations.
+Direct, indirect, closure, witness, vtable, foreign, variadic, fallible and
+unwinding calls now decode, as do tail calls, variadic-list operations,
+`setjmp`/`longjmp`, coroutine start/resume/yield/destroy operations, frame
+queries, `await`, `async.waker`, aggregate constants, function/global/TLS
+addresses, descriptors, witnesses, block addresses and GPU-entry references.
+D-464 defines `expect` probability bytes; D-465 defines guard/deopt state
+framing; D-466 defines heap operand framing and `uninit`; D-467 defines
+landingpad clause tags; D-468 defines variadic-list and non-local-jump
+operands; D-469 defines call framing and call attributes; D-470 defines
+coroutine target and inline-slot framing; D-471 defines aggregate constant and
+symbol-reference framing. Shared bounded operand readers are extracted from the
+dispatcher. Recognized opcode payloads are decoded; unknown opcode payloads
+remain opaque, and instruction-level semantic verification remains open.
+Scoped formatting and offline `cargo check` pass; no tests were run.
+
+TIR VARIANTS now has a counted binary schema (D-458) and decoder. The format
+reader checks member and function indexes, canonical feature ordering, and
+agreement with SIGNATURES; binary verification checks architecture features,
+shared signatures, assembly placement, base coverage, and web/WASI members.
+TIR inline assembly is restricted to aarch64, x64 and rv64 variant bodies
+(D-459). Scoped formatting and offline `cargo check` pass; no tests were run.
+
+### 2026-11-02 update: TIR binary GPU entry records
+
+TIR section 22.4 now defines the GPU entry record layout and role-tagged
+interface types (D-460). `tir-format` decodes entries in SIGNATURES order,
+checks entry kinds, function parameter references, GPU stage interface types,
+thread dimensions, payload and mesh fields, capabilities, subgroup sizes,
+floating-point modes, and specialization-constant defaults. `tir-verify`
+includes the decoder in `tirc check`. Scoped formatting and offline `cargo
+check` pass; no tests were run. Code-derived threadgroup memory and capability
+verification remain open with TIR instruction decoding.
+
+### 2026-11-02 update: TIR GPU CODE decoding
+
+`tir-format` now decodes every GPU opcode listed in TIR section 17.20: control,
+derivative and subgroup collectives, textures, mesh, ray tracing, cooperative
+matrices, tensors, tile imageblocks and work graphs. The decoder checks
+modifier masks, selectors, typed constants, counted value operands, texture
+offsets and sparse-result arity, ray attribute codes, and result counts. TIR
+GPU CODE no longer falls back to opaque payloads for specified opcodes;
+`tir-verify` infers result types for currently handled instructions. Complete
+instruction typing, most stage/capability checks and control-flow semantic
+verification remain open. The scoped offline KLF `cargo check` passes; no
+tests were run.
+
+### 2026-11-02 update: TIR binary GPU profile checks
+
+Binary V15 checks now reject unspecialized GPU generics, forbidden heap,
+indirect-call, closure, vtable, unwinding, foreign, variadic, coroutine, async,
+assembly and target-intrinsic instructions; only `ct.select` and `ct.eq` portable
+intrinsics are accepted. Direct GPU calls to CPU-only functions are rejected,
+the direct GPU call graph is checked for cycles, and `gpu.call.vft` is limited
+to compute and ray-tracing entry paths. Reachable binary code now derives the
+optional capability bits from floating-point and atomic widths, address spaces,
+GPU instructions, entry modes, specialization types and mesh-entry references.
+It rejects GPU builtins with unknown names, wrong result types or unavailable
+stages, and rejects wide integers, `f128`, scalable/invalid-width vectors,
+reference-like and non-trivial types. Register-only ray-query, hit-object and
+cooperative-matrix values are restricted to thread-local storage and module-
+linkage GPU calls in binary verification. Text compute capability checks also
+cover all implicit-derivative sampling operations. Witness-resolution edges
+and uniformity remain open. The scoped offline KLF `cargo check` passes; no
+tests were run.
+
+### 2026-11-02 update: GPU visible-function target verification
+
+TIR binary GPU call graphs now expand `gpu.call.vft` to exported GPU functions
+with the table's exact function type. Their bodies contribute stage checks,
+capability requirements and cycle detection. TVISA expands calls to all
+same-signature `visible` records, applies the caller's stage and capability
+checks to every target body, and includes those edges in call-graph cycle
+detection. TIR and TVISA now define these target sets. Scoped formatting and
+offline KLF `cargo check` pass; no tests were run.
+
+### 2026-11-02 update: binary GPU address-space and memory checks
+
+Binary GPU verification now rejects `tls.addr`, imported or non-constant,
+uninitialized global access, dynamic `stack.alloc` counts, and threadgroup
+allocations outside an entry's first block. The GPU entry record's threadgroup
+memory byte count is checked against the exact layout, count and alignment of
+its threadgroup allocations. TIR now records the `stack.alloc` address-space
+selector in binary CODE and defines the GPU default as thread space; the spec
+also defines count defaults, static-count encoding and threadgroup byte
+accounting. Scoped formatting and offline KLF `cargo check` pass; no tests were
+run.
+
+### 2026-11-02 update: TIR binary coroutine verifier rules
+
+Binary V17 verification now rejects `setjmp`, `longjmp`, `va.*` and
+`br.indirect` in coroutine and async functions. For each `coro.yield`, it walks
+the destroy target's reachable CFG and diagnoses blocks that cannot reach
+`coro.finish`; it also rejects cycles that can run without reaching the finish
+block. Static `access.begin` scopes are followed through block arguments and
+rejected when a path reaches `coro.yield` or `await` before the matching
+`access.end`. Borrowed-value liveness is checked across `coro.yield` and
+`await`; only entry `borrow` parameters in coroutine functions may remain live.
+Owned-value consumption on destroy paths and caller-side destruction of
+borrow-dependent coroutine handles remain open. Rust formatting and the scoped
+offline KLF `cargo check` pass; no tests were run.
+
+### 2026-11-02 update: TVISA binary slot lifetime checks
+
+Binary `slot.addr` result types now follow the frame slot's recorded address
+space. VFY-0007 tracks those addresses through `ptr.offset`, `select`, `freeze`
+and block arguments, then rejects statically visible uses outside the matching
+scoped lifetime, including stale addresses reused after a later `slot.start`.
+Scoped formatting and offline `cargo check` pass; no tests were run. Pointer
+provenance through memory round trips and opaque calls remains outside this
+check.
+
+### 2026-11-02 update: TIR binary assembly inventory verification
+
+TIR V20 now reconciles decoded `asm` and `asm.goto` instructions with the
+ANALYSIS assembly-region inventory. It checks flattened instruction ordinals,
+ASM record indexes, variant architectures, and effect flags, and rejects
+regions that point to non-assembly or out-of-body instructions. If a function
+contains an opcode whose instruction decoder is not yet available, inventory
+absence checks are limited to the decoded portions of that body. Trust-reason
+checks now also require reason bits for assembly, `inttoptr`, foreign and
+variadic operations, non-local jumps, unchecked access, device I/O, raw heap
+operations, CPU raw-pointer operations, and indirect calls through a TIR
+function type marked `[foreign]`. Pointer-typed `mem.copy`,
+`mem.move`, and `mem.set` operands are included. For fully decoded functions,
+reason bits derivable from CODE are also rejected when unsupported; converter
+provenance bit 6 and unresolved pointer operand types remain conservative.
+Unmanaged records with no unmanaged instruction or reason are rejected.
+Sandbox-region base and size globals must have `ptr` and `i64` types. Complete
+trust-class recomputation and proof that sandboxed accesses stay within their
+declared regions remain open. Indirect-call verification now requires ANALYSIS typeids
+for `call.indirect`, closure calls, and `gpu.call.vft`, and rejects IDs that do
+not identify any canonical function type when all function types are
+resolvable. Runtime vtable and witness call types remain open. Scoped
+formatting and offline `cargo check` pass; no tests were run.
+
+Binary TIR V9 also rejects `asm`, `target.intrinsic`, and device-I/O/kernel
+instructions in functions using the `runtime` or `any` engine.
+
+Binary TIR V13 now checks app/system device-I/O bans, profile placement of
+`kernel.*`, driver/kernel engine restrictions, kernel entry and unwinding bans,
+kernel `nounwind`, `kernel.fp` type and instruction use, and static kernel
+`stack.alloc` sizes. Scoped formatting and offline `cargo check` pass; no tests
+were run. Text and binary module verification now enforce driver/kernel source
+language sets and require the `tessera` platform. For kernel languages, the
+verifier follows TIR §1.1's table-wins rule: §6.3 permits `kira` and `rust`,
+while §31.1 says Kira only. Driver import allowlists, license checks,
+source.json-to-module hash matching and rebuild reproducibility, and remaining
+profile module attributes remain open.
+
+TVISA binary VFY-0050 now checks the setjmp/longjmp reason bit against direct
+instructions and runtime entries. Its unmanaged-instruction scan no longer
+classifies `ptrtoint` as unmanaged, matching TIR section 9.5; reserved opcodes
+above `kernel.percpu.addr` are not treated as device I/O. Scoped formatting
+and offline `cargo check` pass; no tests were run.
+
+The textual TVISA trust verifier now follows the same `inttoptr` rule as the
+binary verifier and TIR section 9.5; `ptrtoint` alone does not make a function
+unmanaged.
+
+### 2026-11-02 update: TIR and TVISA GPU uniformity analysis
+
+TIR text and binary V15 analysis now rejects non-dynamically-uniform lane
+selectors for `quad.broadcast` and `subgroup.broadcast`. Binary call summaries
+ignore indirect and runtime tail-call forms, and `switch.enum` selections
+conservatively keep their reachable paths divergent because the encoding has no
+merge target. TVISA binary verification now runs a GPU uniformity pass over GPU
+bodies, checks barriers, derivatives, implicit-derivative sampling, quad and
+mesh requirements, validates broadcast selectors, and includes direct plus
+signature-specific visible-function targets in call summaries. TVISA text
+verification reuses the TIR local analysis and checks interprocedural direct
+calls plus VFT targets matched by the table's complete canonical TIR function
+typeid against each visible record's 64-bit typeid, preserving ABI and
+parameter modifiers. If either typeid cannot be computed or parsed, analysis
+includes every visible target conservatively. Binary
+GPU body parameters are classified as divergent; precise root/immediate
+parameter roles remain open. This does not complete TIR or TVISA uniformity
+conformance. Scoped formatting and offline KLF `cargo check` pass; no tests
+were run.
+
+### 2026-11-03 update: TVISA entry uniformity roles
+
+TVISA section 21.2 now fixes the lowered entry signature order as optional root,
+optional immediate, then stage parameters in their TIR order. The TVISA binary
+entry verifier checks the root parameter is a leaf pointer in the recorded
+address space and requires an immediate parameter item when immediate data is
+present. Binary GPU uniformity analysis seeds root and immediate values as
+dispatch-uniform and keeps stage parameters divergent. This closes the
+previously missing binary role mapping; other uniformity conformance gaps
+remain open.
+
+### 2026-11-02 update: TIR byte-string escapes and driver source hashes
+
+TIR and TVISA `const.bytes` now decode `\xNN` as one raw byte, unescaped
+Unicode and `\u{...}` as UTF-8, and reject unknown or malformed escapes
+(D-472). Text driver modules must carry exactly 64 lowercase hexadecimal
+source-hash digits; other profiles cannot carry that field. Binary driver
+modules retain the fixed 32-byte hash. These structural checks use
+TIR-PROF-0013 (D-473). The binary and text V13 verifiers also reject kernel
+imports from LibTessera. The scoped offline `cargo check` for `tir-verify`,
+`tvisa-verify`, and `klf-cli` passes; no tests were run.
+
+### 2026-11-02 update: TIR V21 platform checks
+
+Text and binary module verification now require portable modules to use the
+`app` or `system` profile, restrict foreign function types and instructions to
+non-portable modules, validate platform import library names against the
+module platform's §32.6 naming forms, and reject §12.22 device-I/O/kernel
+opcodes outside Tessera. These checks are in `tir-verify/src/platform.rs`;
+the profile verifier is back below the 700-line source-file limit. The
+remaining V21 gap is classifying private system RIDL imports and checking
+platform library/symbol availability against the target interface database;
+the standalone module verifier currently receives no such catalog. Scoped
+formatting and offline `cargo check` for `tir-verify`, `tvisa-verify`, and
+`klf-cli` pass; no tests were run.
+
+### 2026-11-02 update: Binary TIR enum payload address typing
+
+Binary TIR result-type inference now derives `enum.payload.addr` from the
+selected enum variant's payload shape and preserves the input address space.
+Generic arguments are substituted recursively through field and payload types.
+Text TIR also infers tuple, nominal field, fixed-array element, and enum payload
+addresses, preserves address spaces, and handles address/pointer conversion
+results. Its verifier diagnoses invalid bases, indices, generic arity,
+non-integer element indices, and incompatible `addr.cast` layouts; GPU
+capability and register-only checks use the same module layouts. Scoped
+formatting and offline `cargo check` for `tir-verify`, `tvisa-verify`, and
+`klf-cli` pass; no tests were run.
+
+### 2026-11-02 update: Kira string escape verification
+
+TIR §23.1 now defines ordinary quoted-string escapes separately from the
+byte-specific `const.bytes` rules. `tir-format` accepts escaped LF/CRLF line
+continuations, validates ordinary string escapes in parsed TIR modules, and
+decodes module-header strings. TVISA verification uses the fallible ordinary
+string decoder for DATA initializers, assembly templates and constraints, and
+GPU node-output names; unknown and incomplete escapes are rejected. Scoped
+formatting and offline `cargo check` for `tir-verify`, `tvisa-verify`, and
+`klf-cli` pass; no tests were run.
+
+### 2026-11-02 update: TIR text GPU witness resolution
+
+Text GPU V15 now resolves `call.witness T, Trait.method(...)` through a unique
+module-local conformance for concrete `T`, then includes the assigned witness
+function in the GPU call graph used for stage, capability, and cycle checks.
+Missing or ambiguous concrete mappings are rejected at the call site. Binary
+GPU call-graph resolution now reads the concrete conformance map from GENERICS;
+substituted method-signature and argument checking remain open. Scoped offline
+`cargo check -p tir-format -p tir-verify -p tvisa-verify` passes. No tests were
+run.
+
+### 2026-11-02 update: TVISA text VFT type identity
+
+TVISA text GPU uniformity now matches `gpu.call.vft` targets by the canonical
+TIR function typeid, including ABI, failure mode, async flag, context and
+parameter ownership, instead of comparing lowered parameter/result shapes.
+The typeid comes from each `visible` record and the typed VFT operand. If a
+typeid is unavailable or invalid, analysis conservatively includes all visible
+targets. Scoped offline `cargo check -p tir-format -p tir-verify -p
+tvisa-verify` passes. No tests were run.
+
+### 2026-11-02 update: TIR text GPU VFT call graph
+
+TIR text GPU V15 now adds `gpu.call.vft` edges to every exported GPU-only
+definition whose canonical function type matches the table type. These edges
+participate in stage, capability, and acyclic-call-graph checks. Canonical text
+matching qualifies nominal paths in the current module; when either type cannot
+be parsed or canonicalized, the graph conservatively includes the candidate.
+Scoped offline `cargo check -p tir-format -p tir-verify -p tvisa-verify` passes.
+No tests were run.
+
+### 2026-11-02 update: binary TIR GENERICS and GPU witnesses
+
+TIR §22.4 now defines the GENERICS wire records for trait requirements,
+conformances and vtables; generic function strategies remain in SIGNATURES.
+`tir-format` decodes those records and validates their type, signature, name,
+uniqueness and conformance-member references. Binary GPU V15 resolves
+`call.witness` through a unique concrete conformance and adds the witness
+function to the stage, capability and acyclic-call-graph walks. Text witness
+type matching also uses canonical module-qualified type text. Direct Rust
+formatting and scoped offline `cargo check -p tir-format -p tir-verify -p
+tvisa-verify` pass. Substituted witness method-signature and argument checks
+remain open; no tests were run.
+
+### 2026-11-02 update: TIR binary scalar instruction typing
+
+Binary TIR V2 now checks integer and floating-point arithmetic, comparison and
+select operands, overflow result shapes, `fclass`/`frexp`/`ldexp` shapes, and
+numeric, pointer and bitcast conversions. These rules cover scalar, fixed
+vector and scalable-vector numeric values and reject operations whose operand
+types could not be inferred. The scoped offline check for `tir-format`,
+`tir-verify` and `tvisa-verify`, explicitly targeting `.tessera-build`, passes
+without warnings. Vector, aggregate, address, memory, atomic and GPU
+instruction-level binary type checks remain open; no tests were run.
+
+### 2026-11-02 update: Binary TIR vector instruction typing
+
+Binary TIR V2 now checks the operand and result types for all §16.3 vector
+opcodes, including masks, typed memory addresses, gather/scatter address forms,
+dot-product lane ratios, selectors and `reassoc`. Shuffle accepts the
+specification's concatenation of differently sized fixed vectors; fixed-vector
+results include the full 2–64 lane set. Scoped formatting and offline
+`cargo check -p tir-verify` pass with `.tessera-build` explicitly selected.
+Text vector instruction typing and binary aggregate, address, memory, atomic
+and GPU instruction-level checks remain open; no tests were run.
+
+### 2026-11-02 update: TIR text vector instruction typing
+
+TIR text verification now infers the §16.3 result type for each vector
+instruction and checks operand shapes, selectors, reduction operations, masks,
+memory addresses and alignment, gather/scatter scales, shuffle indices, and
+dot-product types. `reassoc` is restricted to floating-point add/multiply
+reductions. The scoped offline `cargo check -p tir-verify` passes with output
+pinned to `.tessera-build`; no tests were run.
+
+### 2026-11-02 update: Binary TIR aggregate instruction typing
+
+Binary TIR V2 now checks construction, extraction, insertion, destructuring,
+array indexing and enum payload/tag types for every §12.6 aggregate opcode.
+Nominal field and payload types are specialized through generic arguments;
+constructors require loadable aggregates, and extraction/insertion follow the
+specification's trivial-versus-borrowed rules where borrow flow is statically
+recoverable through parameters, loads, preserving operations and CFG edges.
+Borrow ownership hidden by opaque calls remains conservative. Rust sources
+stay below 700 lines. Formatting and the scoped offline `cargo check -p
+tir-verify`, with output pinned to `.tessera-build`, pass; no tests were run.
+
+### 2026-11-02 update: TIR text aggregate instruction typing
+
+Text TIR now infers and verifies the §12.6 aggregate result shapes, constructor
+field and payload types, generic substitution, array counts and indices, enum
+tag widths, loadability, and trivial-versus-borrowed extraction rules. Enum
+variants resolve by name or numeric index. Aggregate type spellings are
+excluded from SSA operand collection, and the corrected operand lists feed GPU
+inferred-value checks. Borrow tracking covers direct parameters, `load.borrow`,
+`borrow.begin` and aggregate projections; CFG joins and provenance hidden by
+opaque calls remain open. Formatting and scoped offline `cargo check -p
+tir-verify` pass with output pinned to `.tessera-build`; no tests were run.
+
+### 2026-11-02 update: Binary TIR address instruction typing
+
+Binary TIR V2 now verifies §12.7 address operations: stack allocation selector,
+result address space and count type; field, element and enum payload address
+derivation; enum injection variants; layout-compatible address casts; and
+address/pointer conversion spaces and result types. SSA IDs are resolved through
+the inferred value-type table. Stack deallocation LIFO/dataflow proof remains
+open. Scoped formatting and offline `cargo check -p tir-verify`, with output
+pinned to `.tessera-build`, pass; no tests were run.
+
+### 2026-11-02 update: TIR memory instruction typing
+
+Text and binary TIR V2 now check §12.8 load/store ownership modes, memory
+address pointees, copy/move/destroy address operands, trivial raw memory types,
+pointer arithmetic, byte counts and prefetch operands. Text validation also
+checks trailing raw-memory, byte-range, prefetch and address-copy mode clauses.
+Text/binary copy-policy checks and loadability use the module's type policies;
+raw accesses require a static memory layout. Definite initialization, ownership
+consumption and stack-deallocation LIFO proofs remain separate open dataflow
+work. Scoped formatting and offline `cargo check -p tir-verify`, with output
+pinned to `.tessera-build`, pass; no tests were run.
+
+### 2026-11-02 update: TIR heap and reference instruction typing
+
+Text and binary TIR V2 now check §12.9 counted/unique allocation result types,
+reference and unique payload addresses, raw heap allocation/reallocation sizes
+and pointer results, weak-reference creation/loading, unowned pointer
+conversion, and uniqueness queries. Binary `weak.load` now infers its
+`Optional<ref T>` result from the unique generic Optional enum specialization;
+text uses the module Optional declaration or the prelude spelling. Text
+`heap.alloc.raw [uninit]` is checked as a trailing modifier and remains
+permissive-only. Scoped formatting and offline `cargo check -p tir-verify`,
+with output pinned to `.tessera-build`, pass; no tests were run.
+
+### 2026-11-02 update: TIR binary semantic modes
+
+Binary TIR V14 now applies the module default or per-function semantics override
+and rejects encoded permissive-only instruction forms in defined functions:
+poison constants and arithmetic/conversion modes, `exact`, `assume`, UB
+`unreachable`, `or [disjoint]`, `ptr.offset [inbounds]`, `mem.copy [nooverlap]`,
+`heap.alloc.raw [uninit]`, and `nnan`/`ninf`. Binary entry signatures also
+reject a semantics override. Scoped formatting and offline `cargo check
+-p tir-verify`, with output pinned to `.tessera-build`, pass; no tests were
+run. Binary METADATA attachments and parameter/result UB attributes remain
+open; the binary attachment encoding and textual attribute grammar are not
+fully specified in TIR 1.0.
+
+### 2026-11-02 update: TIR address-only SSA values
+
+Text and binary TIR V8 now apply the verifier's layout and relocation policy
+checks to every typed block parameter and inferred instruction result. An
+address-only or non-loadable type cannot enter SSA. Formatting and scoped
+offline `cargo check -p tir-verify`, with output pinned to `.tessera-build`,
+pass; no tests were run.
+
+### 2026-11-02 update: TIR static-access conflict checks
+
+Text and binary TIR V7 now carry active static `access.begin` scopes through
+the CFG, compare read/modify modes for overlapping address identities, follow
+access tokens and addresses through explicit block arguments, and merge
+possible active scopes at joins. The current storage identity is based on SSA
+address identity and block-argument aliases; independently derived addresses
+that may overlap still need provenance analysis. Scoped formatting and offline
+`cargo check` for `tir-format`, `tir-verify`, `tvisa-format`, `tvisa-verify`,
+and `klf-cli`, pinned to `.tessera-build`, pass; no tests were run.
+
+### 2026-11-02 update: TIR borrowed-value consumption checks
+
+Text and binary TIR V5 now reject non-trivial borrowed values consumed by
+`move`, `destroy`, `into.raw`, `store`, `return`, `fail`, and `closure.new`, or
+transferred to owned block parameters. Text provenance follows borrow
+parameters, `load.borrow`, `borrow.begin`, aggregate projections, `select`,
+`freeze`, and explicit borrowed block arguments. Calls with known direct,
+indirect, or closure function signatures are checked against parameter
+conventions; foreign and variadic calls reject non-trivial borrowed values.
+Witness/vtable call argument conventions remain open. Formatting and scoped
+offline `cargo check -p tir-verify`, pinned to `.tessera-build`, pass; no tests
+were run.
+
+### 2026-11-02 update: TIR fallible-call verification
+
+Text TIR V10 rejects `try.call` on non-failing local or imported direct
+functions and rejects ordinary direct or indirect calls to failing function
+types. It also checks closure signatures and locally resolved witness/vtable
+targets, recognizes typed indirect `try.call`, and rejects `invoke` in a
+`nounwind` caller. Binary TIR V2 resolves witness/vtable signatures and checks
+their argument counts, types, and failure convention. The binary `try.call`
+record remains direct-symbol-only, so a failing dynamic witness/vtable target
+has no corresponding encoded try form. Scoped formatting and offline
+`cargo check -p tir-verify`, explicitly targeting `.tessera-build`, pass; no
+tests were run.
+
+### 2026-11-02 update: TIR binary atomics
+
+The TIR binary reader now decodes §15.6 `atomic.wait` and `atomic.notify`
+operands and their `i32` results at opcodes `0x205` and `0x206`. Binary V2
+checks atomic types, fixed widths, trivial policies, typed pointer agreement,
+RMW scalar categories, compare-exchange values, wait/notify operands, target
+scopes, and GPU device/threadgroup pointer spaces; GPU wait/notify use is
+rejected. The TIR binary encoding paragraph now documents all seven opcodes.
+Formatting and scoped offline `cargo check -p tir-format -p tir-verify`, with
+output pinned to `.tessera-build`, pass; no tests were run.
+
+### 2026-11-02 update: TIR borrow-scope verification
+
+Text and binary TIR V6 now track `borrow.begin` and `load.borrow` scopes over
+the control-flow graph. Each scope must close with `borrow.end`, closure order
+must be properly nested, all exits must have an empty scope stack, and incoming
+scope stacks must agree at CFG joins and backedges. Scope identities follow
+borrowed values through explicit block arguments, so equivalent path-specific
+borrows can join through a borrowed block parameter. Scoped formatting and
+offline `cargo check -p tir-verify`, with output pinned to `.tessera-build`,
+pass; no tests were run.
+
+
+### 2026-11-02 update: TIR V4 owned SSA lifetime verification
+
+Text and binary TIR V4 now track each non-trivial, non-borrowed SSA value over
+reachable CFG paths. They check owned call arguments when signatures are known,
+aggregate construction/destructure and enum extraction, `move`, `destroy`,
+`into.raw`, `store [init|assign]`, `switch.enum`, coroutine consumption, block
+parameter transfers, `guard`/`deopt` state, and function exits. The analysis
+preserves distinct path states through joins, catches leaks, double consumes
+and uses after consumption, and resets at loop-carried block parameters and
+re-executed result definitions after checking the prior dynamic value. Trap
+paths are exempt. Witness/vtable call conventions and ownership of variadic
+arguments remain open; `throw` is checked as an exit from the section 14 unwind
+model, although V4's exit list does not name it. Scoped formatting and offline
+`cargo check -p tir-verify`, with output pinned to `.tessera-build`, pass; no
+tests were run.
+
+### 2026-11-02 update: TIR V4/V5 witness and vtable call conventions
+
+Text V4/V5 now resolve witness calls through canonical concrete types and
+local conformance methods, with trait method signatures as the generic fallback.
+Text vtable calls resolve declared slots to their implementation signatures and
+include the receiver as the first parameter. Binary V4/V5 resolve witness
+function signatures from GENERICS and vtable slots from GENERICS plus the data
+symbol tables; V5 applies those conventions to explicit arguments and the
+vtable receiver. Variadic ownership remains open. Scoped formatting and offline
+`cargo check -p tir-verify`, explicitly targeting `.tessera-build`, pass; no
+tests were run.
+
+### 2026-11-02 update: TIR V5 variadic call argument accounting
+
+Text and binary V5 now check a variadic call's fixed arguments against the
+callee's declared parameter conventions and keep the untyped variadic tail
+separate. Borrowed non-trivial values in that tail are rejected; fixed
+`borrow`/`borrowmut` parameters are accepted. Scoped formatting and offline
+`cargo check -p tir-verify`, explicitly targeting `.tessera-build`, pass; no
+tests were run.
+
+### 2026-11-02 update: TIR text call argument typing
+
+Text TIR V2 now checks call argument counts and known parameter types for direct,
+indirect, closure, witness, vtable, foreign, `invoke`, `try.call`, tail, and
+variadic calls. Witness and vtable signatures use the local GENERICS records;
+variadic calls check fixed arguments while allowing the untyped tail. Nominal
+types are compared after module qualification, and arguments whose generic
+types cannot yet be resolved are skipped. Formatting and scoped offline `cargo
+check -p tir-verify`, targeting `.tessera-build`, pass; no tests were run.
+
+### 2026-11-02 update: TIR text call result typing
+
+Text TIR V2 now checks the zero-or-one SSA result count for ordinary direct,
+foreign, variadic, indirect, closure, witness, and vtable calls. The verifier
+infers known result types from direct and imported signatures, function types,
+closure signatures, local witness methods, and vtable slots so later
+instructions can use those values. Direct async calls infer `frame @f`; async
+indirect and closure calls check the result count but have no concrete frame
+identity to infer. Direct generic calls substitute explicit type arguments in
+their parameter and result types; calls without resolvable substitutions keep
+generic result types uninferred. Formatting and offline `cargo check -p
+tir-verify` using Cargo's default target directory pass; no tests were run.
+
+### 2026-11-03 update: binary TIR generic call typing
+
+Binary TIR V2 now applies explicit generic type arguments to direct `call` and
+`tail.call` signatures. It checks specialized parameter types, zero-or-one
+result counts after `unit` and `never` substitution, nested composite types,
+and tail-call result/error compatibility. Generic calls with a malformed
+argument count retain unresolved generic checks and report the V11 arity
+diagnostic. Formatting and offline `cargo check -p tir-verify` using Cargo's
+default target directory pass without warnings; no tests were run.
+
+### 2026-11-03 update: TIR binary witness and vtable typeids
+
+TIR V20 now resolves binary `call.witness` and `call.vtable` targets through
+GENERICS and includes their canonical function typeids in the indirect-call
+inventory check. Formatting and offline `cargo check -p tir-verify` using
+Cargo's default target directory pass without warnings; no tests were run.
+
+### 2026-11-03 update: TIR text generic witness signatures
+
+Text TIR conformance verification now compares each locally resolved witness
+function with its trait requirement after inferring substitutions for the
+trait's generic parameters consistently across all methods in the conformance.
+Parameter types, context and ownership conventions, result and failure types,
+async state, and ABI must match. Mismatches produce a verifier diagnostic on
+the conformance. Formatting and offline `cargo check -p tir-verify` using
+Cargo's default target directory pass without warnings; no tests were run.
+
+### 2026-11-03 update: TIR binary generic witness signatures
+
+Binary TIR verification now checks each GENERICS witness against its trait
+method function type after recursively inferring substitutions for the trait's
+generic parameters consistently across every method in the conformance. It
+compares parameter types, context and ownership conventions, result and error
+types, async state, ABI and foreign status, and emits V2 for mismatches.
+Formatting and offline `cargo check -p tir-verify` using Cargo's default target
+directory pass without warnings; no tests were run.
+
+### 2026-11-03 update: TIR binary texture instruction types
+
+Binary TIR V2 now checks the texture handle and sampler types, coordinate and
+array-layer shapes, texture access modes, multisampling restrictions, and
+operation-specific operand counts across the 0x480 texture opcode range. It
+also checks sample indexes, f32 LOD/gradient/comparison values, comparison
+component types, write and atomic values, atomic operation categories, and
+offset widths. Other binary GPU instruction type checks remain open.
+
+### 2026-11-03 update: TIR text and binary ray instruction types
+
+Binary TIR V2 now checks ray-query, ray trace, payload, hit-attribute,
+hit-object, and reorder operand types. Text TIR now applies the corresponding
+`rt.trace` operand checks to `rt.hitobject.trace`, and checks the operand
+counts of hitobject tracing, ray getters, miss construction, and any-hit
+terminators. Formatting and offline `cargo check -p tir-verify` using Cargo's
+default target directory pass; no tests were run.
+
+### 2026-11-03 update: TIR text GPU atomic capabilities
+
+Text TIR V15 now requires `atomic128` when a reachable atomic operand has a
+16-byte layout. Atomic value selection follows each opcode's operand order, so
+`atomic.store` and `atomic.cmpxchg` derive both `atomic128` and
+`float16.atomics` from their actual value operands. Formatting and offline
+`cargo check -p tir-verify` using Cargo's default target directory pass; no
+tests were run.
+
+### 2026-11-03 update: TIR text and binary cooperative/tensor types
+
+Binary TIR V2 now verifies operand types for all cooperative-matrix and tensor
+instructions: matrix roles, dimensions and element values; pointer/tensor load
+forms and strides; reduction operators and axes; tensor coordinates, stored
+values and query dimensions. Text TIR now applies the same reduction operator,
+axis, MMA modifier and coordinate-width rules, infers `coop.reduce` results,
+and accepts the specified default `extent` for `tensor.query`. Formatting and
+offline `cargo check -p tir-verify` using Cargo's default target directory
+pass; no tests were run.
+
+### 2026-11-03 update: TIR text and binary GPU geometry types
+
+Binary TIR V2 now checks object dispatch and mesh counts, mesh output indexes,
+mesh index vectors, tile imageblock positions, work-graph record indexes and
+node-record pointers. Text TIR now checks tile imageblock positions and
+requires `node.output.addr` to receive an allocation pointer followed by an
+integer record index. Formatting and offline `cargo check -p tir-verify` using
+Cargo's default target directory pass; no tests were run.
+
+### 2026-11-03 update: TIR text and binary collective types
+
+Binary TIR V2 now validates derivative values, quad and subgroup predicates,
+ballot values, lane and offset operands, and subgroup reduction operator/type
+pairs. Text TIR applies the matching operand checks, validates reduction
+operators and cluster sizes, and checks explicit cluster sizes against a
+selected entry subgroup size across its reachable GPU call graph. Binary TIR
+also checks clusters against configured entry subgroup sizes. Formatting and
+offline `cargo check -p tir-verify` using Cargo's default target directory
+pass; no tests were run.
+
+### 2026-11-03 update: TIR and TVISA tensor coordinate ranks
+
+TIR and TVISA now restrict tensor ranks to 1, 2, 3, 4, or 8. This resolves
+the previous rank-5 through rank-7 mismatch: fixed vectors do not permit those
+lane counts, and TVISA has no tuple value type for their coordinates. TIR text
+and binary type validation and the TVISA TYPES decoder enforce the same set.
+Formatting and offline Cargo checks for `tir-types`, `tir-format`,
+`tir-verify`, and `tvisa-format` using Cargo's default target directory pass;
+no tests were run.
+
+### 2026-11-03 update: TIR and TVISA work-graph output kinds
+
+TIR node attributes and binary GPU records now carry the ordered output list,
+including each output's `node` or `mesh` target kind. TVISA node output text and
+binary records carry the same kind. Both verifiers derive `work_graphs.mesh`
+from mesh outputs and reject the capability when no mesh output requires it.
+Formatting and offline Cargo checks using Cargo's default target directory
+pass; no tests were run.
+
+### 2026-11-03 update: TIR binary GPU specialization constants
+
+Text and binary TIR now check specialization constants across each GPU entry's
+reachable code. Repeated IDs must keep one numeric type and default; binary
+entry metadata must list every used ID and may not contain unused records. Both
+code and binary entry records enforce the scalar/vector types permitted by TIR
+17.18. Formatting and offline `cargo check -p tir-verify` using Cargo's default
+target directory pass; no tests were run.
+
+### 2026-11-03 update: TIR binary GPU instruction typing
+
+Binary TIR V2 now checks specialization types and per-entry defaults alongside
+the existing builtin, VFT, collective, texture, ray, geometry, cooperative
+matrix, tensor, and work-graph operand checks. Together these cover the operand
+and result types specified for TIR §17.20 GPU instructions. Formatting and
+offline `cargo check -p tir-verify` using Cargo's default target directory
+pass; no tests were run.
+
+### 2026-11-03 update: TVISA-only instructions and control-flow tags
+
+Text and binary TVISA validate dynamic stack allocation size and alignment,
+stack restore pointers, trap conditions, code pointer operand types, and
+control-flow tags on code pointer operations and indirect calls. Binary
+verification rejects CPU-only TVISA instructions and non-portable intrinsics
+in GPU functions, and rejects GPU/work-graph instructions in CPU functions.
+Formatting and offline Cargo checks for `tvisa-format`, `tvisa-verify`,
+`tir-format`, and `tir-verify` using Cargo's default target directory pass; no
+tests were run.
+
+### 2026-11-03 update: Binary structured control flow for TIR and TVISA
+
+Binary TIR and TVISA now run the same S1–S6 graph checks for loop and
+selection structure, back edges, construct nesting, merge uniqueness, and
+edges entering or leaving constructs. Binary TIR applies them to GPU,
+explicitly structured, and annotated functions; binary TVISA applies them to
+GPU functions. Their S7 checks reject indirect branches and the relevant
+unwinding or jump instructions. Formatting and offline checks for the TIR and
+TVISA format and verifier crates pass with Cargo's default target directory;
+no tests were run.
+
+### 2026-11-03 update: TIR stack deallocation order
+
+Text and binary TIR now track active `stack.alloc` values through CFG edges and
+block parameters. `stack.dealloc` must name the most recent active allocation;
+V2 rejects unknown allocations, out-of-order deallocation, and incompatible
+allocation stacks at joins. Text verification also checks its address operand
+and zero-result shape. Formatting and offline checks for the TIR and TVISA
+format and verifier crates pass with Cargo's default target directory; no
+tests were run.
+
+### 2026-11-03 update: draw-wide builtin uniformity
+
+TIR text and binary uniformity analysis and TVISA binary analysis now classify
+`base_vertex`, `base_instance`, and `draw_index` as dispatch-uniform. TVISA text
+uses the shared TIR text analysis. This avoids treating draw-wide vertex
+parameters as invocation-varying when they flow into uniformity-sensitive GPU
+operations. Scoped formatting and offline `cargo check` for the TIR uniformity
+and TVISA verifier crates pass with Cargo's default target directory; no tests
+were run.
+
+### 2026-11-03 update: TIR witness calls in uniformity summaries
+
+Text and binary TIR GPU uniformity call graphs now resolve concrete
+`call.witness` targets through the module's conformance records and include the
+witness callee's control-flow requirement at the call site. Call results remain
+conservatively divergent because a callee can read invocation-varying builtins.
+If a text witness cannot be resolved, the analysis conservatively includes all
+GPU functions;
+binary analysis does the same when GENERICS cannot identify a unique GPU body.
+Formatting and offline checks for `tir-uniformity`, `tir-verify`, and
+`tvisa-verify` pass with Cargo's default target directory; no tests were run.
+
+### 2026-11-03 update: TVISA raw-memory trust reasons
+
+TVISA text trust verification now classifies CPU raw loads/stores, pointer
+arithmetic/conversions and pointer-based memory operations as unmanaged, while
+preserving TIR's GPU address-space exception. Binary VFY-0050 now derives the
+raw-memory reason from those CODE operations and raw-heap runtime calls, checks
+that bit exactly, and recomputes unchecked-access reasons from encoded forms.
+Text and binary trust analysis classify an indirect call as foreign only when
+it carries TVISA's zero-tag marker and has a C ABI signature; ordinary indirect
+C ABI calls retain their type-tag checks. Formatting and an offline
+`tvisa-verify` check pass with Cargo's default target directory; no tests were
+run.
+
+### 2026-11-03 update: TIR foreign-unwind trust reason
+
+Binary V20 now treats `invoke [foreign_unwind]` as a foreign call when
+recomputing trust: it requires reason bit 3 and prevents the function from
+being marked managed. This follows the TIR call modifier definition and the
+platform rule for foreign exceptions. Formatting and an offline `tir-verify`
+check pass with Cargo's default target directory; no tests were run.
+
+### 2026-11-03 update: Wasm sandbox trust consistency
+
+TIR V20 and TVISA VFY-0050 now reject sandboxed declarations paired with GPU
+functions, foreign calls, assembly, unchecked access, nonlocal jumps, device
+I/O, or heap operations. This checks that the recorded class is compatible
+with the Wasm64 converter's supported instruction set; region-bound proof is
+still a separate requirement. Formatting and offline verifier checks use
+Cargo's default target directory; no tests were run.
+
+### 2026-11-03 update: TVISA binary GPU capability requirements
+
+Binary TVISA GPU entry verification derives optional capabilities from
+reachable value and signature types, atomic widths, instruction use, and entry
+metadata, including `e8m0` operands of cooperative instructions. It checks
+stage-output `shading_rate` and rejects both missing and unused capability
+bits, matching the textual entry verifier. Formatting and offline `cargo
+check -p tvisa-verify` using Cargo's default target directory pass; no tests
+were run.
+
+### 2026-11-03 update: TIR reserved binary opcodes
+
+The TIR binary CODE decoder now rejects unassigned opcodes at their byte
+offset, as required by section 22.6's reserved-opcode rule. Unknown encodings
+can no longer make the remaining function body opaque to verification.
+Formatting and offline `cargo check -p tir-format -p tir-verify` using Cargo's
+default target directory pass; no tests were run.
+
+### 2026-11-03 update: TIR object and mesh geometry flow
+
+Text and binary TIR verification now propagate geometry-operation counts over
+reachable CFG paths and compose direct, witness, and visible-function-table
+GPU calls. It rejects repeated `object.dispatch_mesh` and `mesh.set_counts`,
+mesh writes that may precede `mesh.set_counts`, and missing dispatch/count
+operations on terminating object and mesh entry paths. Reachable
+`mesh.write.indices` operations must use `i32`, `vec<2 x i32>`, or
+`vec<3 x i32>` to match the entry's points, lines, or triangles topology. The
+verifiers reject geometry operations used from the wrong entry stage, and the
+existing uniformity analysis enforces threadgroup-uniform execution.
+Formatting and offline `cargo check -p tir-verify` using Cargo's default target
+directory pass; no tests were run.
+
+### 2026-11-03 update: TIR variadic tail ownership
+
+Text and binary V4 now consume owned values passed in the untyped tail of
+`call.variadic`; fixed arguments continue to follow their declared parameter
+conventions. V5 already rejects non-trivial borrowed values in that tail.
+Formatting and offline `cargo check -p tir-verify` using Cargo's default target
+directory pass; no tests were run.
+
+### 2026-11-03 update: TIR sandbox producer identity
+
+Binary V20 now requires every function marked `sandboxed` to be in a module
+whose producer record declares the `wasm64` source language. This checks the
+necessary producer identity claim; proving each memory access stays within its
+declared region remains open. Formatting and offline `cargo check -p tir-verify`
+using Cargo's default target directory pass; no tests were run.
+
+### 2026-11-03 update: TIR binary specialization constant types
+
+Binary TIR GPU verification now requires each `gpu.spec_const` default constant
+to have the instruction's declared type. Entry declarations already enforce
+this relationship during GPU table decoding. Formatting and offline `cargo
+check -p tir-verify` using Cargo's default target directory pass; no tests were
+run.
+
+### 2026-11-03 update: TIR text attachment index bounds
+
+Text TIR now requires `frag.load_attachment` to carry exactly one unsigned
+32-bit index, matching the binary instruction decoder. Formatting and offline
+`cargo check -p tir-verify` using Cargo's default target directory pass; no
+tests were run.
+
+### 2026-11-03 update: TIR and TVISA tile-domain capability checks
+
+Text and binary TIR and TVISA now derive the optional `tile` capability when
+the GPU memory mask includes the tile domain. An omitted memory clause uses
+the all-domain mask and therefore includes `tile`. Formatting and scoped
+offline verifier checks use Cargo's default target directory; no tests were
+run.
+
+Text TIR and TVISA now restrict `gpu.memfence` memory clauses to the same five
+domains represented by the binary mask, rejecting unencodable CPU and payload
+address spaces. Formatting and scoped offline verifier checks pass; no tests
+were run.
+
+Text TIR and TVISA also reject `[unchecked_uniformity]` on `gpu.memfence`,
+matching the binary modifier rule that permits it only on `gpu.barrier`.
+
+Binary TIR now rejects sandbox-region metadata that reuses a base or current-
+size global across linear memories, preserving one distinct region pair per
+memory. Per-access bounds proof remains open.
+
+### 2026-11-03 update: TIR and TVISA instruction metadata syntax
+
+The shared body parser now checks instruction metadata suffix structure against
+the textual grammars. TIR attachments require a name, balanced parentheses,
+dot-qualified names, comma-separated literals, and the specified
+`!loc("path":line:column)` form. TVISA accepts only `!loc` on instructions.
+
+TIR and TVISA now decode the shared binary METADATA section layout from D-474.
+The verifiers check function and instruction references, branch successor
+counts, loop backedge placement, range types and constants, and attachment
+placement. TVISA rejects TBAA and profile-ID records. TIR text verification
+now checks known metadata names, payload shapes, result types, memory/load
+placement, range intervals, and assertion metadata's defined-mode restriction.
+TVISA's binary verifier also checks metadata result types and natural loop
+backedges. The shared METADATA table now has a canonical binary encoder that
+validates ordering and references; the TVISA encoder rejects TBAA and
+profile-ID attachments. Canonical text reprinting remains open. Formatting and
+scoped offline `cargo check` pass; no tests were run.
+
+
+### 2026-11-03 update: contiguous sandbox-region indices
+
+Binary TIR and TVISA now require ANALYSIS sandbox-region records to cover zero-based linear-memory indices contiguously. This rejects missing region records between otherwise sorted entries. Per-access bounds proof remains open.
+
+Binary TIR and TVISA now reject sandbox-region tables that reuse a base or
+current-size object across memories. The TIR and TVISA ANALYSIS specifications
+state this uniqueness requirement explicitly. Per-access bounds proof remains
+open.
+
+TIR V20 now requires sandbox-region base and current-size slots to have private
+linkage and to be mutable, non-thread-local, non-per-CPU globals, in addition
+to their `ptr` and `i64` types.
+TVISA ANALYSIS requires those slots to name distinct local, defined 8-byte
+writable or zero-initialized DATA objects. Per-access bounds proof remains
+open.
+
+### 2026-11-03 update: TIR and TVISA ANALYSIS encoders
+
+TIR and TVISA now encode their ANALYSIS sections from typed summaries, checking
+canonical ordering, contiguous sandbox-region indexes, distinct region slots,
+valid trust classes, and assembly record fields. Formatting and scoped offline
+`cargo check` pass; no tests were run.
+
+### 2026-11-03 update: TIR binary CLI verification
+
+`tirc check` now reports success for a binary TIR module only after the full
+binary verifier completes without errors. It no longer treats every binary
+module as a failure or claims that CODE decoding and verification are pending.
+Malformed binary TIR and TVISA inputs are selected by their binary extensions
+even when the magic is damaged, and retain their encoding diagnostic code and
+byte offset in CLI output.
+
+### 2026-11-03 update: shared binary string-table encoder
+
+`tir-format::StringTable` can now be built from indexed strings and encoded
+with the spec's minimal ULEB lengths. This supplies the shared STRINGS-section
+writer needed by future TIR and TVISA image assembly.
+
+`tir-format::BinaryModuleRecord::encode` now serializes the TIR MODULE section,
+including producer languages, attributes, initializer/finalizer priorities,
+and the driver-only source hash.
+
+`tir-format::encode_imports` now serializes IMPORTS records and rejects invalid
+UUID/kind pairs, weak non-platform imports, unsupported entity kinds, missing
+platform symbols, and string references absent from STRINGS.
+
+`tvisa-format::encode_import_records` now writes the flat TVISA IMPORTS records
+and validates module UUIDs, weak imports, type tags, alignment, duplicate
+symbols, and STRINGS references.
+
+TIR and TVISA now encode their ASM tables from indexed records, rejecting
+out-of-range string references and duplicate template/constraint pairs.
+
+`tir-format::BinaryGlobalTable::encode` now writes GLOBALS records with checked
+linkage, address-space, type, initializer, flag, and alignment fields.
+
+`tir-format::encode_variant_sets` writes TIR VARIANTS records after checking
+member ordering, string references, uniqueness, architecture attributes, and
+native CPU signature references.
+
+`tvisa-format::VariantIndex::encode` writes TVISA variant and dispatch-set
+records, checking names, kind flags, architecture features, candidate keys,
+and unique member functions.
+
+`tir-format::BinaryTypeTable::encode` now serializes nominal declarations,
+topologically ordered type entries, and nominal definitions. It decodes its
+output through the existing TYPES decoder to enforce section structure.
+
+`tir-format::BinaryConstantTable::encode` now emits scalar, byte, string,
+aggregate, union, enum, null, and sampler values. It runs the section decoder
+on the result to enforce type-directed shape and payload rules.
+
+`tir-format::BinarySignatureTable::encode` now writes signature records,
+generic constraints, coroutine and instance types, variants, entry kinds, and
+platform exports while checking the matching type and callable attributes.
+
+### 2026-11-03 update: TIR CAPS records
+
+TIR CAPS now has an explicit canonical payload grammar for reached LibTessera
+calls, `@Requires` functions, reached platform imports, implied entitlements,
+and requested entitlements. The format crate decodes and encodes checked import
+references and sorted entitlement names; the binary verifier checks LibTessera
+reference identity, implied-entitlement requests, and the kernel/non-Tessera
+profile rules. CAPS is now a required TIR binary section. The verifier exposes
+package-level manifest matching and emits one unused-entitlement remark after
+merging module declarations. The CODE verifier recomputes reached LibTessera
+calls, `@Requires` functions, platform imports, and implied entitlements from
+exported roots, direct calls, compatible address-taken targets, and GPU
+visible-function tables. The
+`tirc package`/`tirc analyze` integration is recorded below. Profile
+entitlement catalogs for app, system, and driver packages remain external to
+this checkout.
+
+### 2026-11-03 update: TIR CAPS call-graph verification
+
+Binary TIR verification now compares all four derived CAPS lists with a
+conservative CODE graph. Roots include
+non-private functions, entries, platform exports, inlinable functions,
+initializers and finalizers. The walk follows direct calls, guard/deopt
+fallbacks, exception filters, function references, imported platform data,
+`foreign.entry` callbacks, GENERICS dispatch targets, and exported GPU
+visible-function targets. The TIR specification now defines these roots and
+edges. Both module and package capability verification use this check. Rust
+formatting and offline `cargo check -p tir-verify` pass; no tests were run.
+The package command supplies imported `@Requires` and LibTessera entitlement
+metadata. Profile entitlement catalogs remain external.
+
+### 2026-11-03 update: TIR CODE body serializer
+
+`tir-format::BinaryCodeTable::encode` now writes ordered function records,
+bounded function bodies, block parameters, loop targets, instruction counts,
+and retained instruction bytes. It decodes each emitted body using the
+existing type- and constant-aware decoder and rejects disagreement between
+retained bytes and any supplied decoded instruction records. Opcode emission
+from TIR text or a frontend IR remains open.
+
+`tir-format::BinaryGenericTable::encode` now writes traits, generic bounds,
+conformances, associated-type bindings, witnesses, and vtables. It validates
+the emitted table by decoding it against the supplied TYPES and SIGNATURES
+records.
+
+`tir-format::BinaryGpuTable::encode` now writes GPU entry interfaces, launch
+parameters, capabilities, specialization constants, and node records. It
+round-trips the output through the existing GPU decoder using the supplied
+TYPES, CONSTANTS, SIGNATURES, and STRINGS tables.
+
+`tvisa-format::TypeSection::encode` now writes the three TYPES parts: value
+types, calling signatures, and C aggregate descriptors. It checks summary
+counts and validates its output through the existing TYPES decoder, including
+type ordering, references, calling-convention rules, and layout constraints.
+
+`tvisa-format::UnwindSection::encode` now writes sorted UNWIND records,
+little-endian type IDs, and filter function indexes. Empty sections are
+rejected so callers omit UNWIND when no record is needed; encoded records are
+validated by the existing decoder.
+
+`tvisa-format::encode_constant_records` writes type-indexed scalar and
+fixed-vector constants. It validates payload length and padding bits by
+decoding the emitted records against TYPES, and rejects empty input so callers
+omit CONSTANTS when there are no pooled values.
+
+`tvisa-format::encode_function_records` now emits SIGNATURES in record order,
+including address-taken type tags, variants, trust and semantics flags, frame
+slots, and debug indexes. Frame-slot summaries retain their debug-variable
+index so the decoded representation round-trips without dropping a field.
+
+`tvisa-format::encode_function_index` now writes fixed-size FUNCINDEX ranges
+and runs the existing range validator over the result, checking body sizes,
+canonical function order, and exact CODE coverage.
+
+`tvisa-format::encode_function_bodies` now reconstructs TVISA body framing and
+FUNCINDEX ranges while retaining each decoded instruction's original bytes.
+It checks block/value counts, loop targets, terminator placement, and retained
+instruction offsets and opcode prefixes. Emission of instruction records from
+frontend IR remains open.
+
+`tvisa-format::encode_runtime_entry_ids` now writes the optional RUNTIME
+section, rejecting empty lists and identifiers that are not strictly
+increasing.
+
+`TvisaImage::encode_code_sections` now re-emits both CODE and FUNCINDEX from
+decoded bodies, then decodes the candidate sections again and checks that the
+body programs were preserved.
+
+### 2026-11-03 update: Shared TIR and TVISA DEBUG tables
+
+TIR and TVISA now share the eight-table DEBUG grammar, with typed decoding and
+encoding, string and type references, ordered locations, nested scope checks,
+and data records. TIR verification checks function, instruction, variable,
+label, and GLOBALS references. TVISA section decoding checks DEBUG structure;
+binary verification checks function and instruction ranges, function scopes,
+frame-slot variables, debug instructions, and DATA record indexes. The specs
+now define the zero sentinel and one-based SIGNATURES debug indexes, and TIR
+DATA debug records index GLOBALS before lowering remaps them to TVISA DATA.
+Formatting and scoped offline `cargo check` pass with Cargo's default target
+directory; no tests were run.
+
+### 2026-11-03 update: TIR and TVISA textual DEBUG operands
+
+TIR and TVISA text bodies now parse typed `!var` and `!label` debug operands
+alongside trailing `!loc` metadata. The parser requires the matching attachment
+on each debug instruction, validates names, scopes, and TIR source types, and
+exposes the parsed attachment to the verifiers. TIR and TVISA text verification
+checks known `debug.value` and `debug.addr` operand types. The specs now define
+the shared text syntax and scope resolution rule.
+
+### 2026-11-03 update: TIR binary symbol spaces
+
+TIR section 22.5 now defines function and data symbol indexes as imported
+entities followed by local SIGNATURES or GLOBALS records. Binary verification
+checks function and data symbol bounds. Direct-call validation and function
+type inference resolve the same imported-function prefix, including imported
+call results, function references, ownership checks, coroutine references, and
+GPU call-graph/profile and uniformity checks. Formatting and offline
+`cargo check -p tir-uniformity -p tir-verify` pass with Cargo's default target
+directory; no tests were run.
+
+### 2026-11-03 update: TIR package analysis and writing
+
+`tirc analyze <pkg>` verifies declared module, resource, and profile files and
+prints the canonical analysis report. `tirc package` accepts modules that
+already carry the canonical flag, rewrites their containers, removes CUSTOM
+sections, recomputes CAPS from reachable calls and RIDL entitlement metadata,
+refreshes manifest hashes, writes `analysis.json` and driver `source.json`,
+checks portable package-relative paths, and emits a sorted TIRA archive. The
+package and analyzer share validation for unique, supported manifest platform
+names. The package signer uses Ed25519 and ML-DSA-65 keys and checks the dual
+certificate-chain JSON shape, canonical Base64, X.509 DER fields, issuer and
+subject continuity, self-issued matching roots, and matching leaf subjects. It matches
+both private keys to their leaf certificate keys, rejects certificates outside
+their validity windows or developer leaf certificates valid for over 182 days,
+and verifies both generated signatures. TIR IMPORTS now carries sorted effective
+`@Requires` and LibTessera entitlement metadata so CAPS can be recomputed; the
+binary verifier compares reached functions and implied entitlements. The TIR
+package and IMPORTS specifications describe these formats. Formatting and
+`cargo check -p klf-cli` with Cargo's default target directory pass; no tests
+were run. Package and analyzer share validation for required manifest fields,
+unique supported platforms, driver license and source requirements, entry
+declarations, and the source.json hash in every driver module. Full semantic
+canonicalization (`tirc canonicalize`), a pinned Tessera developer trust root,
+TIR text or frontend lowering, `tirc build`, and TVISA image finalization
+remain open. Packaging currently rejects modules without the
+canonical flag instead of claiming to canonicalize their semantic tables.
+
+### 2026-11-03 update: TIR JSON canonicalization
+
+Manifest, source, and signature JSON now use the RFC 8785 serializer. Manifest
+and signing-identity parsing rejects duplicate object properties, and package
+serialization rejects integer values that cannot be represented exactly as
+IEEE 754 doubles. Analysis reports retain the TIR-specific rule that integers
+above the exact interoperable range become decimal strings before JCS
+serialization. `cargo fmt -p klf-cli` and `cargo check -p klf-cli` pass with
+Cargo's default target directory; no tests were run.
+
+### 2026-11-03 update: TVISA IMAGE section
+
+`tvisa-format` now decodes and canonically re-encodes the IMAGE section. It
+checks profile and image-kind agreement, TIR and Driver API versions, module
+hash ordering, function-space references to defined CPU functions, and the GPU
+capability union against GPU entry records. TVISA section decoding invokes
+this validation. Section 6.6 now specifies every field's wire encoding and
+canonical rules. Formatting and `cargo check -p klf-cli` pass with Cargo's
+default target directory; no tests were run.
+
+### 2026-11-03 update: TVISA textual IMAGE metadata
+
+`.tvs` now requires a typed `metadata image` block for the package digest,
+producer build ID, source-module hashes, entry and lifecycle functions, GPU
+capability union, and driver API floor. The parser validates field shape,
+digest syntax, canonical field and array ordering, image-kind/profile
+agreement, and version form. Text verification resolves entry and lifecycle symbols to
+defined CPU functions, checks their order, and compares declared GPU
+capabilities with the GPU entry union. Section 25 and Appendix A.1 define the
+block grammar. Formatting and `cargo check -p klf-cli` pass with Cargo's
+default target directory; no tests were run. Text assembly and disassembly
+remain open.
+
+### 2026-11-03 update: Ed25519 signing identity key match
+
+`tirc package --sign` verifies a signature made by the identity's Ed25519
+private key against the Ed25519 leaf certificate before emitting the package.
+This detects a mismatched leaf/key pair. ML-DSA leaf matching and certificate
+path validation remain open. Formatting and `cargo check -p klf-cli` pass with
+Cargo's default target directory; no tests were run.
+
+### 2026-11-03 update: TIR signing identity validation
+
+`tirc package --sign` validates X.509 DER field structure, issuer/subject
+continuity through both leaf-to-root chains, self-issued and identical roots,
+identical leaf subject names, and current certificate validity. Developer
+leaves with validity periods longer than 182 days are rejected. The Ed25519
+signature is checked against its leaf certificate; the ML-DSA-65 leaf SPKI is
+checked against the private key, and its generated signature is verified.
+The verifier checks every certificate signature over its DER
+`TBSCertificate`, including the root self-signature. Trust-anchor pinning
+remains open because TIR specifies no root fingerprint and this repository
+contains no developer CA root. TIR section 29.4 states the identity comparison
+and signing-time validity rules.
+
+### 2026-11-03 update: TIR package signature intake
+
+`tirc analyze` now requires the stored manifest to match its canonical JCS
+encoding, hashes those exact bytes, and verifies both package signatures
+against the Ed25519 and ML-DSA-65 leaf certificates in
+`signatures/developer.sig`. Intake also applies chain-shape, Base64,
+subject/root, certificate-validity, and certificate-signature checks, including
+the root self-signature. `cargo check -p klf-cli` passes with Cargo defaults; no
+tests were run. Trust-anchor pinning remains open because TIR specifies no root
+fingerprint and this repository contains no developer CA root.
+
+### 2026-11-03 update: TVISA header summary flags
+
+TVISA section validation now checks header summary bits against defined GPU
+functions, ASM records, VARIANTS set kinds, defined-function trust classes, and
+referenced `c` signatures across imports and definitions. The TVISA header
+specification now states each derivation and requires exact agreement. The
+canonical marker remains governed by the delivery-unit rule.
+
+### 2026-11-03 update: TVISA GPU capability ordering
+
+Text GPU-entry verification now rejects capability arrays that are not in the
+TIR section 17.18 order used by the section 21.2 binary bit set. Section 25.1
+now makes this canonical ordering explicit while preserving input order for
+other arrays. Formatting and `cargo check -p tvisa-verify` pass with Cargo's
+default target directory; no tests were run.
+
+### 2026-11-03 update: typed TVISA runtime metadata
+
+The `.tvs` text model now parses `metadata runtime` into typed 16-bit entry
+identifiers with source spans, requires hexadecimal identifiers in strictly
+increasing order, and retains duplicate records for verifier diagnostics. The
+TVISA verifier consumes this parsed representation and compares it with the
+unique `call.runtime` identifier set. Formatting and `cargo check -p
+tvisa-format -p tvisa-verify -p klf-cli` pass with Cargo defaults; no tests
+were run. Text assembly and disassembly remain open.
+
+### 2026-11-03 update: typed TVISA variant and dispatch sets
+
+The `.tvs` text model now parses variant and dispatch declarations into typed
+sets with their names, kind, architecture-feature keys, function symbols, and
+absolute source spans. Text verification consumes those records directly;
+function variant attributes and assembly-specific checks continue to use the
+shared architecture/key types. Formatting and `cargo check -p tvisa-format -p
+tvisa-verify -p klf-cli` pass with Cargo defaults; no tests were run. Full text
+assembly and disassembly remain open.
+
+### 2026-11-03 update: typed TVISA imports
+
+`.tvs` imports now parse into typed module records (RIDL, package, platform),
+ABI UUIDs, weak-platform state, function signatures and tags, or data size and
+alignment, with absolute symbol spans. TVISA's text grammar now carries the
+module kind and weak flag required by the binary IMPORTS records; function
+convention comes from its referenced signature. Function imports must resolve
+their signature, and platform function imports must use `c`; `foreign.addr`
+and `foreign.data` now require platform imports. Symbol, call-signature, GPU,
+data-relocation and trust verification consume this shared representation.
+Formatting and `cargo check -p tvisa-format -p tvisa-verify -p klf-cli` pass
+with Cargo defaults; no tests were run. Text assembly and disassembly remain
+open.
+
+### 2026-11-03 update: typed TVISA DATA text model
+
+TVISA `.tvs` data records now parse once into shared typed records containing
+linkage, data kind, per-CPU state, alignment, decoded initializer bytes or
+aggregate elements, and relocations with addends, tags, symbol spans, and
+absolute source spans. The data, symbol, and GPU verifiers consume that model
+instead of independently reparsing data headers. Text verification now checks
+initializer-kind agreement, aggregate bounds and ordering, relocation bounds,
+overlap and tag placement, target symbol kind, and existing profile and
+relocation rules. `encode_text_data_section` now lowers those parsed records to
+the canonical binary DATA section with caller-supplied symbol indexes.
+Formatting and `cargo check -p tvisa-format -p tvisa-verify -p klf-cli` pass
+with Cargo's default target directory; no tests were run.
+
+### 2026-11-03 update: TVISA text import and variant encoders
+
+Parsed `.tvs` imports can now be converted to binary IMPORTS records by
+resolving their signature references. Parsed variant and dispatch declarations
+can be converted to the canonical VARIANTS index by resolving member function
+symbols; its existing encoder checks the names, feature order, member keys and
+set-kind indexes. Text IMAGE metadata now resolves entry, initializer, and
+finalizer functions into a canonical IMAGE record, including the GPU capability
+mask. Text runtime metadata encodes to the optional RUNTIME section. Formatting
+and `cargo check -p tvisa-format -p tvisa-verify -p klf-cli` pass with Cargo
+defaults; no tests were run.
+
+### 2026-11-03 update: shared TVISA GPU entry text model
+
+GPU entry headers and nested field values now parse once into the shared
+`TextImage` model, retaining stage, function symbol, field values, and absolute source
+spans. Entry-record verification, stage restrictions, visible-function
+uniformity analysis, capability collection, and IMAGE capability-union checks
+consume that model instead of lexing the same headers and fields again.
+Formatting and `cargo check -p tvisa-format -p tvisa-verify -p klf-cli` pass
+with Cargo defaults; no tests were run. Text-to-binary GPU entry encoding and
+the TIR-to-TVISA build path remain open.
+
+### 2026-11-03 update: TVISA GPU semantic indices
+
+TVISA GPU stage-field binary records now carry semantic index separately from
+link location. The decoder requires zero for non-indexed semantics and checks
+duplicates by semantic code, semantic index, and location; the encoder preserves
+the added field. Sections 21.2, 21.3, 21.9 and 25.1 and decision D-483 now
+specify the lossless mapping for `color(n)`, `color_index1(n)`,
+`clip_distance(n)` and `cull_distance(n)`. Formatting and `cargo check -p
+tvisa-format -p tvisa-verify -p klf-cli` pass with Cargo defaults; no tests
+were run. Text-to-binary GPU entry encoding remains open.
+
+### 2026-11-03 update: TVISA GPU entry text encoding
+
+`encode_text_gpu_entry_records` now lowers typed `.tvs` GPU entries to canonical
+binary records. Callers supply function, value-type, and constant-index
+resolvers; the encoder maps stage semantic indexes, interpolation flag sets,
+capabilities, specialization constants, node outputs, ray-tracing metadata and
+fragment flags, then validates the records through the binary encoder and
+decoder. Capability ordering is now one shared table used by text IMAGE
+metadata, the verifier, and the encoder. Sections 21.2, 21.3, 21.9 and 25.1
+specify the semantic-index and interpolation-bit mappings, recorded as D-483
+and D-484. Formatting and `cargo check -p tvisa-format -p tvisa-verify -p
+klf-cli` pass with Cargo defaults; no tests were run. The complete TIR-to-TVISA
+build path and text assembly/disassembly remain open.
+
+### 2026-11-03 follow-up: TVISA GPU entry text bridge complete
+
+The GPU-entry text-to-binary encoder now covers all section 21.2 fields and
+resolves function, type, and specialization-constant references supplied by
+its caller. It enforces the exact textual record shapes, canonical capability
+order, indexed stage semantics, combined interpolation flags, and the `none`
+versus present-size rules before round-tripping through the binary encoder and
+decoder. `GPU_CAPABILITY_NAMES` is shared with IMAGE metadata and the verifier.
+The earlier open item for this section is resolved; full image assembly,
+textual function-body assembly/disassembly, and TIR-to-TVISA lowering remain
+open. Formatting and `cargo check -p tvisa-format -p tvisa-verify -p klf-cli`
+pass with Cargo defaults; no tests were run.
+
+### 2026-11-03 update: shared TVISA function-body parse model
+
+`TextImage` now parses each function body once and stores its typed body or
+parse error with the absolute function-item span. The main verifier,
+symbol/trust checks, GPU checks, and variant assembly checks now consume that
+shared model instead of parsing the same source slice repeatedly. Body and
+parse-error spans remain relative to the item and are shifted by consumers that
+emit diagnostics. Formatting and `cargo check -p tvisa-format -p tvisa-verify
+-p klf-cli` pass with Cargo defaults; no tests were run. Text assembly and
+disassembly and TIR-to-TVISA lowering remain open.
+
+### 2026-11-03 update: TVISA text signature encoding
+
+`encode_text_signature_records` lowers parsed signatures into TYPES signature
+and C aggregate summaries, resolving value types through a caller-provided
+index resolver and interning equivalent C aggregate descriptors.
+`encode_text_type_section` emits the complete TYPES section from the caller's
+canonical first-reference type order, inserts nested types before their
+parents, interns identical binary type records, and validates by binary
+round-trip. Textual byref and C aggregate flags now have explicit names and
+reject unknown or repeated flags, recorded in D-485. Formatting and
+`cargo check -p tvisa-format -p tvisa-verify -p klf-cli` pass with Cargo
+defaults; no tests were run. Full image assembly, CODE text assembly, and
+TIR-to-TVISA lowering remain open.
+
+### 2026-11-04 update: KLF direct TIR module builder seam
+
+`klf-services` now exposes `TirModuleBuilder`, `TirFunctionBuilder`, and
+`TirBlockBuilder` through `klf-defsvc`. They render a `tir-format::ModuleHeader`,
+assemble function and block lines, and reparse completed modules through
+`parse_text_module`, without constructing a KIR module. Per-instruction builder
+helpers cover constants (including canonical byte escaping and symbol
+references), integer and floating arithmetic, conversions, comparisons,
+aggregates, storage and addresses, memory, heap/reference ownership, calls,
+branches, returns, and traps. Remaining TIR opcodes, builder API validation,
+and migration of definition services and Kira definitions are open. Formatting
+and `cargo check -p klf-services -p klf-defsvc` pass with Cargo defaults; no
+tests were run.
+
+### 2026-11-04 continuation: expanded TIR instruction builder surface
+
+`TirBlockBuilder` now also has helpers for aggregate operations, storage and
+addresses, typed and raw memory, references and ownership, direct/indirect/
+closure/foreign calls, atomic operations, fixed-vector operations, GPU barriers,
+coroutines, unwinding, variadics, non-local jumps, inline assembly, target
+queries, portable intrinsics, debug metadata, generic type queries,
+speculation, MMIO, foreign interop, builtins, fragment operations, quad
+operations and subgroup collectives, plus a generic emitter for remaining
+spec-defined forms. Structured function signatures and a caller-supplied module
+validation hook are also available. The builder emits bracketed modifier groups
+and uses TIR's specified `const.bytes` escapes for arbitrary byte constants.
+Formatting and `cargo check -p klf-services -p klf-defsvc -p klf-cli` pass with
+Cargo defaults; no tests were run. Remaining instruction forms, the semantic
+verification of generated modules, KLF definition-service/Kira migration, and
+the TIR-to-TVISA build path remain open.
+
+### 2026-11-04 update: TVISA section image builder
+
+`TvisaImageBuilder` now collects encoded section payloads, sets the version,
+profile, function count and canonical flag, and delegates to the container
+writer to validate sections and calculate the header and content hash. This is
+a binary-section composition primitive; text-to-image assembly and CODE body
+assembly remain open. Formatting and `cargo check -p tvisa-format -p
+tvisa-verify -p klf-services -p klf-defsvc -p klf-cli` pass with Cargo defaults;
+no tests were run.
+
+### 2026-11-04 continuation: verified TIR module builder
+
+`TirModuleBuilder::finish_verified` and its options-taking variant now parse
+and run `tir-verify` on the assembled text module, returning verifier
+diagnostics when errors are present. This adds a direct semantic validation
+path for generated modules; ownership canonicalization and full TIR producer
+migration remain open. Formatting and `cargo check -p klf-services -p
+klf-defsvc -p klf-cli` pass with Cargo defaults; no tests were run.
+
+### 2026-11-04 continuation: TIR V10 diagnostic mapping
+
+Text and binary verification now report `try.call`/`fails` mismatches and
+`invoke` in `nounwind` functions with the V10 diagnostic code required by the
+spec. Other call signature and operand type errors retain V2. Formatting and
+`cargo check -p tir-verify -p tvisa-verify -p klf-services -p klf-defsvc -p
+klf-cli` pass with Cargo defaults; no tests were run.
+
+### 2026-11-04 continuation: TIR V12 exported ABI constraint
+
+Text and binary verification now reject exported functions declared with the
+C ABI, as V12 requires. The text check parses the declaration's own ABI
+attribute, so nested C-ABI callback types do not trigger it. The broader RIDL
+representability checks for exported types and signatures remain open.
+Formatting and `cargo check -p tir-format -p tir-verify -p
+tvisa-verify -p klf-cli` pass with Cargo defaults; no tests were run.
+
+### 2026-11-04 continuation: TIR V19 function bitcasts
+
+Text and binary verification now reject bitcasts involving function types with
+the V19 diagnostic, while permitting casts between a generic pointer and a
+`[foreign]` function type. Closure casts remain rejected. Indirect-call target
+reachability and broader function-type compatibility analysis remain open.
+Text and binary checks also require the explicit `call.indirect` function type
+to match the callee value.
+Formatting and `cargo check -p tir-verify -p tvisa-verify -p klf-cli` pass with
+Cargo defaults; no tests were run.
+
+### 2026-11-04 continuation: TIR vtable call contract
+
+TIR now specifies that `call.vtable` uses the named table directly and passes
+the receiver as the first slot argument. The verifier checks the receiver and
+explicit arguments against the slot signature; TIR carries no table-to-object
+identity relation, so the producer selects a table valid for the object. No
+code changed for this clarification.

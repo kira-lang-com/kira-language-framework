@@ -95,7 +95,12 @@ fn object_language(ir: &str) -> String {
     let obj = dir.join("program.o");
     std::fs::write(&ll, ir).expect("write ir");
     let status = Command::new(tools().join("clang"))
-        .args(["-g", "-c", "-Wno-override-module", "--target=aarch64-unknown-linux-gnu"])
+        .args([
+            "-g",
+            "-c",
+            "-Wno-override-module",
+            "--target=aarch64-unknown-linux-gnu",
+        ])
         .arg(&ll)
         .arg("-o")
         .arg(&obj)
@@ -215,7 +220,10 @@ fn karc_and_c_carry_their_own_language_codes() {
         let mut module = host_module();
         module.language = language.to_owned();
         let found = object_language(&klf_llvm::emit_module(&module).expect("module emits"));
-        assert!(found.contains(code), "`{language}` should be {code}: {found}");
+        assert!(
+            found.contains(code),
+            "`{language}` should be {code}: {found}"
+        );
     }
 }
 

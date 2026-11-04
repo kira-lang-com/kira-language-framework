@@ -59,7 +59,15 @@ const OPENERS: [&str; 22] = [
 /// The words before `function` in a member, or before what a declaration
 /// is.
 const MODIFIERS: [&str; 10] = [
-    "public", "static", "mutating", "final", "open", "async", "indirect", "override", "consuming",
+    "public",
+    "static",
+    "mutating",
+    "final",
+    "open",
+    "async",
+    "indirect",
+    "override",
+    "consuming",
     "borrowing",
 ];
 
@@ -70,9 +78,32 @@ const MEMBER_INDENT: usize = 4;
 /// spelling it, such as a raw enum's `rawValue`: kept with their type, which
 /// reaches them.
 const IMPLICIT: [&str; 26] = [
-    "rawValue", "fromRawValue", "projectedValue", "wrappedValue", "init", "drop", "destroy",
-    "copy", "hash", "equal", "order", "next", "description", "get", "set", "absorb", "union",
-    "contains", "append", "close", "send", "receive", "teardown", "bootstrap", "trace", "default",
+    "rawValue",
+    "fromRawValue",
+    "projectedValue",
+    "wrappedValue",
+    "init",
+    "drop",
+    "destroy",
+    "copy",
+    "hash",
+    "equal",
+    "order",
+    "next",
+    "description",
+    "get",
+    "set",
+    "absorb",
+    "union",
+    "contains",
+    "append",
+    "close",
+    "send",
+    "receive",
+    "teardown",
+    "bootstrap",
+    "trace",
+    "default",
 ];
 
 /// The types every program can spell without a source naming them, such as
@@ -301,7 +332,10 @@ fn member_name(body: &str) -> Option<&str> {
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .unwrap_or(rest.len());
     let name = &rest[..end];
-    let starts = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    let starts = name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
     (starts && !IMPLICIT.contains(&name)).then_some(name)
 }
 
@@ -312,10 +346,7 @@ fn names_of(line: &str) -> Vec<&str> {
         Some(&"import") | None => Vec::new(),
         // The type an extension extends, every name it is spelled with.
         Some(&"extend") => {
-            let target = line
-                .split([':', '{'])
-                .next()
-                .unwrap_or(line);
+            let target = line.split([':', '{']).next().unwrap_or(line);
             identifiers(target).skip(1).collect()
         }
         Some(word) if OPENERS.contains(word) => words
@@ -330,7 +361,11 @@ fn names_of(line: &str) -> Vec<&str> {
 
 fn identifiers(text: &str) -> impl Iterator<Item = &str> {
     text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .filter(|word| word.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_'))
+        .filter(|word| {
+            word.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        })
 }
 
 #[cfg(test)]
@@ -358,7 +393,10 @@ mod tests {
         let before = reached(&names, &[LIBRARY, other]);
         let edited = other.replace("b: Point) -> Bool", "b: Point, c: Number) -> Bool");
         assert_ne!(reached(&names, &[LIBRARY, &edited]), before);
-        let unrelated = other.replace("struct Unrelated {\n}", "struct Unrelated {\n    let a: Number\n}");
+        let unrelated = other.replace(
+            "struct Unrelated {\n}",
+            "struct Unrelated {\n    let a: Number\n}",
+        );
         assert_eq!(reached(&names, &[LIBRARY, &unrelated]), before);
     }
 
@@ -369,9 +407,15 @@ mod tests {
         let before = reached(&names, &[library]);
         let added = library.replace("    Open(String)", "    Open(String)\n    Switch(String)");
         assert_eq!(reached(&names, &[&added]), before);
-        let field = library.replace("    let name: String", "    let name: String\n    let size: Number");
+        let field = library.replace(
+            "    let name: String",
+            "    let name: String\n    let size: Number",
+        );
         assert_ne!(reached(&names, &[&field]), before);
-        let implicit = library.replace("rawValue(borrow self) -> Number", "rawValue(borrow self) -> U32");
+        let implicit = library.replace(
+            "rawValue(borrow self) -> Number",
+            "rawValue(borrow self) -> U32",
+        );
         assert_ne!(reached(&names, &[&implicit]), before);
         let calls = seed(["let a: Application = load()\nlet r = a.openRequest()"]);
         assert_ne!(reached(&calls, &[&added]), reached(&calls, &[library]));

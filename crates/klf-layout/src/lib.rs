@@ -6,10 +6,10 @@
 use klf_kir::{Type, TypeDeclaration, TypeKind};
 
 mod trace;
-pub use trace::trace_map;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+pub use trace::trace_map;
 
 /// The size and alignment of a type, in bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

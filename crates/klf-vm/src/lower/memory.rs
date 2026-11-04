@@ -234,7 +234,11 @@ impl Lowerer<'_> {
         Ok(())
     }
 
-    pub(super) fn lower_load(&mut self, results: &[Name], address: &Name) -> Result<(), LowerError> {
+    pub(super) fn lower_load(
+        &mut self,
+        results: &[Name],
+        address: &Name,
+    ) -> Result<(), LowerError> {
         let dest = self.result(results)?;
         let source = self.register(address)?;
         let width = match results {

@@ -35,13 +35,9 @@ fn generate_keyword_header() -> (String, Vec<Remark>) {
         include_dirs: &[],
     };
     let header = Path::new("keyword_names.h");
-    let (module, remarks) = generate(
-        HEADER,
-        header,
-        "keywords",
-        environment,
-        &mut |_: &Path| None::<String>,
-    )
+    let (module, remarks) = generate(HEADER, header, "keywords", environment, &mut |_: &Path| {
+        None::<String>
+    })
     .expect("the fixture header preprocesses");
     (emit(&module), remarks)
 }

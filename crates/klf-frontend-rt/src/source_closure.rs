@@ -13,7 +13,8 @@ pub(crate) fn register(
     let std_include = crate::output::installed_sysroot()
         .map(|sysroot| crate::output::std_include(&sysroot, &metadata.name))
         .or_else(|| {
-            (!metadata.std_root.is_empty()).then(|| PathBuf::from(&metadata.std_root).join("include"))
+            (!metadata.std_root.is_empty())
+                .then(|| PathBuf::from(&metadata.std_root).join("include"))
         });
     let search = include_dirs(session);
     let mut pending = VecDeque::from([(root.to_owned(), text.to_owned())]);
@@ -33,7 +34,8 @@ pub(crate) fn register(
             }
         }
         for (requested, angled) in found {
-            let Some(include) = resolve(&path, &requested, angled, &search, std_include.as_deref()) else {
+            let Some(include) = resolve(&path, &requested, angled, &search, std_include.as_deref())
+            else {
                 continue;
             };
             let include = normalized(&include);

@@ -114,10 +114,13 @@ impl ProjectCall {
         word: u64,
     ) -> Result<Option<HookProject>, String> {
         self.bridge.commit_records(session)?;
-        if self.bridge.file.is_some() || reported.iter().any(|record| {
-            session.diagnostic_spec(record.code)
-                .is_none_or(|spec| spec.severity == klf_diag::Severity::Error)
-        }) {
+        if self.bridge.file.is_some()
+            || reported.iter().any(|record| {
+                session
+                    .diagnostic_spec(record.code)
+                    .is_none_or(|spec| spec.severity == klf_diag::Severity::Error)
+            })
+        {
             settle_phase_diagnostics(session, self.bridge.file, reported)?;
         }
         let pushed = self

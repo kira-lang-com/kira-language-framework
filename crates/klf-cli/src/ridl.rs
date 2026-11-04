@@ -70,7 +70,9 @@ fn kernel(args: &[String]) -> ExitCode {
         [option, target_option, target] if option == "--entries" && target_option == "--target" => {
             klf_driver::kernel_ridl_entries(target)
         }
-        _ => Err("usage: klf ridl kernel --contract | --kcore | --entries --target <triple>".to_owned()),
+        _ => Err(
+            "usage: klf ridl kernel --contract | --kcore | --entries --target <triple>".to_owned(),
+        ),
     };
     match output {
         Ok(output) => {

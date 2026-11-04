@@ -142,7 +142,8 @@ entry():
 "#;
     let module = klf_kir::parse_module(source).expect("module parses");
     let (capabilities, _, diagnostics) = kernel_services_with_source_and_diagnostics("source");
-    let outcome = run_module_with_capabilities(&module, "main", &[], &capabilities).expect("module runs");
+    let outcome =
+        run_module_with_capabilities(&module, "main", &[], &capabilities).expect("module runs");
     assert_eq!(outcome, Outcome::Return(Some(0)));
     let records = diagnostics.lock().expect("diagnostics");
     assert_eq!(records[0].origin, i64::MIN);

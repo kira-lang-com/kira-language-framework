@@ -55,7 +55,10 @@ impl Reader<'_> {
 
     /// One `decimal-length identifier` component.
     fn component(&mut self) -> Option<&str> {
-        let digits = self.text[self.at..].bytes().take_while(u8::is_ascii_digit).count();
+        let digits = self.text[self.at..]
+            .bytes()
+            .take_while(u8::is_ascii_digit)
+            .count();
         let length: usize = self.text.get(self.at..self.at + digits)?.parse().ok()?;
         let start = self.at + digits;
         let name = self.text.get(start..start.checked_add(length)?)?;
@@ -137,9 +140,18 @@ mod tests {
     #[test]
     fn every_kind_reads_back_as_its_source_names() {
         let cases = [
-            (mangle::function_symbol("Geometry", "parse", Some("6f1c2a9e44d07b31")), "Geometry.parse"),
-            (mangle::method_symbol("Harmony", "ModelPicker", "choose", None), "Harmony.ModelPicker.choose"),
-            (mangle::descriptor_symbol("Core", "FavoritePreset"), "descriptor of Core.FavoritePreset"),
+            (
+                mangle::function_symbol("Geometry", "parse", Some("6f1c2a9e44d07b31")),
+                "Geometry.parse",
+            ),
+            (
+                mangle::method_symbol("Harmony", "ModelPicker", "choose", None),
+                "Harmony.ModelPicker.choose",
+            ),
+            (
+                mangle::descriptor_symbol("Core", "FavoritePreset"),
+                "descriptor of Core.FavoritePreset",
+            ),
             (
                 mangle::witness_symbol("Core", "AvailableModel", "Foundation", "Codable"),
                 "witness table of Core.AvailableModel for Foundation.Codable",
@@ -148,7 +160,10 @@ mod tests {
                 mangle::instance_symbol(
                     "Foundation",
                     "Array",
-                    &[Type::Nominal { name: "ModelSelection".to_owned(), args: Vec::new() }],
+                    &[Type::Nominal {
+                        name: "ModelSelection".to_owned(),
+                        args: Vec::new(),
+                    }],
                     None,
                 ),
                 "Foundation.Array<ModelSelection>",
@@ -157,14 +172,21 @@ mod tests {
                 mangle::instance_symbol(
                     "Foundation",
                     "Map",
-                    &[Type::String, Type::Array(Box::new(Type::Scalar(Scalar::I64)))],
+                    &[
+                        Type::String,
+                        Type::Array(Box::new(Type::Scalar(Scalar::I64))),
+                    ],
                     None,
                 ),
                 "Foundation.Map<String, [Int]>",
             ),
         ];
         for (symbol, shown) in cases {
-            assert_eq!(demangle(&format!("_{symbol}")).as_deref(), Some(shown), "{symbol}");
+            assert_eq!(
+                demangle(&format!("_{symbol}")).as_deref(),
+                Some(shown),
+                "{symbol}"
+            );
         }
         assert_eq!(demangle("kir.main"), None);
     }

@@ -107,14 +107,22 @@ impl Heap {
             let mut top = owner.spans.load(Ordering::Relaxed);
             loop {
                 header.next_remote.store(top, Ordering::Relaxed);
-                match owner.spans.compare_exchange_weak(top, h as usize, Ordering::Release, Ordering::Relaxed) {
+                match owner.spans.compare_exchange_weak(
+                    top,
+                    h as usize,
+                    Ordering::Release,
+                    Ordering::Relaxed,
+                ) {
                     Ok(_) => break,
                     Err(actual) => top = actual,
                 }
             }
         }
         if owner.orphaned.load(Ordering::Acquire) {
-            let mut orphan = owner.orphan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut orphan = owner
+                .orphan
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(heap) = orphan.as_mut() {
                 heap.collect_remote();
             }
@@ -127,7 +135,10 @@ impl Heap {
     #[inline]
     pub fn collect_remote(&mut self) {
         if self.owner != 0
-            && unsafe { &*(self.owner as *const Owner) }.spans.load(Ordering::Relaxed) != 0
+            && unsafe { &*(self.owner as *const Owner) }
+                .spans
+                .load(Ordering::Relaxed)
+                != 0
         {
             self.collect_queued();
         }
@@ -143,7 +154,9 @@ impl Heap {
             // Read before the list is taken: a free after that queues the
             // span again through this link.
             span = unsafe { &*h }.next_remote.load(Ordering::Relaxed);
-            let mut slot = unsafe { &*h }.remote_free.swap(REMOTE_END, Ordering::Acquire);
+            let mut slot = unsafe { &*h }
+                .remote_free
+                .swap(REMOTE_END, Ordering::Acquire);
             while slot != REMOTE_END {
                 let state = unsafe { meta_ref(h, slot) }.load(Ordering::Relaxed);
                 let next = ((state & LINK_MASK) >> LINK_SHIFT) as u32;
@@ -163,7 +176,10 @@ impl Heap {
         }
         self.collect_remote();
         let owner = unsafe { &*(self.owner as *const Owner) };
-        let mut orphan = owner.orphan.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut orphan = owner
+            .orphan
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         owner.orphaned.store(true, Ordering::Release);
         // A free that pushed before the flag was set did not collect.
         self.collect_remote();
