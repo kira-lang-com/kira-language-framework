@@ -1,22 +1,21 @@
-# 26.10.4
+# 26.11.1
 
 **Project:** Kira Language Framework (KLF)  
-**Release week:** 2026-10-26 – 2026-11-01
+**Release week:** 2026-11-02 – 2026-11-08
 
 ## Highlights
 
-Improved raw-memory lowering correctness for kernel-oriented development.
+Expanded the KLF framework and its integration with Kira-hosted language frontends.
+
+## Added
+
+- RIDL integration and driver-side support for Kira-hosted language frontends, with example Kira consumer and shader packages.
+- Source for TIRC command-line workflows covering analysis, assembly/disassembly, and packaging.
 
 ## Changed
 
-- LLVM emission now preserves requested volatile and alignment flags on unmanaged raw loads and stores.
-- Cranelift rejects unsupported flagged raw-memory operations instead of silently ignoring their semantics.
-- Updated the implemented-features documentation to reflect the backend behavior.
-
-## Validation
-
-- `klf-llvm` and `klf-cranelift` compiled successfully; volatile/alignment LLVM regression passed.
+- Expanded KLF kernel, compiler, and CLI sources, including the distribution path for Kira-facing framework libraries and RIDL definitions.
 
 ## Known limitations
 
-- Cranelift flagged-memory support and cross-backend parity are not yet implemented.
+- The presence of new frontend and CLI paths is not proof of full Kira ecosystem parity. A complete conformance, package-build, and cross-backend run was not performed for these notes.
