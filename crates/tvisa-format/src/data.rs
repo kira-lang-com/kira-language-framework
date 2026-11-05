@@ -6,8 +6,6 @@ use tir_format::leb::{read_sleb, read_uleb, write_sleb, write_uleb};
 use crate::binary::FormatError;
 use tir_format::StringTable;
 
-use crate::text::{TextData, TextDataInitializer};
-
 const MAX_DATA_OBJECTS_PER_IMAGE: u64 = 1 << 28;
 const DATA_PERCPU_FLAG: u8 = 1 << 3;
 
@@ -134,107 +132,6 @@ pub struct DataObject {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DataSection {
     pub objects: Vec<DataObject>,
-}
-
-/// Encodes DATA records parsed from TVISA text.
-///
-/// The resolver returns the already-tagged symbol operand from section 6.4.
-/// Data names and all other text-owned fields are encoded from the parsed AST.
-pub fn encode_text_data_section(
-    data: &[TextData],
-    strings: &StringTable,
-    mut resolve_symbol: impl FnMut(&str) -> Option<u64>,
-) -> Result<Vec<u8>, FormatError> {
-    let mut objects = Vec::new();
-    objects
-        .try_reserve_exact(data.len())
-        .map_err(|_| malformed(0, "DATA object allocation failed"))?;
-    for text in data {
-        let name_index = strings
-            .index_of(&text.symbol)
-            .and_then(|index| u64::try_from(index).ok())
-            .ok_or_else(|| malformed(0, "DATA name is absent from STRINGS"))?;
-        let (size, contents) = encode_text_initializer(text)?;
-        let mut relocations = Vec::new();
-        relocations
-            .try_reserve_exact(text.relocations.len())
-            .map_err(|_| malformed(0, "DATA relocation allocation failed"))?;
-        for relocation in &text.relocations {
-            let symbol = resolve_symbol(&relocation.symbol)
-                .ok_or_else(|| malformed(0, "DATA relocation names an unresolved symbol"))?;
-            relocations.push(DataRelocation {
-                offset: relocation.offset,
-                kind: relocation.kind,
-                symbol,
-                addend: relocation.addend,
-                tag: relocation.tag,
-            });
-        }
-        objects.push(DataObject {
-            name_index,
-            linkage: text.linkage,
-            kind: text.kind,
-            per_cpu: text.per_cpu,
-            alignment: text.alignment,
-            size,
-            contents,
-            debug_index: 0,
-            relocations,
-        });
-    }
-    DataSection { objects }.encode(strings)
-}
-
-fn encode_text_initializer(data: &TextData) -> Result<(u64, Option<Vec<u8>>), FormatError> {
-    match (&data.initializer, data.kind.has_contents()) {
-        (TextDataInitializer::Zero { size, .. }, false) => Ok((*size, None)),
-        (TextDataInitializer::Bytes { bytes, .. }, true) => {
-            let size = u64::try_from(bytes.len())
-                .map_err(|_| malformed(0, "DATA byte initializer size overflows"))?;
-            let mut contents = Vec::new();
-            contents
-                .try_reserve_exact(bytes.len())
-                .map_err(|_| malformed(0, "DATA initializer allocation failed"))?;
-            contents.extend_from_slice(bytes);
-            Ok((size, Some(contents)))
-        }
-        (TextDataInitializer::Aggregate { size, elements, .. }, true) => {
-            let host_size = usize::try_from(*size)
-                .map_err(|_| malformed(0, "DATA aggregate size does not fit in memory"))?;
-            let mut contents = Vec::new();
-            contents
-                .try_reserve_exact(host_size)
-                .map_err(|_| malformed(0, "DATA aggregate allocation failed"))?;
-            contents.resize(host_size, 0);
-            let mut previous_end = 0_u64;
-            for element in elements {
-                if element.bytes.is_empty() || element.offset < previous_end {
-                    return Err(malformed(
-                        0,
-                        "DATA aggregate elements must be nonempty, ordered, and nonoverlapping",
-                    ));
-                }
-                let byte_count = u64::try_from(element.bytes.len())
-                    .map_err(|_| malformed(0, "DATA aggregate element size overflows"))?;
-                let end = element
-                    .offset
-                    .checked_add(byte_count)
-                    .filter(|end| *end <= *size)
-                    .ok_or_else(|| malformed(0, "DATA aggregate element exceeds its size"))?;
-                let start = usize::try_from(element.offset)
-                    .map_err(|_| malformed(0, "DATA aggregate offset does not fit in memory"))?;
-                let end = usize::try_from(end)
-                    .map_err(|_| malformed(0, "DATA aggregate end does not fit in memory"))?;
-                contents[start..end].copy_from_slice(&element.bytes);
-                previous_end = end as u64;
-            }
-            Ok((*size, Some(contents)))
-        }
-        _ => Err(malformed(
-            0,
-            "DATA initializer does not match its data kind",
-        )),
-    }
 }
 
 impl DataSection {

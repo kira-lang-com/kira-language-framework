@@ -9,7 +9,6 @@ const VFY14: Code = Code::new(Dialect::Tvisa, Area::Verifier, 14);
 const VFY15: Code = Code::new(Dialect::Tvisa, Area::Verifier, 15);
 const VFY3: Code = Code::new(Dialect::Tvisa, Area::Verifier, 3);
 const VFY17: Code = Code::new(Dialect::Tvisa, Area::Verifier, 17);
-const VFY21: Code = Code::new(Dialect::Tvisa, Area::Verifier, 21);
 const VFY40: Code = Code::new(Dialect::Tvisa, Area::Verifier, 40);
 
 pub(super) fn verify_function(
@@ -85,18 +84,6 @@ pub(super) fn verify_function(
                 format!("portable intrinsic {id} operands do not match its signature"),
             ));
         }
-        if gpu
-            && instruction.opcode == 0x230
-            && !instruction
-                .operands
-                .iter()
-                .any(|operand| matches!(operand, BinaryOperand::Index(15 | 16)))
-        {
-            diagnostics.push(Diagnostic::error(
-                VFY21,
-                "GPU code permits only portable intrinsic IDs 15 and 16",
-            ));
-        }
         if instruction.opcode == 0x70b && !matches!(profile, Profile::System | Profile::Kernel) {
             diagnostics.push(Diagnostic::error(
                 VFY40,
@@ -116,15 +103,6 @@ pub(super) fn verify_function(
             diagnostics.push(Diagnostic::error(
                 VFY14,
                 format!("const.sampler appears in CPU function @{}", function.name),
-            ));
-        }
-        if gpu && is_cpu_only_tvisa_instruction(instruction) {
-            diagnostics.push(Diagnostic::error(
-                VFY21,
-                format!(
-                    "TVISA opcode 0x{:03X} is forbidden in GPU function @{}",
-                    instruction.opcode, function.name
-                ),
             ));
         }
         if instruction.opcode == 0x011
@@ -318,15 +296,7 @@ fn uses_float_or_vector(instruction: &BinaryInstruction, types: &TypeSection) ->
 }
 
 fn is_gpu_instruction(opcode: u64) -> bool {
-    (0x400..=0x5bf).contains(&opcode) || (0x5c0..=0x5c5).contains(&opcode)
-}
-
-fn is_cpu_only_tvisa_instruction(instruction: &BinaryInstruction) -> bool {
-    let opcode = instruction.opcode;
-    matches!(
-        opcode,
-        0x00f | 0x1a1 | 0x1a9 | 0x210..=0x215 | 0x220..=0x224 | 0x703..=0x706 | 0x708..=0x70f
-    ) || (opcode == 0x1e7 && matches!((instruction.modifiers >> 48) & 0xf, 1 | 2))
+    (0x400..=0x5bf).contains(&opcode)
 }
 
 fn is_allocation_runtime_call(instruction: &BinaryInstruction) -> bool {

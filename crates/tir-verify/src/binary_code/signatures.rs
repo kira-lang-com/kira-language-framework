@@ -1,36 +1,22 @@
 mod call_verification;
+mod calls;
 mod generic_types;
 mod helpers;
-mod witness_verification;
-
-use call_verification::verify_call;
-use generic_types::{
-    call_result_edge_types, call_type_arguments, infer_type_arguments,
-    specialized_result_edge_types, type_matches_with_arguments,
-};
 
 use helpers::{
-    check_call_type_argument_count, contains_generic, explicit_type, frame_type, function_type,
-    resolve_direct_callee, result_edge_types, type_at, value_ids, value_type,
+    contains_generic, direct_callee, explicit_type, frame_type, function_type, is_generic_call,
+    result_edge_types, type_at, value_ids, value_type,
 };
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryFunctionBody, BinaryFunctionType, BinaryGenericTable, BinaryInstruction, BinaryOperand,
-    BinarySignature, BinarySignatureTable, BinaryType, BinaryTypeTable,
+    BinaryFunctionBody, BinaryFunctionType, BinaryInstruction, BinaryOperand, BinarySignature,
+    BinarySignatureTable, BinaryType, BinaryTypeTable,
 };
 
 const V2: Code = Code::new(Dialect::Tir, Area::Verifier, 2);
 const V10: Code = Code::new(Dialect::Tir, Area::Verifier, 10);
 const V11: Code = Code::new(Dialect::Tir, Area::Verifier, 11);
 const V19: Code = Code::new(Dialect::Tir, Area::Verifier, 19);
-
-pub(super) fn verify_generic_witness_signatures(
-    generics: &BinaryGenericTable,
-    signatures: &BinarySignatureTable,
-    types: &BinaryTypeTable,
-) -> Vec<Diagnostic> {
-    witness_verification::verify(generics, types, signatures)
-}
 
 pub(super) fn verify_body(
     body: &BinaryFunctionBody,
@@ -83,29 +69,77 @@ pub(super) fn verify_body(
                     }
                 }
                 0x1a0 | 0x1a8 | 0x1a7 | 0x1aa | 0x1e7 => {
-                    let Some(callee) = resolve_direct_callee(
-                        instruction,
-                        signatures,
-                        types,
-                        imports.unwrap_or_default(),
-                    ) else {
+                    let Some((callee_index, callee)) = direct_callee(instruction, signatures)
+                    else {
                         continue;
                     };
-                    check_call_type_argument_count(
-                        instruction,
-                        &callee,
-                        &caller.name,
-                        &mut diagnostics,
-                    );
                     let type_arguments =
-                        call_type_arguments(instruction, callee.generic_parameter_count);
+                        instruction
+                            .operands
+                            .iter()
+                            .find_map(|operand| match operand {
+                                BinaryOperand::Types(arguments) => Some(arguments.as_slice()),
+                                _ => None,
+                            });
+                    let generic_parameter_count = callee.generic_parameters.len();
+                    let infers_generic_arguments =
+                        matches!(instruction.opcode, 0x1a7 | 0x1aa) && type_arguments.is_none();
+                    if matches!(instruction.opcode, 0x1a7 | 0x1aa) && type_arguments.is_some() {
+                        report_with_code(
+                            &mut diagnostics,
+                            &caller.name,
+                            instruction,
+                            V2,
+                            "try.call and invoke infer generic type arguments and do not encode them",
+                        );
+                        continue;
+                    }
+                    let type_argument_count = type_arguments.map_or(0, <[u64]>::len);
+                    if !infers_generic_arguments && type_argument_count != generic_parameter_count {
+                        report_with_code(
+                            &mut diagnostics,
+                            &caller.name,
+                            instruction,
+                            V2,
+                            format!(
+                                "call to @{} has {} type arguments; expected {}",
+                                callee.name, type_argument_count, generic_parameter_count
+                            ),
+                        );
+                        continue;
+                    }
+                    let specialized_type = if type_arguments.is_none_or(<[u64]>::is_empty) {
+                        Some(callee.function_type)
+                    } else {
+                        super::types::specialize_nominal_type(
+                            types,
+                            callee.function_type,
+                            type_arguments.unwrap_or_default(),
+                        )
+                    };
+                    let Some(specialized_type) = specialized_type else {
+                        report_with_code(
+                            &mut diagnostics,
+                            &caller.name,
+                            instruction,
+                            V2,
+                            format!(
+                                "call to @{} does not resolve to a function type in TYPES after generic substitution",
+                                callee.name
+                            ),
+                        );
+                        continue;
+                    };
+                    let Some(function) = function_type(types, specialized_type) else {
+                        continue;
+                    };
                     verify_direct_call(
                         instruction,
                         &callee.name,
-                        callee.local_index,
+                        callee_index,
                         type_arguments,
-                        callee.generic_parameter_count,
-                        callee.function_type,
+                        generic_parameter_count,
+                        function,
                         value_types,
                         types,
                         caller_function,
@@ -124,25 +158,21 @@ pub(super) fn verify_body(
                                 value_type(instruction, 0, value_types)
                             && actual_function_type != function_index
                         {
-                            report_v19(
+                            report_with_code(
                                 &mut diagnostics,
                                 &caller.name,
                                 instruction,
+                                V19,
                                 format!(
                                     "indirect-call value has function type {actual_function_type}; declared type is {function_index}"
                                 ),
                             );
                         }
                         if instruction.opcode == 0x1a9
-                            && let Some(callee) = resolve_direct_callee(
-                                instruction,
-                                signatures,
-                                types,
-                                imports.unwrap_or_default(),
-                            )
-                            && callee.generic_parameter_count == 0
-                            && !contains_generic(types, callee.function_type_index, &mut Vec::new())
-                            && callee.function_type_index != function_index
+                            && let Some((_, callee)) = direct_callee(instruction, signatures)
+                            && callee.generic_parameters.is_empty()
+                            && !contains_generic(types, callee.function_type, &mut Vec::new())
+                            && callee.function_type != function_index
                         {
                             report(
                                 &mut diagnostics,
@@ -150,7 +180,7 @@ pub(super) fn verify_body(
                                 instruction,
                                 format!(
                                     "variadic-call type {function_index} does not match callee type {}",
-                                    callee.function_type_index
+                                    callee.function_type
                                 ),
                             );
                         }
@@ -170,12 +200,11 @@ pub(super) fn verify_body(
                         } else {
                             value_ids(instruction).into_iter().skip(skip).collect()
                         };
-                        verify_call(
+                        calls::verify_call(
                             instruction,
                             "indirect call",
                             function,
                             &arguments,
-                            None,
                             value_types,
                             types,
                             &caller.name,
@@ -199,12 +228,11 @@ pub(super) fn verify_body(
                     if let Some(function) = function_type(types, *closure_function_type) {
                         let arguments: Vec<u64> =
                             value_ids(instruction).into_iter().skip(1).collect();
-                        verify_call(
+                        calls::verify_call(
                             instruction,
                             "closure call",
                             function,
                             &arguments,
-                            None,
                             value_types,
                             types,
                             &caller.name,
@@ -226,7 +254,7 @@ pub(super) fn verify_body(
                     let Some(function) = function_type(types, function_index) else {
                         continue;
                     };
-                    verify_call(
+                    calls::verify_call(
                         instruction,
                         if instruction.opcode == 0x1a5 {
                             "witness call"
@@ -235,7 +263,6 @@ pub(super) fn verify_body(
                         },
                         function,
                         &value_ids(instruction),
-                        None,
                         value_types,
                         types,
                         &caller.name,
@@ -259,7 +286,7 @@ pub(super) fn verify_body(
 fn verify_direct_call(
     instruction: &BinaryInstruction,
     callee_name: &str,
-    callee_index: Option<u64>,
+    callee_index: u64,
     type_arguments: Option<&[u64]>,
     generic_parameter_count: usize,
     function: &BinaryFunctionType,
@@ -291,10 +318,10 @@ fn verify_direct_call(
                 diagnostics,
                 caller_name,
                 instruction,
+                V11,
                 format!(
                     "call to @{callee_name} cannot infer all generic type arguments from its arguments"
                 ),
-                V11,
             );
         }
         inferred
@@ -304,7 +331,7 @@ fn verify_direct_call(
     let type_arguments = type_arguments.or(inferred_type_arguments.as_deref());
     if opcode == 0x1a0 || opcode == 0x1a8 || is_try_call || is_invoke || is_tail_call {
         let arguments = value_ids(instruction);
-        verify_call(
+        call_verification::verify_call(
             instruction,
             callee_name,
             function,
@@ -319,10 +346,11 @@ fn verify_direct_call(
 
     if is_try_call {
         if function.error.is_none() {
-            report_v10(
+            report_with_code(
                 diagnostics,
                 caller_name,
                 instruction,
+                V10,
                 "try.call requires a callee function type with fails",
             );
         }
@@ -330,18 +358,19 @@ fn verify_direct_call(
             instruction,
             body,
             function,
-            callee_index.unwrap_or(u64::MAX),
-            types,
+            callee_index,
             type_arguments,
+            types,
             caller_name,
             diagnostics,
         );
     } else if is_invoke {
         if caller_is_nounwind {
-            report_v10(
+            report_with_code(
                 diagnostics,
                 caller_name,
                 instruction,
+                V10,
                 "invoke is not permitted in a nounwind function",
             );
         }
@@ -349,26 +378,32 @@ fn verify_direct_call(
             instruction,
             body,
             function,
-            callee_index.unwrap_or(u64::MAX),
-            types,
+            callee_index,
             type_arguments,
+            types,
             caller_name,
             diagnostics,
         );
     }
 
     let callee_result_matches = if function.asynchronous {
-        callee_index
-            .and_then(|callee_index| frame_type(types, callee_index))
-            .is_some_and(|result| result == caller.result)
+        frame_type(types, callee_index).is_some_and(|result| result == caller.result)
     } else {
-        type_matches_with_arguments(types, function.result, caller.result, type_arguments)
+        generic_types::type_matches_with_arguments(
+            types,
+            function.result,
+            caller.result,
+            type_arguments,
+        )
     };
     let callee_error_matches = match (function.error, caller.error) {
         (None, None) => true,
-        (Some(callee_error), Some(caller_error)) => {
-            type_matches_with_arguments(types, callee_error, caller_error, type_arguments)
-        }
+        (Some(callee_error), Some(caller_error)) => generic_types::type_matches_with_arguments(
+            types,
+            callee_error,
+            caller_error,
+            type_arguments,
+        ),
         _ => false,
     };
     if is_tail_call
@@ -390,17 +425,15 @@ fn infer_call_type_arguments(
     value_types: &[Option<u64>],
     types: &BinaryTypeTable,
 ) -> Option<Vec<u64>> {
-    let mut inferred = vec![None; generic_parameter_count];
     let arguments = value_ids(instruction);
-    for (parameter, argument) in function.parameters.iter().zip(arguments) {
-        let actual = usize::try_from(argument)
-            .ok()
-            .and_then(|index| value_types.get(index))
+    let mut inferred = vec![None; generic_parameter_count];
+    for (argument, parameter) in arguments.iter().zip(&function.parameters) {
+        let actual = value_types
+            .get(usize::try_from(*argument).ok()?)
             .copied()
             .flatten()?;
-        let mut candidate = inferred.clone();
-        if infer_type_arguments(types, parameter.ty, actual, &mut candidate) {
-            inferred = candidate;
+        if !generic_types::infer_type_arguments(types, parameter.ty, actual, &mut inferred) {
+            return None;
         }
     }
     inferred.into_iter().collect()
@@ -411,11 +444,12 @@ fn verify_try_call_edges(
     body: &BinaryFunctionBody,
     function: &BinaryFunctionType,
     callee_index: u64,
-    types: &BinaryTypeTable,
     type_arguments: Option<&[u64]>,
+    types: &BinaryTypeTable,
     caller_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let compare_types = type_arguments.is_some() || !is_generic_call(function, types);
     let targets = instruction
         .operands
         .iter()
@@ -425,7 +459,7 @@ fn verify_try_call_edges(
         })
         .collect::<Vec<_>>();
     let (result, result_type_known) =
-        call_result_edge_types(types, function, callee_index, type_arguments);
+        generic_types::call_result_edge_types(types, function, callee_index, type_arguments);
     if let Some(target) = targets.first()
         && let Some(block) = usize::try_from(*target)
             .ok()
@@ -441,9 +475,7 @@ fn verify_try_call_edges(
                 .map(|parameter| parameter.ty)
                 .collect::<Vec<_>>(),
             &result,
-            types,
-            result_type_known,
-            type_arguments,
+            compare_types && result_type_known,
             diagnostics,
         );
     }
@@ -452,7 +484,8 @@ fn verify_try_call_edges(
             .ok()
             .and_then(|index| body.blocks.get(index))
     {
-        let error_values = specialized_result_edge_types(types, error_type, type_arguments);
+        let error_values =
+            generic_types::specialized_result_edge_types(types, error_type, type_arguments);
         verify_implicit_edge(
             instruction,
             caller_name,
@@ -463,9 +496,7 @@ fn verify_try_call_edges(
                 .map(|parameter| parameter.ty)
                 .collect::<Vec<_>>(),
             &error_values,
-            types,
-            true,
-            type_arguments,
+            compare_types,
             diagnostics,
         );
     }
@@ -476,8 +507,8 @@ fn verify_invoke_edges(
     body: &BinaryFunctionBody,
     function: &BinaryFunctionType,
     callee_index: u64,
-    types: &BinaryTypeTable,
     type_arguments: Option<&[u64]>,
+    types: &BinaryTypeTable,
     caller_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -489,8 +520,9 @@ fn verify_invoke_edges(
             _ => None,
         })
         .collect::<Vec<_>>();
+    let compare_types = type_arguments.is_some() || !is_generic_call(function, types);
     let (expected, result_type_known) =
-        call_result_edge_types(types, function, callee_index, type_arguments);
+        generic_types::call_result_edge_types(types, function, callee_index, type_arguments);
     if let Some(target) = targets.first()
         && let Some(block) = usize::try_from(*target)
             .ok()
@@ -506,9 +538,7 @@ fn verify_invoke_edges(
                 .map(|parameter| parameter.ty)
                 .collect::<Vec<_>>(),
             &expected,
-            types,
-            result_type_known,
-            type_arguments,
+            compare_types && result_type_known,
             diagnostics,
         );
     }
@@ -516,28 +546,18 @@ fn verify_invoke_edges(
         && let Some(block) = usize::try_from(*target)
             .ok()
             .and_then(|index| body.blocks.get(index))
-    {
-        if !block.parameters.is_empty() {
-            report(
-                diagnostics,
-                caller_name,
-                instruction,
-                format!("invoke unwind target block {target} has parameters; expected none"),
-            );
-        }
-        if block
+        && block
             .instructions
             .as_ref()
             .and_then(|instructions| instructions.first())
             .is_none_or(|first| first.opcode != 0x1d0)
-        {
-            report(
-                diagnostics,
-                caller_name,
-                instruction,
-                format!("invoke unwind target block {target} does not begin with landingpad"),
-            );
-        }
+    {
+        report(
+            diagnostics,
+            caller_name,
+            instruction,
+            format!("invoke unwind target block {target} does not begin with landingpad"),
+        );
     }
 }
 
@@ -547,16 +567,10 @@ fn verify_implicit_edge(
     target: u64,
     actual: &[u64],
     expected: &[u64],
-    types: &BinaryTypeTable,
     compare_types: bool,
-    type_arguments: Option<&[u64]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let types_match = !compare_types
-        || actual.iter().zip(expected).all(|(actual, expected)| {
-            type_matches_with_arguments(types, *expected, *actual, type_arguments)
-        });
-    if actual.len() != expected.len() || !types_match {
+    if actual.len() != expected.len() || compare_types && actual != expected {
         report(
             diagnostics,
             caller_name,
@@ -627,12 +641,11 @@ fn verify_vft_call(
         .into_iter()
         .skip(2)
         .collect::<Vec<_>>();
-    verify_call(
+    calls::verify_call(
         instruction,
         "visible function table entry",
         function,
         &arguments,
-        None,
         value_types,
         types,
         caller,
@@ -699,33 +712,15 @@ fn report(
     instruction: &BinaryInstruction,
     message: impl Into<String>,
 ) {
-    report_with_code(diagnostics, function, instruction, message, V2);
-}
-
-fn report_v10(
-    diagnostics: &mut Vec<Diagnostic>,
-    function: &str,
-    instruction: &BinaryInstruction,
-    message: impl Into<String>,
-) {
-    report_with_code(diagnostics, function, instruction, message, V10);
-}
-
-fn report_v19(
-    diagnostics: &mut Vec<Diagnostic>,
-    function: &str,
-    instruction: &BinaryInstruction,
-    message: impl Into<String>,
-) {
-    report_with_code(diagnostics, function, instruction, message, V19);
+    report_with_code(diagnostics, function, instruction, V2, message);
 }
 
 fn report_with_code(
     diagnostics: &mut Vec<Diagnostic>,
     function: &str,
     instruction: &BinaryInstruction,
-    message: impl Into<String>,
     code: Code,
+    message: impl Into<String>,
 ) {
     diagnostics.push(Diagnostic::error(
         code,

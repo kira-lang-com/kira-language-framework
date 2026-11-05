@@ -4,13 +4,10 @@ mod assembly_constraints;
 mod atomic_types;
 mod binary_analysis;
 mod binary_code;
-mod binary_debug;
 mod binary_gpu_entries;
 mod binary_gpu_stages;
-mod binary_gpu_type_capabilities;
 mod binary_gpu_uniformity;
 mod binary_gpu_uniformity_cfg;
-mod binary_metadata;
 mod binary_signatures;
 mod binary_symbols;
 mod call_types;
@@ -18,7 +15,6 @@ mod calls;
 mod constant_types;
 mod conversion_types;
 mod data;
-mod debug_types;
 mod edge_types;
 mod gpu;
 mod gpu_advanced_types;
@@ -43,7 +39,6 @@ mod symbols;
 mod text_gpu_uniformity;
 mod trust;
 mod type_classes;
-mod type_tags;
 mod unwind;
 mod variant_text;
 mod variants;
@@ -51,6 +46,7 @@ mod vector_inference;
 mod vector_types;
 
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
+use tir_format::parse_tvisa_function_body;
 use tir_format::text::{Token, TokenKind, lex};
 use tir_verify::{ControlFlowOptions, verify_text_body, verify_text_value_dominance};
 use tvisa_format::{TextCallingConvention, TextImage, TextItemKind, TvisaImage};
@@ -111,22 +107,19 @@ pub fn verify_text_image(image: &TextImage) -> Vec<Diagnostic> {
                 continue;
             }
         };
-        let Some(parsed_body) = image.function_body_for_item(*item) else {
-            continue;
-        };
-        let body = match (&parsed_body.body, &parsed_body.error) {
-            (Some(body), _) => body,
-            (None, Some(error)) => {
-                diagnostics.push(
-                    Diagnostic::error(ENCODING, error.message.clone())
-                        .with_primary_span(shift(error.span, item.span.start)),
-                );
-                continue;
-            }
-            (None, None) => {
+        let body = match parse_tvisa_function_body(source) {
+            Ok(Some(body)) => body,
+            Ok(None) => {
                 diagnostics.push(
                     Diagnostic::error(VFY1, "defined TVISA function has no body")
                         .with_primary_span(item.span),
+                );
+                continue;
+            }
+            Err(error) => {
+                diagnostics.push(
+                    Diagnostic::error(ENCODING, error.message)
+                        .with_primary_span(shift(error.span, item.span.start)),
                 );
                 continue;
             }
@@ -210,7 +203,6 @@ pub fn verify_text_image(image: &TextImage) -> Vec<Diagnostic> {
         &uniformity_functions,
     ));
     diagnostics.extend(trust::verify_image(image));
-    diagnostics.extend(gpu_entries::verify_image_metadata(image));
     diagnostics.extend(gpu_restrictions::verify_image(image));
     diagnostics.extend(gpu::verify_call_graph(image));
     diagnostics.extend(gpu_entries::verify_entry_records(image));
@@ -230,8 +222,6 @@ pub fn verify_binary_image(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnos
     let mut diagnostics = data::verify_binary(image, memory_limit);
     diagnostics.extend(binary_symbols::verify_binary_records(image, memory_limit));
     diagnostics.extend(binary_code::verify(image, memory_limit));
-    diagnostics.extend(binary_debug::verify(image, memory_limit));
-    diagnostics.extend(binary_metadata::verify(image, memory_limit));
     diagnostics.extend(binary_gpu_entries::verify(image, memory_limit));
     diagnostics.extend(binary_gpu_stages::verify(image, memory_limit));
     diagnostics.extend(binary_gpu_uniformity::verify(image, memory_limit));

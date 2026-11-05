@@ -6,12 +6,7 @@ use tir_format::leb::read_uleb;
 use crate::binary::{FormatError, TvisaImage};
 
 mod encode;
-mod names;
-mod text_encode;
-mod text_values;
 pub use encode::encode_gpu_entry_records;
-pub use names::GPU_CAPABILITY_NAMES;
-pub use text_encode::encode_text_gpu_entry_records;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -83,7 +78,6 @@ pub struct GpuRootRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GpuStageField {
     pub semantic: u8,
-    pub semantic_index: u64,
     pub location: u64,
     pub type_index: u64,
     pub interpolation: u8,
@@ -97,17 +91,9 @@ pub struct GpuSpecializationConstant {
     pub default_constant: u64,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum GpuNodeOutputKind {
-    Node = 0,
-    Mesh = 1,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GpuNodeOutput {
     pub name: String,
-    pub kind: GpuNodeOutputKind,
     pub record_size: u64,
     pub maximum_records: u64,
 }
@@ -365,7 +351,7 @@ fn read_stage_fields(
     name: &str,
 ) -> Result<Vec<GpuStageField>, FormatError> {
     let count = read_index(bytes, cursor, name)?;
-    if count > bytes.len().saturating_sub(*cursor) as u64 / 6 {
+    if count > bytes.len().saturating_sub(*cursor) as u64 / 5 {
         return Err(malformed(
             *cursor,
             format!("{name} count exceeds the section size"),
@@ -384,32 +370,24 @@ fn read_stage_fields(
         if semantic > 17 {
             return Err(malformed(start, "unknown GPU stage semantic"));
         }
-        let semantic_index = read_index(bytes, cursor, "GPU stage semantic index")?;
-        if !matches!(semantic, 2 | 3 | 9 | 10) && semantic_index != 0 {
-            return Err(malformed(
-                start,
-                "non-indexed GPU stage semantic has a semantic index",
-            ));
-        }
         let location = read_index(bytes, cursor, "GPU stage location")?;
         let type_index = read_index(bytes, cursor, "GPU stage type index")?;
         if type_index >= type_count {
             return Err(malformed(*cursor, "GPU stage type index is out of range"));
         }
         let interpolation = read_byte(bytes, cursor, "GPU interpolation")?;
-        if interpolation & !0x7f != 0 {
+        if interpolation > 6 {
             return Err(malformed(*cursor - 1, "unknown GPU interpolation code"));
         }
         let byte_offset = read_index(bytes, cursor, "GPU stage byte offset")?;
-        if !seen.insert((semantic, semantic_index, location)) {
+        if !seen.insert((semantic, location)) {
             return Err(malformed(
                 start,
-                "duplicate GPU stage semantic, semantic index, and location",
+                "duplicate GPU stage semantic and location",
             ));
         }
         fields.push(GpuStageField {
             semantic,
-            semantic_index,
             location,
             type_index,
             interpolation,
@@ -579,15 +557,9 @@ fn read_node(
         read_index(bytes, cursor, "GPU node dispatch grid")?,
         read_index(bytes, cursor, "GPU node dispatch grid")?,
     ];
-    if maximum_dispatch_grid.contains(&0) {
-        return Err(malformed(
-            *cursor,
-            "GPU node dispatch-grid dimensions must be positive",
-        ));
-    }
     let input_record_size = read_index(bytes, cursor, "GPU node input record size")?;
     let output_count = read_index(bytes, cursor, "GPU node output count")?;
-    if output_count > bytes.len().saturating_sub(*cursor) as u64 / 4 {
+    if output_count > bytes.len().saturating_sub(*cursor) as u64 / 3 {
         return Err(malformed(
             *cursor,
             "GPU node output count exceeds the section size",
@@ -608,29 +580,13 @@ fn read_node(
             .and_then(|index| strings.get(index))
             .ok_or_else(|| malformed(name_offset, "GPU node output name is out of range"))?
             .to_owned();
-        if name.is_empty() {
-            return Err(malformed(name_offset, "GPU node output name is empty"));
-        }
-        let kind_offset = *cursor;
-        let kind = match read_byte(bytes, cursor, "GPU node output kind")? {
-            0 => GpuNodeOutputKind::Node,
-            1 => GpuNodeOutputKind::Mesh,
-            _ => return Err(malformed(kind_offset, "invalid GPU node output kind")),
-        };
         let record_size = read_index(bytes, cursor, "GPU node output record size")?;
         let maximum_records = read_index(bytes, cursor, "GPU node output maximum records")?;
-        if record_size == 0 || maximum_records == 0 {
-            return Err(malformed(
-                name_offset,
-                "GPU node output size and maximum records must be positive",
-            ));
-        }
         if !names.insert(name.clone()) {
             return Err(malformed(name_offset, "duplicate GPU node output name"));
         }
         outputs.push(GpuNodeOutput {
             name,
-            kind,
             record_size,
             maximum_records,
         });

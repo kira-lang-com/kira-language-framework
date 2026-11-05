@@ -1,18 +1,17 @@
 use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
+use tir_format::parse_tvisa_function_body;
 use tir_format::text::lex;
 use tir_target::{Architecture, known_features};
 use tvisa_format::{
-    TextCallingConvention, TextImage, TextItem, TextItemKind, TextSignature,
-    TextVariantArchitecture as VariantArchitecture, TextVariantKey as VariantKey,
-    TextVariantMember as VariantMember, TvisaImage,
+    TextCallingConvention, TextImage, TextItem, TextItemKind, TextSignature, TvisaImage,
 };
 
 use crate::assembly_constraints::{AssemblyArchitecture, verify_text_instruction};
 use crate::variant_text::{
-    atom, intrinsic_architecture, is_atom, is_punctuation, parse_function_variant, read_symbol,
-    significant,
+    VariantArchitecture, VariantKey, VariantMember, atom, intrinsic_architecture, is_atom,
+    is_punctuation, parse_function_variant, parse_set, read_symbol, significant,
 };
 
 const VFY12: Code = Code::new(Dialect::Tvisa, Area::Verifier, 12);
@@ -44,11 +43,21 @@ pub(super) fn verify_image(image: &TextImage) -> Vec<Diagnostic> {
         }
     }
 
-    for set in &image.variant_sets {
+    for item in &image.items {
+        if !matches!(item.kind, TextItemKind::Variants | TextItemKind::Dispatch) {
+            continue;
+        }
+        let members = match parse_set(image.item_text(*item)) {
+            Ok(members) => members,
+            Err((span, message)) => {
+                push(&mut diagnostics, item.span.start, span, message);
+                continue;
+            }
+        };
         verify_set(
             image,
-            set.span,
-            &set.members,
+            *item,
+            &members,
             &functions,
             &mut variant_membership,
             &mut diagnostics,
@@ -361,10 +370,8 @@ fn parse_function(
             None
         }
     };
-    let body_has_assembly = image
-        .function_body_for_item(item)
-        .and_then(|parsed| parsed.body.as_ref())
-        .is_some_and(|body| {
+    let body_has_assembly = match parse_tvisa_function_body(source) {
+        Ok(Some(body)) => {
             let mut has_assembly = false;
             for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
                 match instruction.opcode.as_str() {
@@ -426,7 +433,14 @@ fn parse_function(
                 }
             }
             has_assembly
-        });
+        }
+        Ok(None) => false,
+        Err(error) => {
+            // The body parser reports its own encoding diagnostic in the main verifier.
+            let _ = error;
+            false
+        }
+    };
     Some((
         name,
         FunctionRecord {
@@ -440,7 +454,7 @@ fn parse_function(
 
 fn verify_set(
     image: &TextImage,
-    set_span: Span,
+    item: TextItem,
     members: &[VariantMember],
     functions: &HashMap<String, FunctionRecord>,
     membership: &mut HashMap<String, Vec<Span>>,
@@ -455,7 +469,7 @@ fn verify_set(
         if !seen_keys.insert(member.key.clone()) {
             push(
                 diagnostics,
-                0,
+                item.span.start,
                 member.span,
                 "duplicate architecture and feature variant in set",
             );
@@ -463,7 +477,7 @@ fn verify_set(
         if !seen_functions.insert(member.function.clone()) {
             push(
                 diagnostics,
-                0,
+                item.span.start,
                 member.span,
                 format!(
                     "function @{} appears more than once in this set",
@@ -474,14 +488,14 @@ fn verify_set(
         membership
             .entry(member.function.clone())
             .or_default()
-            .push(member.span);
+            .push(shift(member.span, item.span.start));
 
-        validate_features(&member.key, member.span, 0, diagnostics);
+        validate_features(&member.key, member.span, item.span.start, diagnostics);
 
         let Some(function) = functions.get(&member.function) else {
             push(
                 diagnostics,
-                0,
+                item.span.start,
                 member.span,
                 format!(
                     "variant member @{} must name a defined TVISA function",
@@ -494,7 +508,7 @@ fn verify_set(
         if !same_variant(&member.key, function.variant.as_ref()) {
             push(
                 diagnostics,
-                0,
+                item.span.start,
                 member.span,
                 format!(
                     "variant member @{} must have a matching variant attribute",
@@ -505,7 +519,7 @@ fn verify_set(
         let Some(signature_name) = function.signature.as_deref() else {
             push(
                 diagnostics,
-                0,
+                item.span.start,
                 member.span,
                 format!("variant member @{} has no signature", member.function),
             );
@@ -524,7 +538,7 @@ fn verify_set(
         ) {
             push(
                 diagnostics,
-                0,
+                item.span.start,
                 member.span,
                 format!(
                     "variant member @{} must use a native CPU signature",
@@ -536,7 +550,7 @@ fn verify_set(
             if !same_signature(reference, signature) {
                 push(
                     diagnostics,
-                    0,
+                    item.span.start,
                     member.span,
                     format!(
                         "variant member @{} must have the same signature and ABI as its set",
@@ -569,7 +583,7 @@ fn verify_set(
             push(
                 diagnostics,
                 0,
-                set_span,
+                item.span,
                 "a variant set containing assembly requires feature-free aarch64, x64, and rv64 members",
             );
         }
@@ -577,7 +591,7 @@ fn verify_set(
         push(
             diagnostics,
             0,
-            set_span,
+            item.span,
             "a variant set without assembly requires a portable member or feature-free aarch64, x64, and rv64 members",
         );
     }

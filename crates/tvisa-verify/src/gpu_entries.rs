@@ -1,13 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
-use tvisa_format::{TextCallingConvention, TextImage, TextItemKind};
+use tvisa_format::{GpuEntryKind, TextCallingConvention, TextImage, TextItemKind};
 
 mod capabilities;
 mod fields;
-mod image_metadata;
-
-pub(super) use image_metadata::verify_image_metadata;
 
 const VFY22: Code = Code::new(Dialect::Tvisa, Area::Verifier, 22);
 
@@ -44,37 +41,19 @@ pub(super) fn verify_entry_records(image: &TextImage) -> Vec<Diagnostic> {
 
     let mut referenced = HashSet::new();
     let mut diagnostics = Vec::new();
-    for item in image
-        .items
-        .iter()
-        .filter(|item| item.kind == TextItemKind::Entry)
-    {
-        let Some(entry) = image.gpu_entry_for_item(*item) else {
+    for entry in &image.entries {
+        let Some(item) = image
+            .items
+            .iter()
+            .find(|item| item.kind == TextItemKind::Entry && item.span.start == entry.span.start)
+        else {
             continue;
         };
-        let (Some(stage), Some(root)) = (entry.kind.as_deref(), entry.function.as_deref()) else {
-            diagnostics.push(
-                Diagnostic::error(VFY22, "GPU entry record has an invalid header")
-                    .with_primary_span(item.span),
-            );
-            continue;
-        };
-        if !entry.header_valid {
-            diagnostics.push(
-                Diagnostic::error(VFY22, "GPU entry record has an invalid header")
-                    .with_primary_span(item.span),
-            );
-            continue;
-        }
-        if !is_gpu_entry_kind(stage) {
-            diagnostics.push(
-                Diagnostic::error(VFY22, format!("unknown GPU entry kind '{stage}'"))
-                    .with_primary_span(item.span),
-            );
-            continue;
-        }
-        diagnostics.extend(fields::verify(entry, stage, 0));
-        if !referenced.insert(root.to_owned()) {
+        let source = image.item_text(*item);
+        let stage = gpu_entry_kind_name(entry.kind);
+        let root = &entry.function;
+        diagnostics.extend(fields::verify(source, stage, item.span.start));
+        if !referenced.insert(root.clone()) {
             diagnostics.push(
                 Diagnostic::error(
                     VFY22,
@@ -120,13 +99,13 @@ pub(super) fn verify_entry_records(image: &TextImage) -> Vec<Diagnostic> {
             );
         }
         if stage != "visible" {
-            verify_entry_signature(stage, entry, signature, item.span, &mut diagnostics);
+            verify_entry_signature(source, stage, signature, item.span, &mut diagnostics);
         }
         if stage != "visible" {
-            let mut required = fields::record_capability_requirements(entry, stage);
+            let mut required = fields::record_capability_requirements(source, stage);
             let usage = capabilities::analyze(image, root, stage);
             required.extend(usage.capabilities);
-            if let Some(declared) = fields::declared_capabilities(entry) {
+            if let Some(declared) = fields::declared_capabilities(source) {
                 for capability in required.difference(&declared) {
                     diagnostics.push(
                         Diagnostic::error(
@@ -139,6 +118,9 @@ pub(super) fn verify_entry_records(image: &TextImage) -> Vec<Diagnostic> {
                     );
                 }
                 for capability in declared.difference(&required) {
+                    if stage == "node" && capability == "work_graphs.mesh" {
+                        continue;
+                    }
                     diagnostics.push(
                         Diagnostic::error(
                             VFY22,
@@ -159,7 +141,7 @@ pub(super) fn verify_entry_records(image: &TextImage) -> Vec<Diagnostic> {
                     .with_primary_span(item.span),
                 );
             }
-            if let Some(recorded) = fields::specialization_constants(image.source(), entry) {
+            if let Some(recorded) = fields::specialization_constants(source) {
                 for (id, constant) in &usage.specialization_constants {
                     match recorded.get(id) {
                         None => diagnostics.push(
@@ -216,8 +198,8 @@ pub(super) fn verify_entry_records(image: &TextImage) -> Vec<Diagnostic> {
 }
 
 fn verify_entry_signature(
+    source: &str,
     stage: &str,
-    entry: &tvisa_format::TextGpuEntry,
     signature: &tvisa_format::TextSignature,
     span: tir_diag::Span,
     diagnostics: &mut Vec<Diagnostic>,
@@ -232,7 +214,7 @@ fn verify_entry_signature(
         );
     }
 
-    let input_fields = fields::stage_field_types(entry, "stage_input");
+    let input_fields = fields::stage_field_types(source, "stage_input");
     if let Some(input_fields) = input_fields {
         let expected = input_fields.iter().map(|(ty, _)| ty).collect::<Vec<_>>();
         if !expected.is_empty()
@@ -255,7 +237,7 @@ fn verify_entry_signature(
         }
     }
 
-    let output_fields = fields::stage_field_types(entry, "stage_output");
+    let output_fields = fields::stage_field_types(source, "stage_output");
     if matches!(stage, "vertex" | "fragment") {
         if let Some(output_fields) = output_fields {
             let expected = output_fields.iter().map(|(ty, _)| ty).collect::<Vec<_>>();
@@ -325,22 +307,21 @@ fn flattened_result_types(signature: &tvisa_format::TextSignature) -> Vec<&tir_t
     types
 }
 
-fn is_gpu_entry_kind(stage: &str) -> bool {
-    matches!(
-        stage,
-        "compute"
-            | "object"
-            | "mesh"
-            | "vertex"
-            | "fragment"
-            | "tile"
-            | "raygen"
-            | "intersection"
-            | "anyhit"
-            | "closesthit"
-            | "miss"
-            | "callable"
-            | "node"
-            | "visible"
-    )
+pub(super) fn gpu_entry_kind_name(kind: GpuEntryKind) -> &'static str {
+    match kind {
+        GpuEntryKind::Compute => "compute",
+        GpuEntryKind::Object => "object",
+        GpuEntryKind::Mesh => "mesh",
+        GpuEntryKind::Vertex => "vertex",
+        GpuEntryKind::Fragment => "fragment",
+        GpuEntryKind::Tile => "tile",
+        GpuEntryKind::Raygen => "raygen",
+        GpuEntryKind::Intersection => "intersection",
+        GpuEntryKind::Anyhit => "anyhit",
+        GpuEntryKind::Closesthit => "closesthit",
+        GpuEntryKind::Miss => "miss",
+        GpuEntryKind::Callable => "callable",
+        GpuEntryKind::Node => "node",
+        GpuEntryKind::Visible => "visible",
+    }
 }

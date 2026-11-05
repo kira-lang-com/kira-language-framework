@@ -44,7 +44,8 @@ pub(super) fn borrow_arguments(module: &mut Module) -> bool {
     if borrowed.is_empty() {
         return false;
     }
-    for function in &mut module.functions {
+    for shared in &mut module.functions {
+        let function = std::sync::Arc::make_mut(shared);
         if let Some(parameters) = borrowed.get(&function.name) {
             lend(function, parameters);
         }

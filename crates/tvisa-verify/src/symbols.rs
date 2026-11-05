@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
-use tir_format::TextInstruction;
 use tir_format::text::{Token, TokenKind, lex};
+use tir_format::{TextInstruction, parse_tvisa_function_body};
 use tir_target::Profile;
-use tvisa_format::{
-    ImportModuleKind, TextCallingConvention, TextImage, TextImportPayload, TextItem, TextItemKind,
-};
+use tvisa_format::{TextCallingConvention, TextImage, TextItem, TextItemKind};
 
 #[path = "symbols/parsing.rs"]
 mod parsing;
@@ -21,10 +19,8 @@ const ENCODING: Code = Code::new(Dialect::Tvisa, Area::Encoding, 1);
 enum SymbolKind {
     Function,
     ImportedFunction,
-    PlatformImportedFunction,
     Data,
     ImportedData,
-    PlatformImportedData,
     PerCpuData,
     VariantSet,
     DispatchSet,
@@ -43,6 +39,7 @@ pub(super) fn verify_image(image: &TextImage) -> Vec<Diagnostic> {
     let mut functions = HashMap::new();
     let mut symbols: HashMap<String, Vec<SymbolKind>> = HashMap::new();
     for item in &image.items {
+        let source = image.item_text(*item);
         match item.kind {
             TextItemKind::Function => {
                 if let Some((name, record, mut errors)) = parse_function(image, *item) {
@@ -59,52 +56,34 @@ pub(super) fn verify_image(image: &TextImage) -> Vec<Diagnostic> {
                 }
             }
             TextItemKind::Import => {
-                if let Some(import) = image.import_for_item(*item) {
-                    match &import.payload {
-                        TextImportPayload::Function { .. } => {
-                            if let Some((name, record, errors)) =
-                                parse_function_import(image, import)
-                            {
-                                diagnostics.extend(errors);
-                                let kind = if import.module.kind == ImportModuleKind::Platform {
-                                    SymbolKind::PlatformImportedFunction
-                                } else {
-                                    SymbolKind::ImportedFunction
-                                };
-                                add_symbol(
-                                    &mut symbols,
-                                    &mut diagnostics,
-                                    name.clone(),
-                                    kind,
-                                    *item,
-                                );
-                                functions.insert(name, record);
-                            }
-                        }
-                        TextImportPayload::Data { .. } => {
-                            let kind = if import.module.kind == ImportModuleKind::Platform {
-                                SymbolKind::PlatformImportedData
-                            } else {
-                                SymbolKind::ImportedData
-                            };
-                            add_symbol(
-                                &mut symbols,
-                                &mut diagnostics,
-                                import.symbol.clone(),
-                                kind,
-                                *item,
-                            );
-                        }
-                    }
-                }
-            }
-            TextItemKind::Data => {
-                if let Some(data) = image.data_for_item(*item) {
+                if let Some((name, record, mut errors)) = parse_function_import(image, *item) {
+                    shift_all(&mut errors, item.span.start);
+                    diagnostics.extend(errors);
                     add_symbol(
                         &mut symbols,
                         &mut diagnostics,
-                        data.symbol.clone(),
-                        if data.per_cpu {
+                        name.clone(),
+                        SymbolKind::ImportedFunction,
+                        *item,
+                    );
+                    functions.insert(name, record);
+                } else if let Some(name) = parse_data_import(image, *item) {
+                    add_symbol(
+                        &mut symbols,
+                        &mut diagnostics,
+                        name,
+                        SymbolKind::ImportedData,
+                        *item,
+                    );
+                }
+            }
+            TextItemKind::Data => {
+                if let Some((name, _, per_cpu)) = crate::gpu_restrictions::data_record(source) {
+                    add_symbol(
+                        &mut symbols,
+                        &mut diagnostics,
+                        name,
+                        if per_cpu {
                             SymbolKind::PerCpuData
                         } else {
                             SymbolKind::Data
@@ -179,10 +158,7 @@ pub(super) fn verify_image(image: &TextImage) -> Vec<Diagnostic> {
             }
             cursor = next;
         }
-        if let Some(body) = image
-            .function_body_for_item(*item)
-            .and_then(|parsed| parsed.body.as_ref())
-        {
+        if let Ok(Some(body)) = parse_tvisa_function_body(source) {
             let signature_name = crate::gpu::function_signature_name(source);
             let caller_is_gpu = image
                 .signatures
@@ -222,27 +198,21 @@ fn verify_symbol_operand(
     instruction: &TextInstruction,
 ) {
     let expected = match instruction.opcode.as_str() {
-        "func.ref" => &[
-            SymbolKind::Function,
-            SymbolKind::ImportedFunction,
-            SymbolKind::PlatformImportedFunction,
-        ][..],
+        "func.ref" => &[SymbolKind::Function, SymbolKind::ImportedFunction][..],
         "global.addr" => &[
             SymbolKind::Data,
             SymbolKind::ImportedData,
-            SymbolKind::PlatformImportedData,
             SymbolKind::PerCpuData,
         ][..],
         "tls.addr" => &[SymbolKind::Data][..],
-        "foreign.addr" => &[SymbolKind::PlatformImportedFunction][..],
-        "foreign.data" => &[SymbolKind::PlatformImportedData][..],
+        "foreign.addr" => &[SymbolKind::ImportedFunction][..],
+        "foreign.data" => &[SymbolKind::ImportedData][..],
         "foreign.entry" => &[SymbolKind::Function][..],
         "kernel.percpu.addr" => &[SymbolKind::PerCpuData][..],
         "gpu.entry.ref" => &[SymbolKind::GpuEntry][..],
         "call" | "tail.call" | "invoke" | "call.variadic" => &[
             SymbolKind::Function,
             SymbolKind::ImportedFunction,
-            SymbolKind::PlatformImportedFunction,
             SymbolKind::VariantSet,
             SymbolKind::DispatchSet,
         ][..],
@@ -339,6 +309,16 @@ pub(super) fn function_is_exported(source: &str) -> bool {
     tokens
         .get(1)
         .is_some_and(|token| atom(token) == Some("exported"))
+}
+
+fn parse_data_import(image: &TextImage, item: TextItem) -> Option<String> {
+    let all_tokens = lex(image.item_text(item)).ok()?;
+    let tokens = significant(&all_tokens);
+    if tokens.len() < 4 || !is_atom(tokens[0], "import") || !is_atom(tokens[1], "data") {
+        return None;
+    }
+    let at = tokens.iter().position(|token| is_punctuation(token, '@'))?;
+    read_symbol_refs(&tokens, at).map(|(name, _, _)| name)
 }
 
 fn named_symbol(image: &TextImage, item: TextItem) -> Option<String> {
@@ -482,7 +462,7 @@ fn is_func_ref_operand(tokens: &[Token], at_offset: usize) -> bool {
         && is_atom(&tokens[at_index - 1], "ref")
 }
 
-fn forbidden_tag(tag: u32) -> bool {
+pub(super) fn forbidden_tag(tag: u32) -> bool {
     (tag & 0x000F_FFFF) == 0
         || (tag & 0xFFF) == 0x017
         || tag == 0xFA1E_0FF3

@@ -7,16 +7,14 @@ mod loadable;
 mod owned_values;
 mod profile;
 mod signatures;
-mod stack_allocations;
 mod static_access;
 mod structure;
 mod types;
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryCodeTable, BinaryConstantTable, BinaryFunctionBody, BinaryGenericTable,
-    BinaryGlobalTable, BinaryGpuTable, BinaryImport, BinarySignatureTable, BinaryTarget,
-    BinaryTypeTable, StringTable,
+    BinaryCodeTable, BinaryFunctionBody, BinaryGenericTable, BinaryGlobalTable, BinaryGpuTable,
+    BinaryImport, BinarySignatureTable, BinaryTypeTable, StringTable,
 };
 use tir_target::Profile;
 
@@ -26,16 +24,19 @@ pub(super) fn infer_value_types(
     body: &BinaryFunctionBody,
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
-    imports: Option<&[BinaryImport]>,
 ) -> Vec<Option<u64>> {
-    types::infer_value_types_with_imports(body, signatures, types, imports)
+    types::infer_value_types(body, signatures, types)
+}
+
+pub(super) fn is_type_trivial(types: &BinaryTypeTable, ty: u64) -> bool {
+    types::aggregate_instructions::is_trivial_type(types, ty)
 }
 
 pub(super) fn witness_or_vtable_function_type(
     instruction: &tir_format::BinaryInstruction,
     signatures: &BinarySignatureTable,
     generics: Option<&BinaryGenericTable>,
-    strings: Option<&StringTable>,
+    strings: Option<&tir_format::StringTable>,
     imports: Option<&[BinaryImport]>,
     globals: Option<&BinaryGlobalTable>,
 ) -> Option<u64> {
@@ -49,14 +50,6 @@ pub(super) fn witness_or_vtable_function_type(
     )
 }
 
-pub(super) fn verify_generic_witness_signatures(
-    generics: &BinaryGenericTable,
-    signatures: &BinarySignatureTable,
-    types: &BinaryTypeTable,
-) -> Vec<Diagnostic> {
-    signatures::verify_generic_witness_signatures(generics, signatures, types)
-}
-
 pub(super) fn verify(
     code: &BinaryCodeTable,
     signatures: &BinarySignatureTable,
@@ -66,7 +59,6 @@ pub(super) fn verify(
     imports: Option<&[BinaryImport]>,
     globals: Option<&BinaryGlobalTable>,
     gpu: Option<&BinaryGpuTable>,
-    constants: Option<&BinaryConstantTable>,
     module_profile: Profile,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -80,7 +72,24 @@ pub(super) fn verify(
             ));
             continue;
         }
-        let value_types = types::infer_value_types_with_imports(body, signatures, types, imports);
+        let value_types = types::infer_value_types(body, signatures, types);
+        diagnostics.extend(types::verify_function_references(
+            body,
+            signatures,
+            types,
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(types::verify_closure_contexts(
+            body,
+            &value_types,
+            types,
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(types::verify_closure_callbacks(
+            body,
+            types,
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
         if let Some(signature) = signature {
             diagnostics.extend(borrow_scopes::verify(body, &signature.name));
             diagnostics.extend(static_access::verify(body, &signature.name));
@@ -122,15 +131,7 @@ pub(super) fn verify(
                 &signature.name,
             ));
         }
-        let structured = signature.is_some_and(|signature| {
-            signature.structured
-                || matches!(signature.target, BinaryTarget::Gpu | BinaryTarget::Both)
-        });
-        diagnostics.extend(structure::verify_body(body, &value_types, structured));
-        diagnostics.extend(stack_allocations::verify(
-            body,
-            &signature.map_or("<unknown>", |s| s.name.as_str()),
-        ));
+        diagnostics.extend(structure::verify_body(body, &value_types));
         if let Some(signature) = signature {
             diagnostics.extend(types::verify_scalar_instructions(
                 body,
@@ -163,38 +164,6 @@ pub(super) fn verify(
                 types,
                 &signature.name,
             ));
-            if matches!(signature.target, BinaryTarget::Gpu | BinaryTarget::Both) {
-                diagnostics.extend(types::gpu::verify_texture_instructions(
-                    body,
-                    &value_types,
-                    types,
-                    &signature.name,
-                ));
-                diagnostics.extend(types::gpu::verify_ray_instructions(
-                    body,
-                    &value_types,
-                    types,
-                    &signature.name,
-                ));
-                diagnostics.extend(types::gpu::verify_advanced_instructions(
-                    body,
-                    &value_types,
-                    types,
-                    &signature.name,
-                ));
-                diagnostics.extend(types::gpu::verify_geometry_instructions(
-                    body,
-                    &value_types,
-                    types,
-                    &signature.name,
-                ));
-                diagnostics.extend(types::gpu::verify_collective_instructions(
-                    body,
-                    &value_types,
-                    types,
-                    &signature.name,
-                ));
-            }
             diagnostics.extend(heap::verify_body(
                 body,
                 &value_types,
@@ -218,7 +187,6 @@ pub(super) fn verify(
                 signatures,
                 types,
                 &value_types,
-                imports,
             ));
         }
     }
@@ -231,11 +199,10 @@ pub(super) fn verify(
         imports,
         globals,
         gpu,
-        constants,
         module_profile,
     ));
     diagnostics.extend(tir_uniformity::verify_binary_gpu_module(
-        code, signatures, gpu, generics, strings, imports,
+        code, signatures, gpu, strings,
     ));
     diagnostics
 }

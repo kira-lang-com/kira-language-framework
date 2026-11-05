@@ -34,14 +34,9 @@ pub(super) fn verify(
             continue;
         };
         for instruction in instructions {
-            if let Some(message) = verify_instruction(instruction, value_types, value_cursor, types)
+            if let Some((code, message)) =
+                verify_instruction(instruction, value_types, value_cursor, types)
             {
-                let code = if bitcast_v19_violation_for_instruction(instruction, value_types, types)
-                {
-                    V19
-                } else {
-                    V2
-                };
                 diagnostics.push(Diagnostic::error(
                     code,
                     format!(
@@ -61,18 +56,23 @@ fn verify_instruction(
     value_types: &[Option<u64>],
     result_index: usize,
     types: &BinaryTypeTable,
-) -> Option<String> {
+) -> Option<(Code, String)> {
     match instruction.opcode {
         0x020..=0x045 | 0x060..=0x092 | 0x0a0..=0x0ac => {
             if resolved_operands(instruction, value_types).is_none() {
-                return Some(format!(
-                    "opcode 0x{:03X} has an operand whose type cannot be inferred",
-                    instruction.opcode
+                return Some((
+                    V2,
+                    format!(
+                        "opcode 0x{:03X} has an operand whose type cannot be inferred",
+                        instruction.opcode
+                    ),
                 ));
             }
             match instruction.opcode {
-                0x020..=0x045 => verify_integer(instruction, value_types, result_index, types),
-                0x060..=0x092 => verify_float(instruction, value_types, result_index, types),
+                0x020..=0x045 => verify_integer(instruction, value_types, result_index, types)
+                    .map(|message| (V2, message)),
+                0x060..=0x092 => verify_float(instruction, value_types, result_index, types)
+                    .map(|message| (V2, message)),
                 0x0a0..=0x0ac => verify_conversion(instruction, value_types, types),
                 _ => None,
             }
@@ -217,7 +217,7 @@ fn verify_conversion(
     instruction: &BinaryInstruction,
     value_types: &[Option<u64>],
     types: &BinaryTypeTable,
-) -> Option<String> {
+) -> Option<(Code, String)> {
     let source = resolved_operands(instruction, value_types)?
         .first()
         .copied()?;
@@ -228,7 +228,13 @@ fn verify_conversion(
             BinaryOperand::Type(index) => Some(*index),
             _ => None,
         })?;
-    let valid = match instruction.opcode - 0x0a0 {
+    let function_bitcast = (instruction.opcode == 0x0ab)
+        .then(|| function_bitcast_compatible(types, source, target))
+        .flatten();
+    let valid = if let Some(valid) = function_bitcast {
+        valid
+    } else {
+        match instruction.opcode - 0x0a0 {
         0 => numeric_widths(types, source, target).is_some_and(|(from, to, same_shape)| {
             same_shape
                 && matches!((from, to), (NumericKind::Integer(a), NumericKind::Integer(b)) if a > b)
@@ -264,12 +270,21 @@ fn verify_conversion(
             numeric_widths(types, source, target),
             Some((NumericKind::Float(_), NumericKind::Float(_), true))
         ),
-        _ => false,
+            _ => false,
+        }
+    };
+    let code = if function_bitcast == Some(false) {
+        V19
+    } else {
+        V2
     };
     (!valid).then(|| {
-        format!(
-            "conversion opcode 0x{:03X} cannot convert type {source} to type {target}",
-            instruction.opcode
+        (
+            code,
+            format!(
+                "conversion opcode 0x{:03X} cannot convert type {source} to type {target}",
+                instruction.opcode
+            ),
         )
     })
 }
@@ -460,18 +475,17 @@ fn type_is_integer_width(types: &BinaryTypeTable, index: Option<u64>, width: u64
 }
 
 fn bitcast_compatible(types: &BinaryTypeTable, source: u64, target: u64) -> bool {
-    if bitcast_v19_violation(types, source, target) {
-        return false;
+    if let Some(valid) = function_bitcast_compatible(types, source, target) {
+        return valid;
     }
-    match (type_at(types, source), type_at(types, target)) {
-        (Some(BinaryType::Function(function)), Some(BinaryType::Pointer(0)))
-        | (Some(BinaryType::Pointer(0)), Some(BinaryType::Function(function))) => {
-            return function.foreign;
-        }
-        (Some(BinaryType::Closure { .. }), _) | (_, Some(BinaryType::Closure { .. })) => {
-            return false;
-        }
-        _ => {}
+    if matches!(
+        type_at(types, source),
+        Some(BinaryType::Function(_) | BinaryType::Closure { .. })
+    ) || matches!(
+        type_at(types, target),
+        Some(BinaryType::Function(_) | BinaryType::Closure { .. })
+    ) {
+        return false;
     }
     match (bit_size(types, source), bit_size(types, target)) {
         (Some(source_size), Some(target_size)) => source_size == target_size,
@@ -479,38 +493,18 @@ fn bitcast_compatible(types: &BinaryTypeTable, source: u64, target: u64) -> bool
     }
 }
 
-fn bitcast_v19_violation_for_instruction(
-    instruction: &BinaryInstruction,
-    value_types: &[Option<u64>],
-    types: &BinaryTypeTable,
-) -> bool {
-    if instruction.opcode != 0x0ab {
-        return false;
-    }
-    let Some(source) =
-        resolved_operands(instruction, value_types).and_then(|operands| operands.first().copied())
-    else {
-        return false;
-    };
-    let Some(target) = instruction
-        .operands
-        .iter()
-        .find_map(|operand| match operand {
-            BinaryOperand::Type(index) => Some(*index),
-            _ => None,
-        })
-    else {
-        return false;
-    };
-    bitcast_v19_violation(types, source, target)
-}
-
-fn bitcast_v19_violation(types: &BinaryTypeTable, source: u64, target: u64) -> bool {
+fn function_bitcast_compatible(types: &BinaryTypeTable, source: u64, target: u64) -> Option<bool> {
     match (type_at(types, source), type_at(types, target)) {
+        (Some(BinaryType::Function(left)), Some(BinaryType::Function(right))) => {
+            Some(left == right)
+        }
         (Some(BinaryType::Function(function)), Some(BinaryType::Pointer(0)))
-        | (Some(BinaryType::Pointer(0)), Some(BinaryType::Function(function))) => !function.foreign,
-        (Some(BinaryType::Function(_)), _) | (_, Some(BinaryType::Function(_))) => true,
-        _ => false,
+        | (Some(BinaryType::Pointer(0)), Some(BinaryType::Function(function))) => {
+            Some(function.foreign)
+        }
+        (Some(BinaryType::Function(_)), Some(BinaryType::Pointer(_)))
+        | (Some(BinaryType::Pointer(_)), Some(BinaryType::Function(_))) => Some(false),
+        _ => None,
     }
 }
 

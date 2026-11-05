@@ -33,16 +33,10 @@ klf-editor-gen = { path = "../klf-editor-gen" }
 tir-format = { path = "../tir-format" }
 tir-diag = { path = "../tir-diag" }
 tir-verify = { path = "../tir-verify" }
+tir-own = { path = "../tir-own" }
 tvisa-format = { path = "../tvisa-format" }
 tvisa-verify = { path = "../tvisa-verify" }
-klf-host-crypto = { path = "../klf-host-crypto" }
 serde_json = "1"
-serde = "1"
-serde_jcs = "0.2"
-base64 = "0.22"
-blake3 = "1.8"
-ml-dsa = { version = "0.1.2", features = ["pkcs8"] }
-zstd = "0.13"
 
 [dev-dependencies]
 klf-cranelift = { path = "../klf-cranelift" }

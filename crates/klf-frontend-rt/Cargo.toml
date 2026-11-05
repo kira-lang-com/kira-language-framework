@@ -8,6 +8,7 @@ rust-version.workspace = true
 crate-type = ["staticlib"]
 
 [dependencies]
+blake3 = "1"
 klf-args = { path = "../klf-args" }
 klf-core = { path = "../klf-core" }
 klf-diag = { path = "../klf-diag" }

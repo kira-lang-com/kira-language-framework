@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::paths::{framework, target_directory};
-use crate::process::{run_with_env, step};
+use crate::process::{run, run_with_env, step};
 use crate::release;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -82,7 +82,7 @@ pub fn command(arguments: &[String]) -> Result<(), String> {
             )
         })?;
     }
-    run_with_env(
+    run(
         &kira,
         [
             OsString::from("build"),
@@ -91,7 +91,6 @@ pub fn command(arguments: &[String]) -> Result<(), String> {
             manager_bootstrap.as_os_str().to_owned(),
         ],
         &checkout,
-        &bootstrap_environment,
     )?;
     require_file(&manager_bootstrap)?;
 

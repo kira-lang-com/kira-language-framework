@@ -13,9 +13,10 @@ klf-kir = { path = "../klf-kir" }
 klf-target = { path = "../klf-target" }
 klf-facts = { path = "../klf-facts" }
 klf-shader = { path = "../klf-shader" }
-tir-format = { path = "../tir-format" }
-tir-diag = { path = "../tir-diag" }
-tir-verify = { path = "../tir-verify" }
+
+[[bench]]
+name = "package_scaling"
+harness = false
 
 [lints]
 workspace = true

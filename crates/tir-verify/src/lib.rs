@@ -2,21 +2,15 @@
 
 mod atomic_order;
 mod binary_analysis;
-mod binary_capabilities;
 mod binary_code;
 mod binary_constants;
-mod binary_debug;
 mod binary_header_flags;
-mod binary_metadata;
-pub(crate) mod binary_record;
 mod binary_references;
-mod binary_ridl;
 mod binary_semantics;
-mod binary_symbols;
 mod binary_variants;
 mod borrow_scopes;
-pub(crate) mod capability_calls;
 mod conversion_types;
+mod definite_init;
 mod dominators;
 mod entry;
 mod gpu_profile;
@@ -24,17 +18,17 @@ mod instruction_types;
 mod model;
 mod platform;
 mod profile;
+mod ridl;
 mod runtime_engine;
 mod semantics;
 mod signature_types;
 mod ssa;
-mod stack_allocations;
 mod static_access;
 mod structured;
+#[cfg(test)]
+mod tests;
 mod text_cfg;
-mod text_debug;
 mod text_layout;
-mod text_metadata;
 mod text_modifiers;
 mod text_types;
 mod variant_text;
@@ -43,12 +37,6 @@ mod vector_text;
 
 use std::collections::{HashMap, HashSet};
 
-use binary_record::collect_record;
-
-pub use binary_capabilities::{
-    recompute_binary_module_capabilities, verify_binary_package_capabilities,
-};
-
 pub use dominators::DominatorTree;
 pub use model::{
     Block, Edge, Function, Instruction, Terminator, TerminatorKind, ValueDefinition, ValueUse,
@@ -56,7 +44,6 @@ pub use model::{
 pub use ssa::{
     VerifyOptions, terminator_is_s7_forbidden, verify_function, verify_text_value_dominance,
 };
-pub use structured::{StructuredGraphBlock, verify_structured_graph};
 pub use text_cfg::text_successors;
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
 use tir_format::{
@@ -105,6 +92,13 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
             &mut diagnostics,
         )
     });
+    if let (Some(types), Some(signatures)) = (&types, &signatures) {
+        diagnostics.extend(ridl::verify_binary_exports(
+            signatures,
+            types,
+            imports.as_deref(),
+        ));
+    }
     let generics = if let (Some(types), Some(signatures)) = (&types, &signatures) {
         collect_record(
             module.generics_table(memory_limit, types, signatures),
@@ -113,12 +107,6 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
     } else {
         None
     };
-    let ridl = collect_record(module.ridl_table(memory_limit), &mut diagnostics);
-    if let (Some(types), Some(signatures), Some(generics)) = (&types, &signatures, &generics) {
-        diagnostics.extend(binary_code::verify_generic_witness_signatures(
-            generics, signatures, types,
-        ));
-    }
     let code = signatures.as_ref().and_then(|signatures| {
         collect_record(
             module.code_table(memory_limit, signatures),
@@ -135,29 +123,23 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
     } else {
         None
     };
-    diagnostics.extend(binary_ridl::verify_exports(
-        ridl.as_ref(),
-        signatures.as_ref(),
-        globals.as_ref(),
-        types.as_ref(),
-    ));
     let analysis = collect_record(module.analysis_summary(memory_limit), &mut diagnostics);
-    diagnostics.extend(binary_header_flags::verify(
-        module.header.flags,
-        module_record.as_ref(),
-        signatures.as_ref(),
-        code.as_ref(),
-        analysis.as_ref(),
-    ));
-    let capabilities = collect_record(module.capabilities(memory_limit), &mut diagnostics);
-    let metadata = collect_record(module.metadata_table(memory_limit), &mut diagnostics);
-    let debug_table = collect_record(module.debug_table(memory_limit), &mut diagnostics).flatten();
     if let Some(module_record) = &module_record {
         diagnostics.extend(profile::verify_binary_module_profile(
             module.header.profile,
             module.header.platform,
             module_record.producer.as_ref(),
             module_record.source_hash.is_some(),
+        ));
+    }
+    if let (Some(module_record), Some(signatures), Some(analysis)) =
+        (&module_record, &signatures, &analysis)
+    {
+        diagnostics.extend(binary_header_flags::verify(
+            module.header.flags,
+            module_record.semantics,
+            signatures,
+            analysis,
         ));
     }
     if let Some(imports) = &imports {
@@ -167,23 +149,6 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
             imports,
             types.as_ref(),
             code.as_ref(),
-        ));
-    }
-    if let Some(capabilities) = &capabilities {
-        diagnostics.extend(binary_capabilities::verify(
-            capabilities,
-            imports.as_deref(),
-            module.header.profile,
-            module.header.platform,
-            (
-                module_record.as_ref(),
-                code.as_ref(),
-                signatures.as_ref(),
-                types.as_ref(),
-                globals.as_ref(),
-                generics.as_ref(),
-                strings.as_ref(),
-            ),
         ));
     }
     if let (Some(module_record), Some(imports), Some(types), Some(signatures)) =
@@ -233,7 +198,6 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
             signatures,
             types,
             analysis,
-            imports.as_deref(),
             module_record.producer.as_ref(),
         ));
     }
@@ -264,28 +228,7 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
             imports.as_deref(),
             globals.as_ref(),
             gpu.as_ref(),
-            constants.as_ref(),
             module.header.profile,
-        ));
-    }
-    if let (Some(signatures), Some(code), Some(imports)) = (&signatures, &code, &imports) {
-        diagnostics.extend(binary_symbols::verify_code_symbol_references(
-            code,
-            signatures,
-            imports,
-            globals.as_ref(),
-        ));
-    }
-    if let (Some(metadata), Some(signatures), Some(code), Some(types), Some(constants)) =
-        (&metadata, &signatures, &code, &types, &constants)
-    {
-        diagnostics.extend(binary_metadata::verify(
-            metadata,
-            signatures,
-            code,
-            types,
-            constants,
-            imports.as_deref(),
         ));
     }
     if let (Some(module_record), Some(signatures), Some(code)) =
@@ -295,18 +238,22 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
             module_record.semantics,
             signatures,
             code,
-            metadata.as_ref(),
-        ));
-    }
-    if let Some(debug_table) = &debug_table {
-        diagnostics.extend(binary_debug::verify(
-            debug_table,
-            signatures.as_ref(),
-            code.as_ref(),
-            globals.as_ref(),
         ));
     }
     diagnostics
+}
+
+fn collect_record<T>(
+    result: Result<T, tir_format::FormatError>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<T> {
+    match result {
+        Ok(record) => Some(record),
+        Err(error) => {
+            diagnostics.push(error.diagnostic);
+            None
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -430,6 +377,7 @@ pub fn verify_text_module(module: &TextModule, defaults: ControlFlowOptions) -> 
     let (mut layouts, layout_diagnostics) = text_layout::from_module(module);
     diagnostics.extend(layout_diagnostics);
     let policies = gpu_profile::policy::TypePolicies::from_module(module);
+    diagnostics.extend(ridl::verify_text_exports(module, &layouts, &policies));
     let call_conventions = signature_types::callable_conventions(module);
     diagnostics.extend(signature_types::verify_module_calls(
         module,
@@ -533,25 +481,29 @@ pub fn verify_text_module(module: &TextModule, defaults: ControlFlowOptions) -> 
                     }),
             );
         }
-        let value_types = text_types::inferred_value_types(
+        diagnostics.extend(
+            definite_init::verify(&body)
+                .into_iter()
+                .map(|mut diagnostic| {
+                    shift_diagnostic(&mut diagnostic, item.span.start);
+                    diagnostic
+                }),
+        );
+        let inferred_types = text_types::inferred_value_types_with_calls(
             source,
             &body,
             &layouts,
             &policies,
-            Some(&call_conventions),
+            &call_conventions,
         );
-        diagnostics.extend(text_metadata::verify(&body, &value_types).into_iter().map(
-            |mut diagnostic| {
-                shift_diagnostic(&mut diagnostic, item.span.start);
-                diagnostic
-            },
-        ));
-        diagnostics.extend(text_debug::verify(&body, &value_types).into_iter().map(
-            |mut diagnostic| {
-                shift_diagnostic(&mut diagnostic, item.span.start);
-                diagnostic
-            },
-        ));
+        diagnostics.extend(
+            text_cfg::verify_edge_types(&body, &inferred_types)
+                .into_iter()
+                .map(|mut diagnostic| {
+                    shift_diagnostic(&mut diagnostic, item.span.start);
+                    diagnostic
+                }),
+        );
         let options = item_options(source, item.kind, defaults);
         diagnostics.extend(
             text_types::verify_function(
@@ -596,9 +548,9 @@ pub fn verify_text_body(body: &FunctionBody, mut options: ControlFlowOptions) ->
         body,
         options.gpu || options.structured,
     ));
+    diagnostics.extend(verify_text_value_dominance(body));
     diagnostics.extend(borrow_scopes::verify(body));
     diagnostics.extend(static_access::verify(body));
-    diagnostics.extend(stack_allocations::verify(body));
     diagnostics
 }
 

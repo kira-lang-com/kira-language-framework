@@ -2,9 +2,10 @@ use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::text::{Token, TokenKind, lex};
 use tir_format::{
     BinaryCodeTable, BinaryImport, BinaryImportKind, BinaryType, BinaryTypeTable, FunctionBody,
-    TextItemKind, TextModule,
+    TextItemKind, TextModule, parse_type,
 };
 use tir_target::{Platform, Profile};
+use tir_types::{Abi, Type};
 
 const V13: Code = Code::new(Dialect::Tir, Area::Verifier, 13);
 const PLAT1: Code = Code::new(Dialect::Tir, Area::Platform, 1);
@@ -56,6 +57,7 @@ pub(super) fn verify_text_module(module: &TextModule) -> Vec<Diagnostic> {
                     .with_primary_span(item.span),
                 );
             }
+            diagnostics.extend(verify_platform_function_imports(source, &tokens, item.span));
         }
     }
 
@@ -73,6 +75,63 @@ pub(super) fn verify_text_module(module: &TextModule) -> Vec<Diagnostic> {
                     .with_primary_span(item.span),
                 );
             }
+        }
+    }
+    diagnostics
+}
+
+fn verify_platform_function_imports(
+    source: &str,
+    tokens: &[Token],
+    item_span: tir_diag::Span,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if atom(token) != Some("func") {
+            continue;
+        }
+        let Some(symbol_index) = (index + 1..tokens.len()).find(|cursor| {
+            is_punctuation(&tokens[*cursor], '@')
+                || matches!(
+                    tokens[*cursor].kind,
+                    TokenKind::Punctuation('}' | ',') | TokenKind::Newline
+                )
+        }) else {
+            continue;
+        };
+        if !is_punctuation(&tokens[symbol_index], '@') {
+            continue;
+        }
+        let Some((_, symbol_end, _)) = crate::variant_text::read_symbol(tokens, symbol_index)
+        else {
+            continue;
+        };
+        let Some(colon) = (symbol_end..tokens.len()).find(|cursor| {
+            matches!(tokens[*cursor].kind, TokenKind::Punctuation(':'))
+                || matches!(tokens[*cursor].kind, TokenKind::Punctuation(',' | '}'))
+        }) else {
+            continue;
+        };
+        if !is_punctuation(&tokens[colon], ':') {
+            continue;
+        }
+        let end = crate::signature_types::type_item_end(tokens, colon + 1);
+        let (Some(first), Some(last)) = (tokens.get(colon + 1), tokens.get(end.saturating_sub(1)))
+        else {
+            continue;
+        };
+        let Some(type_text) = source.get(first.span.start..last.span.end) else {
+            continue;
+        };
+        match parse_type(type_text) {
+            Ok(Type::Function(function)) if function.abi == Abi::C => {}
+            _ => diagnostics.push(
+                Diagnostic::error(
+                    PLAT1,
+                    "platform function imports must declare a function type with abi(c)",
+                )
+                .with_primary_span(item_span),
+            ),
         }
     }
     diagnostics
@@ -295,6 +354,17 @@ fn atom_at(tokens: &[Token], index: usize) -> Option<&str> {
     }
 }
 
-pub(super) fn is_libtessera_module(name: &str) -> bool {
+fn atom(token: &Token) -> Option<&str> {
+    match &token.kind {
+        TokenKind::Atom(atom) => Some(atom),
+        _ => None,
+    }
+}
+
+fn is_punctuation(token: &Token, expected: char) -> bool {
+    matches!(token.kind, TokenKind::Punctuation(character) if character == expected)
+}
+
+fn is_libtessera_module(name: &str) -> bool {
     name == "LibTessera" || name.starts_with("LibTessera.")
 }

@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::text::{Token, TokenKind, lex};
-use tir_format::{FunctionBody, TextFunctionSignature, TextModule, parse_function_signature};
+use tir_format::{
+    FunctionBody, TextFunctionSignature, TextInstruction, TextModule, parse_function_signature,
+};
 use tir_layout::LayoutEngine;
 use tir_types::{AddressSpace, FloatType, Type};
 
@@ -81,27 +83,12 @@ pub(super) fn verify(
             }
             pending.extend(successors[index].iter().copied());
         }
-        for capability in &required {
-            if !declared.contains(*capability) {
+        for capability in required {
+            if !declared.contains(capability) {
                 diagnostics.push(
                     Diagnostic::error(
                         V15,
                         format!("GPU entry uses undeclared capability '{capability}'"),
-                    )
-                    .with_primary_span(entry.item.span),
-                );
-            }
-        }
-        for capability in &declared {
-            if OPTIONAL_CAPABILITIES.contains(&capability.as_str())
-                && !required
-                    .iter()
-                    .any(|required| *required == capability.as_str())
-            {
-                diagnostics.push(
-                    Diagnostic::error(
-                        V15,
-                        format!("GPU entry declares unused capability '{capability}'"),
                     )
                     .with_primary_span(entry.item.span),
                 );
@@ -132,7 +119,7 @@ fn function_capabilities(
     }
     if entry_stage == "node" {
         required.insert("work_graphs");
-        if has_mesh_output(header) {
+        if has_atom(header, "mesh") {
             required.insert("work_graphs.mesh");
         }
     }
@@ -156,19 +143,14 @@ fn function_capabilities(
     {
         add_type_capabilities(&ty, policies, &mut required);
     }
-    let value_types =
-        crate::text_types::inferred_value_types(source, body, layouts, policies, None);
+    let value_types = crate::text_types::inferred_value_types(source, body, layouts, policies);
     for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
         let opcode = instruction.opcode.as_str();
         let tokens = &instruction.tokens;
         if matches!(opcode, "frag.imageblock.addr" | "tile.imageblock.addr") {
             required.insert("tile");
         }
-        if tir_format::parse_gpu_synchronization(instruction)
-            .ok()
-            .flatten()
-            .is_some_and(|sync| sync.memory.contains(tir_format::GpuMemoryDomain::Tile))
-        {
+        if matches!(opcode, "gpu.barrier" | "gpu.memfence") && has_atom(tokens, "tile") {
             required.insert("tile");
         }
         if opcode == "frag.load_attachment" {
@@ -202,6 +184,9 @@ fn function_capabilities(
         }
         if opcode.starts_with("node.") {
             required.insert("work_graphs");
+            if has_atom(tokens, "mesh") {
+                required.insert("work_graphs.mesh");
+            }
         }
         if opcode.starts_with("tex.") && has_atom(tokens, "sparse") {
             required.insert("sparse_residency");
@@ -215,14 +200,11 @@ fn function_capabilities(
             required.insert("shading_rate");
         }
         if opcode.starts_with("atomic.") {
-            if let Some(atomic_type) = atomic_value_type(source, instruction, &value_types) {
-                if matches!(atomic_type, Type::Float(FloatType::F16)) {
+            if let Some(ty) = atomic_type(source, instruction, &value_types) {
+                if matches!(ty, Type::Float(FloatType::F16)) {
                     required.insert("float16.atomics");
                 }
-                if layouts
-                    .layout(&atomic_type)
-                    .is_ok_and(|layout| layout.size == 16)
-                {
+                if matches!(layouts.layout(&ty), Ok(layout) if layout.size == 16) {
                     required.insert("atomic128");
                 }
             }
@@ -236,26 +218,28 @@ fn function_capabilities(
     required
 }
 
-fn atomic_value_type(
+fn atomic_type(
     source: &str,
-    instruction: &tir_format::TextInstruction,
+    instruction: &TextInstruction,
     value_types: &HashMap<String, Type>,
 ) -> Option<Type> {
     if instruction.opcode == "atomic.load" {
         return crate::text_types::explicit_type(source, instruction);
     }
-    let value_index = match instruction.opcode.as_str() {
-        "atomic.store" => 0,
-        "atomic.rmw" => 1,
-        "atomic.cmpxchg" => 2,
-        _ => return None,
+    let values = crate::ssa::text_value_uses(instruction);
+    let index = if instruction.opcode == "atomic.store" {
+        0
+    } else {
+        values.len().checked_sub(1)?
     };
-    let uses = crate::ssa::text_value_uses(instruction);
-    let (name, _) = uses.get(value_index)?;
+    let (name, _) = values.get(index)?;
     value_types.get(name).cloned()
 }
 
 fn add_type_capabilities(ty: &Type, policies: &TypePolicies, required: &mut HashSet<&'static str>) {
+    if policies.any_nested_type(ty, |nested| matches!(nested, Type::Float(FloatType::F64))) {
+        required.insert("float64");
+    }
     if policies.any_nested_type(ty, |nested| {
         matches!(
             nested,
@@ -371,14 +355,6 @@ fn entry_stage(header: &[Token]) -> Option<&str> {
 
 fn has_atom(tokens: &[Token], expected: &str) -> bool {
     tokens.iter().any(|token| atom(token) == Some(expected))
-}
-
-fn has_mesh_output(tokens: &[Token]) -> bool {
-    tokens.windows(3).any(|field| {
-        atom(&field[0]) == Some("kind")
-            && punctuation(&field[1], ':')
-            && atom(&field[2]) == Some("mesh")
-    })
 }
 
 fn atom_at(tokens: &[Token], index: usize) -> Option<&str> {

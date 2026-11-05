@@ -6,22 +6,12 @@ use crate::types::{
     BinaryGenericStrategy, BinaryLinkage, BinarySignature, BinarySignatureTable, BinaryTarget,
     BinaryType, BinaryTypeTable, BinaryVariantAttribute,
 };
-use crate::{BinaryModule, FormatError, SemanticsMode, StringTable};
-
-const MAX_SIGNATURE_COUNT: u64 = 1 << 32;
-const SIGNATURE_MODIFIER_MASK: u64 = 0b1_1111 << 41;
+use crate::{BinaryModule, FormatError, SemanticsMode};
 
 mod encode;
 
-impl BinarySignatureTable {
-    pub fn encode(
-        &self,
-        strings: &StringTable,
-        types: &BinaryTypeTable,
-    ) -> Result<Vec<u8>, FormatError> {
-        encode::encode_signature_table(self, strings, types)
-    }
-}
+const MAX_SIGNATURE_COUNT: u64 = 1 << 32;
+const SIGNATURE_MODIFIER_MASK: u64 = 0b1_1111 << 41;
 
 impl BinaryModule {
     /// Decodes SIGNATURES and validates its type and frame references.

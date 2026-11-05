@@ -502,12 +502,6 @@ impl FnLowerer<'_> {
             C::Truncate => self.builder.ins().ireduce(dst, operand),
             C::ZeroExtend => self.builder.ins().uextend(dst, operand),
             C::SignExtend => self.builder.ins().sextend(dst, operand),
-            C::SignedToSignedSaturating
-            | C::SignedToUnsignedSaturating
-            | C::UnsignedToSignedSaturating
-            | C::UnsignedToUnsignedSaturating => {
-                self.integer_to_int_saturating(kind, src, dst, operand)
-            }
             C::FloatTruncate => self.builder.ins().fdemote(dst, operand),
             C::FloatExtend => self.builder.ins().fpromote(dst, operand),
             C::SignedToFloat => self.builder.ins().fcvt_from_sint(dst, operand),
@@ -537,87 +531,6 @@ impl FnLowerer<'_> {
             C::FloatToUnsignedSaturating => self.builder.ins().fcvt_to_uint_sat(dst, operand),
         };
         self.define(results, out)
-    }
-
-    fn integer_to_int_saturating(
-        &mut self,
-        kind: ConvertKind,
-        src: types::Type,
-        dst: types::Type,
-        operand: Value,
-    ) -> Value {
-        use ConvertKind as C;
-        let source_signed = matches!(
-            kind,
-            C::SignedToSignedSaturating | C::SignedToUnsignedSaturating
-        );
-        let dest_signed = matches!(
-            kind,
-            C::SignedToSignedSaturating | C::UnsignedToSignedSaturating
-        );
-        let source_bits = src.bits();
-        let dest_bits = dst.bits();
-        let zero = self.builder.ins().iconst(src, 0);
-        let mut bounded = operand;
-
-        if source_signed {
-            if dest_signed && dest_bits < source_bits {
-                let (minimum, maximum) = signed_bounds(dest_bits);
-                let minimum_value = self.builder.ins().iconst(src, minimum as i64);
-                let below = self
-                    .builder
-                    .ins()
-                    .icmp(IntCC::SignedLessThan, bounded, minimum_value);
-                bounded = self.builder.ins().select(below, minimum_value, bounded);
-                let maximum_value = self.builder.ins().iconst(src, maximum as i64);
-                let above =
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::SignedGreaterThan, bounded, maximum_value);
-                bounded = self.builder.ins().select(above, maximum_value, bounded);
-            } else if !dest_signed {
-                let negative = self
-                    .builder
-                    .ins()
-                    .icmp(IntCC::SignedLessThan, bounded, zero);
-                bounded = self.builder.ins().select(negative, zero, bounded);
-                if dest_bits < source_bits {
-                    let maximum = unsigned_max(dest_bits) as i64;
-                    let maximum_value = self.builder.ins().iconst(src, maximum);
-                    let above =
-                        self.builder
-                            .ins()
-                            .icmp(IntCC::SignedGreaterThan, bounded, maximum_value);
-                    bounded = self.builder.ins().select(above, maximum_value, bounded);
-                }
-            }
-        } else if dest_signed && dest_bits <= source_bits {
-            let maximum = ((1u128 << (dest_bits - 1)) - 1) as i64;
-            let maximum_value = self.builder.ins().iconst(src, maximum);
-            let above = self
-                .builder
-                .ins()
-                .icmp(IntCC::UnsignedGreaterThan, bounded, maximum_value);
-            bounded = self.builder.ins().select(above, maximum_value, bounded);
-        } else if !dest_signed && dest_bits < source_bits {
-            let maximum = unsigned_max(dest_bits) as i64;
-            let maximum_value = self.builder.ins().iconst(src, maximum);
-            let above = self
-                .builder
-                .ins()
-                .icmp(IntCC::UnsignedGreaterThan, bounded, maximum_value);
-            bounded = self.builder.ins().select(above, maximum_value, bounded);
-        }
-
-        if src.bits() == dst.bits() {
-            bounded
-        } else if src.bits() > dst.bits() {
-            self.builder.ins().ireduce(dst, bounded)
-        } else if source_signed {
-            self.builder.ins().sextend(dst, bounded)
-        } else {
-            self.builder.ins().uextend(dst, bounded)
-        }
     }
 
     #[allow(clippy::cast_precision_loss)]

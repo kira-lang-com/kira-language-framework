@@ -55,13 +55,14 @@ members = [
     "crates/tir-layout",
     "crates/tir-uniformity",
     "crates/tir-verify",
+    "crates/tir-own",
     "crates/tvisa-format",
     "crates/tvisa-verify",
     "xtask",
 ]
 
 [workspace.package]
-version = "26.10.4"
+version = "26.11.1"
 edition = "2024"
 rust-version = "1.96"
 

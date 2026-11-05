@@ -224,13 +224,17 @@ fn is_byte_string_operand(tokens: &[Token], string_index: usize) -> bool {
         .iter()
         .rposition(|token| matches!(token.kind, TokenKind::Newline))
         .map_or(0, |index| index + 1);
-    tokens[line_start..string_index - 1]
-        .windows(3)
-        .any(|window| {
-            atom(&window[0]) == Some("const")
-                && matches!(window[1].kind, TokenKind::Punctuation('.'))
-                && atom(&window[2]) == Some("bytes")
-        })
+    let prefix = &tokens[line_start..string_index - 1];
+    if string_index >= line_start + 3
+        && matches!(tokens[string_index - 2].kind, TokenKind::Punctuation('='))
+    {
+        return true;
+    }
+    prefix.windows(3).any(|window| {
+        atom(&window[0]) == Some("const")
+            && matches!(window[1].kind, TokenKind::Punctuation('.'))
+            && atom(&window[2]) == Some("bytes")
+    })
 }
 
 fn process_top_level_line(

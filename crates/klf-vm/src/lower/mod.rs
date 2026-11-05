@@ -132,7 +132,7 @@ fn lower(module: &Module, trace: bool) -> Result<(Program, Traces), LowerError> 
     let declared: HashMap<&str, &Function> = module
         .functions
         .iter()
-        .map(|function| (function.name.as_str(), function))
+        .map(|function| (function.name.as_str(), function.as_ref()))
         .collect();
     let tables = ModuleTables {
         functions: &declared,
@@ -203,21 +203,31 @@ fn foreign_calls(module: &Module) -> Option<Module> {
         return None;
     }
     let mut rewritten = module.clone();
-    for instruction in rewritten
-        .functions
-        .iter_mut()
-        .flat_map(|function| &mut function.blocks)
-        .flat_map(|block| &mut block.instructions)
-    {
-        if let Operation::Call {
-            callee, arguments, ..
-        } = &instruction.operation
-            && foreign.contains(callee.as_str())
+    for shared in &mut rewritten.functions {
+        if !shared
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| calls_foreign(&instruction.operation))
         {
-            instruction.operation = Operation::CallForeign {
-                symbol: callee.clone(),
-                arguments: arguments.clone(),
-            };
+            continue;
+        }
+        let function = std::sync::Arc::make_mut(shared);
+        for instruction in function
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+        {
+            if let Operation::Call {
+                callee, arguments, ..
+            } = &instruction.operation
+                && foreign.contains(callee.as_str())
+            {
+                instruction.operation = Operation::CallForeign {
+                    symbol: callee.clone(),
+                    arguments: arguments.clone(),
+                };
+            }
         }
     }
     Some(rewritten)

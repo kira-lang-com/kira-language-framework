@@ -165,20 +165,18 @@ fn permissive_form(instruction: &tir_format::TextInstruction) -> Option<&'static
     let metadata = metadata_names(&instruction.tokens);
     if let Some(name) = metadata
         .iter()
-        .find(|name| matches!(name.as_str(), "noalias" | "alias.scope" | "tbaa"))
+        .find(|name| matches!(**name, "noalias" | "alias.scope" | "tbaa"))
     {
-        return Some(match name.as_str() {
+        return Some(match *name {
             "noalias" => "!noalias metadata",
             "alias.scope" => "!alias.scope metadata",
             _ => "!tbaa metadata",
         });
     }
-    if matches!(
-        opcode,
-        "load" | "load.borrow" | "raw.load" | "atomic.load" | "mmio.load"
-    ) && metadata
-        .iter()
-        .any(|name| matches!(name.as_str(), "range" | "nonnull" | "align"))
+    if opcode == "load"
+        && metadata
+            .iter()
+            .any(|name| matches!(*name, "range" | "nonnull" | "align"))
     {
         return Some("load metadata assertion");
     }
@@ -217,32 +215,12 @@ fn leading_modifiers(tokens: &[Token]) -> Vec<&str> {
     modifiers
 }
 
-fn metadata_names(tokens: &[Token]) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut cursor = 0;
-    while cursor + 1 < tokens.len() {
-        if !matches!(tokens[cursor].kind, TokenKind::Punctuation('!')) {
-            cursor += 1;
-            continue;
-        }
-        let Some(TokenKind::Atom(first)) = tokens.get(cursor + 1).map(|token| &token.kind) else {
-            cursor += 1;
-            continue;
-        };
-        let mut name = first.clone();
-        cursor += 2;
-        while cursor + 1 < tokens.len()
-            && matches!(tokens[cursor].kind, TokenKind::Punctuation('.'))
-        {
-            let Some(TokenKind::Atom(component)) = tokens.get(cursor + 1).map(|token| &token.kind)
-            else {
-                break;
-            };
-            name.push('.');
-            name.push_str(component);
-            cursor += 2;
-        }
-        names.push(name);
-    }
-    names
+fn metadata_names(tokens: &[Token]) -> Vec<&str> {
+    tokens
+        .windows(2)
+        .filter_map(|pair| match (&pair[0].kind, &pair[1].kind) {
+            (TokenKind::Punctuation('!'), TokenKind::Atom(name)) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect()
 }

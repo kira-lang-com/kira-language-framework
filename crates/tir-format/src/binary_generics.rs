@@ -4,9 +4,9 @@ use crate::leb::{LebError, read_uleb};
 use crate::types::{BinaryGenericParameter, BinarySignatureTable, BinaryType, BinaryTypeTable};
 use crate::{BinaryModule, FormatError, StringTable};
 
-const MAX_RECORDS: u64 = 1 << 32;
-
 mod encode;
+
+const MAX_RECORDS: u64 = 1 << 32;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BinaryGenericTable {
@@ -66,17 +66,6 @@ pub struct BinaryVTable {
 pub struct BinaryVTableSlot {
     pub slot: u64,
     pub function_index: u64,
-}
-
-impl BinaryGenericTable {
-    pub fn encode(
-        &self,
-        strings: &StringTable,
-        types: &BinaryTypeTable,
-        signatures: &BinarySignatureTable,
-    ) -> Result<Vec<u8>, FormatError> {
-        encode::encode_generics(self, strings, types, signatures)
-    }
 }
 
 impl BinaryModule {

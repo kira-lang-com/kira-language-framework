@@ -64,6 +64,7 @@ services! {
     klfsvc_source_path_exists, (a0: i64, a1: *mut u8, a2: i64), i64;
     klfsvc_source_directory, (a0: i64, a1: *mut u8, a2: i64, a3: *mut u8, a4: i64), i64;
     klfsvc_source_directory_file, (a0: i64, a1: i64), i64;
+    klfsvc_source_directory_child, (a0: i64, a1: *mut u8, a2: i64, a3: *mut u8, a4: i64), i64;
     klfsvc_editor_mode, (), i64;
     klfsvc_editor_project_field, (a0: i64, a1: *mut u8, a2: i64), i64;
     klfsvc_format_text, (a0: *mut u8, a1: i64), i64;

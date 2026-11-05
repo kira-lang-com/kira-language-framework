@@ -6,21 +6,10 @@ use tir_types::{FloatType, Type};
 use crate::ssa::text_instruction_operands_start;
 
 mod specialization;
-pub(super) mod subgroup;
 
-use specialization::{
-    specialization_constant_default_is_valid, specialization_constant_key as parse_specialization,
-    specialization_constant_type,
-};
+use specialization::{specialization_constant_default_is_valid, specialization_constant_type};
 
 const V2: Code = Code::new(Dialect::Tir, Area::Verifier, 2);
-
-pub(crate) fn specialization_constant_key(
-    source: &str,
-    instruction: &TextInstruction,
-) -> Option<(u32, Type, Vec<String>)> {
-    parse_specialization(source, instruction)
-}
 
 pub(crate) fn verify(
     source: &str,
@@ -85,13 +74,6 @@ pub(crate) fn verify(
                 );
             }
         }
-        "frag.load_attachment" if !attachment_index_is_valid(instruction) => {
-            error(
-                &mut diagnostics,
-                instruction,
-                "frag.load_attachment requires one unsigned 32-bit attachment index",
-            );
-        }
         _ => {}
     }
     let result_count = super::texture_types::result_arity(instruction)
@@ -115,7 +97,7 @@ pub(crate) fn verify(
     diagnostics.extend(super::ray_types::verify(instruction, operands));
     diagnostics.extend(super::advanced_types::verify(source, instruction, operands));
     diagnostics.extend(super::sync::verify(instruction));
-    diagnostics.extend(subgroup::verify(instruction, operands));
+    verify_subgroup_types(instruction, operands, &mut diagnostics);
     diagnostics
 }
 
@@ -242,26 +224,59 @@ pub(crate) fn expected_operand_count(opcode: &str) -> Option<usize> {
         | "coop.mma" => 3,
         "rq.init" => 8,
         "rt.trace" => 11,
-        "rt.hitobject.trace" => 10,
-        "rt.ignore_hit" | "rt.accept_and_end" => 0,
         "coop.fill" => 1,
         "coop.load" => 2,
         _ => return None,
     })
 }
 
-fn attachment_index_is_valid(instruction: &TextInstruction) -> bool {
-    let tokens = &instruction.tokens;
-    let mut operands = tokens
-        .iter()
-        .skip(text_instruction_operands_start(tokens))
-        .filter(|token| !matches!(token.kind, TokenKind::Newline | TokenKind::End));
-    let Some(index) = operands.next().and_then(atom) else {
-        return false;
-    };
-    operands.next().is_none()
-        && tir_format::numeric_literals::parse_unsigned_integer(index)
-            .is_some_and(|index| index <= u128::from(u32::MAX))
+fn verify_subgroup_types(
+    instruction: &TextInstruction,
+    operands: &[Type],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match instruction.opcode.as_str() {
+        "gpu.ddx" | "gpu.ddy" | "gpu.fwidth" => {
+            if operands.first().is_some_and(|ty| !is_float_value(ty)) {
+                error(
+                    diagnostics,
+                    instruction,
+                    format!("{} requires a floating-point value", instruction.opcode),
+                );
+            }
+        }
+        "quad.all" | "quad.any" | "subgroup.all" | "subgroup.any" | "subgroup.ballot" => {
+            if operands.first().is_some_and(|ty| ty != &Type::Integer(1)) {
+                error(
+                    diagnostics,
+                    instruction,
+                    format!("{} requires an i1 value", instruction.opcode),
+                );
+            }
+        }
+        "subgroup.all_equal" => {
+            if operands.first().is_some_and(|ty| !is_scalar_value(ty)) {
+                error(
+                    diagnostics,
+                    instruction,
+                    "subgroup.all_equal requires a scalar value",
+                );
+            }
+        }
+        "subgroup.inverse_ballot"
+        | "subgroup.ballot_bit_count"
+        | "subgroup.ballot_find_lsb"
+        | "subgroup.ballot_find_msb" => {
+            if operands.first().is_some_and(|ty| ty != &ballot_type()) {
+                error(
+                    diagnostics,
+                    instruction,
+                    format!("{} requires vec<4 x i32>", instruction.opcode),
+                );
+            }
+        }
+        _ => {}
+    }
 }
 
 fn is_gpu_opcode(opcode: &str) -> bool {

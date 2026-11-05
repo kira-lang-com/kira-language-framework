@@ -1,6 +1,6 @@
 //! Building a Kira-written frontend into the kernel's native driver.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,7 +9,9 @@ use klf_core::FileId;
 use klf_defsvc::FrontendMetadata;
 use klf_ridl::module::{Convention, ItemKind, Module};
 use klf_ridl::types::{Scalar, Type};
-use klf_services::{DefinitionPackage, DefinitionSource, Session};
+use klf_services::{
+    DefinitionArtifact, DefinitionPackage, DefinitionSource, DefinitionUnit, QueryPhase, Session,
+};
 use klf_target::Target;
 
 use crate::{BuiltFrontend, Profile};
@@ -36,7 +38,7 @@ pub(crate) fn build(
     languages: &[&Path],
     profile: Profile,
 ) -> Result<BuiltFrontend, String> {
-    let (descriptor, metadata) = frontend_metadata(session, root, target)?;
+    let (descriptor, metadata, module) = frontend_metadata(session, root, target)?;
     if descriptor.shader.is_none() && !languages.is_empty() {
         return Err("additional language packages require a shader frontend".to_owned());
     }
@@ -49,6 +51,7 @@ pub(crate) fn build(
         profile,
         &descriptor,
         &metadata,
+        &module,
     )
 }
 
@@ -56,8 +59,9 @@ fn frontend_metadata(
     session: &mut Session,
     root: &Path,
     target: &Target,
-) -> Result<(klf_services::LanguageDescriptor, FrontendMetadata), String> {
+) -> Result<(klf_services::LanguageDescriptor, FrontendMetadata, String), String> {
     let (package, definition) = read_package(session, root)?;
+    let module = package_module(session, root, &package)?;
     let descriptor = &definition.descriptor;
     let mut metadata = FrontendMetadata::from_descriptor(descriptor, target.triple());
     metadata.materializes = [true; 4];
@@ -93,7 +97,7 @@ fn frontend_metadata(
         klf_defsvc::driver_cli::validate(&metadata)?;
     }
 
-    Ok((definition.descriptor, metadata))
+    Ok((definition.descriptor, metadata, module))
 }
 
 /// Whether a package supplies a Kira-written language frontend.
@@ -118,8 +122,8 @@ pub fn descriptor(
 /// # Errors
 /// Returns a diagnostic if the metadata, compiler, or phase contract is invalid.
 pub fn check(session: &mut Session, root: &Path, target: &Target) -> Result<(), String> {
-    let (_, definition) = read_package(session, root)?;
-    let module_name = package_module(session, root)?;
+    let (package, definition) = read_package(session, root)?;
+    let module_name = package_module(session, root, &package)?;
     if definition.descriptor.shader.is_none() {
         klf_defsvc::driver_cli::validate(&FrontendMetadata::from_descriptor(
             &definition.descriptor,
@@ -160,13 +164,46 @@ pub fn check(session: &mut Session, root: &Path, target: &Target) -> Result<(), 
     )
 }
 
-fn package_module(session: &mut Session, root: &Path) -> Result<String, String> {
-    use klf_kira_syntax::{TokenKind, ast::DeclKind};
+fn package_module(
+    session: &mut Session,
+    root: &Path,
+    package: &DefinitionPackage,
+) -> Result<String, String> {
     let path = root.join("package.kira");
-    let text =
-        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let id = session.add_file(path.to_string_lossy().as_ref(), text);
-    let parsed = klf_kira_syntax::parse(session.file(id));
+    let manifest = package
+        .sources()
+        .iter()
+        .find(|source| source.name.as_ref() == "package.kira")
+        .ok_or_else(|| format!("cannot read {} from the loaded package", path.display()))?;
+    let id = session.upsert_file(
+        path.to_string_lossy().as_ref(),
+        std::sync::Arc::clone(&manifest.text),
+    );
+    let unit = DefinitionUnit::new(id);
+    if let Some(artifact) = session.cached_artifact("klf-package", &unit, QueryPhase::Parse) {
+        return artifact
+            .downcast_ref::<String>(session)
+            .cloned()
+            .ok_or_else(|| format!("cached package module is invalid for {}", path.display()));
+    }
+    let query = session.begin_derived_query("klf-package", &unit, QueryPhase::Parse);
+    let result = package_module_from_source(session, &path, id);
+    if let Ok(module) = &result {
+        let artifact = DefinitionArtifact::new(session, unit, module.clone());
+        session.cache_artifact("klf-package", QueryPhase::Parse, &artifact);
+    }
+    session.finish_query(query);
+    result
+}
+
+fn package_module_from_source(
+    session: &mut Session,
+    path: &Path,
+    id: FileId,
+) -> Result<String, String> {
+    use klf_kira_syntax::{TokenKind, ast::DeclKind};
+    let parsed = klf_kira_lower::parse_registered_file(session, id)
+        .ok_or_else(|| format!("cannot parse {}", path.display()))?;
     let construct = parsed
         .file
         .decls
@@ -237,16 +274,20 @@ pub(crate) fn read_package(
     String,
 > {
     let source = root.join("app/Language.kira");
-    let text = std::fs::read_to_string(&source)
-        .map_err(|error| format!("cannot read {}: {error}", source.display()))?;
-    let id = session.add_file(source.to_string_lossy().as_ref(), text);
-    let parsed = klf_kira_syntax::parse(session.file(id));
-    for diagnostic in parsed.diagnostics {
-        session.report(diagnostic);
-    }
+    let package = read_sources(root)?;
+    let language_source = package
+        .sources()
+        .iter()
+        .find(|candidate| candidate.name.as_ref() == "app/Language.kira")
+        .ok_or_else(|| format!("cannot read language metadata in {}", source.display()))?;
+    let id = session.upsert_file(
+        source.to_string_lossy().as_ref(),
+        std::sync::Arc::clone(&language_source.text),
+    );
+    let parsed = klf_kira_lower::parse_registered_file(session, id)
+        .ok_or_else(|| format!("cannot read language metadata in {}", source.display()))?;
     let definition = klf_kira_lower::extract_language_metadata(session, &parsed.file)
         .ok_or_else(|| format!("cannot read language metadata in {}", source.display()))?;
-    let package = read_sources(root)?;
     Ok((package, definition))
 }
 
@@ -259,6 +300,7 @@ fn build_library(
     profile: Profile,
     descriptor: &klf_services::LanguageDescriptor,
     metadata: &FrontendMetadata,
+    module: &str,
 ) -> Result<BuiltFrontend, String> {
     let home = crate::kernel::archive_home().ok_or("no KLF distribution for the Kira frontend")?;
     let library = home.join("share/klf/KLF");
@@ -270,18 +312,16 @@ fn build_library(
     }
     let compiler = std::env::var_os("KLF_KIRA").unwrap_or_else(|| "kira".into());
     let scratch = Scratch::new()?;
-    let mut modules = Vec::new();
+    let mut modules = HashSet::from([module.to_owned()]);
     let mut objects = Vec::new();
     let mut archives = Vec::new();
-    let mut seen = vec![
-        root.canonicalize()
-            .map_err(|error| format!("{}: {error}", root.display()))?,
-    ];
-    let module = package_module(session, root)?;
+    let root_identity = root
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", root.display()))?;
+    let mut seen = HashSet::from([root_identity]);
     let (component_objects, archive) = compile_component(
-        root, &module, metadata, 0, &compiler, &home, &library, profile, &scratch,
+        root, module, metadata, 0, &compiler, &home, &library, profile, &scratch,
     )?;
-    modules.push(module);
     objects.extend(component_objects);
     archives.push(archive);
     append_languages(
@@ -333,11 +373,11 @@ pub(crate) fn build_with_kcore_primary(
     }
     let compiler = std::env::var_os("KLF_KIRA").unwrap_or_else(|| "kira".into());
     let scratch = Scratch::new()?;
-    let mut seen = vec![
-        root.canonicalize()
-            .map_err(|error| format!("{}: {error}", root.display()))?,
-    ];
-    let mut modules = Vec::new();
+    let root_identity = root
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", root.display()))?;
+    let mut seen = HashSet::from([root_identity]);
+    let mut modules = HashSet::new();
     let mut objects = vec![scratch.write("primary.o", primary)?];
     let mut archives = Vec::new();
     append_languages(
@@ -593,83 +633,5 @@ impl Drop for Scratch {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const REQUIRED: &str = "\
-function klfFrontendUnits(a: I64, b: I64) -> I64\n\
-function klfFrontendParse(a: I64, b: I64, c: I64) -> I64\n\
-function klfFrontendElaborate(a: I64, b: I64, c: I64) -> I64\n\
-function klfFrontendLower(a: I64, b: I64, c: I64) -> I64\n\
-function klfFrontendBegin() -> I64\n\
-function klfFrontendDispose() -> I64\n";
-
-    #[test]
-    fn format_entry_is_required_only_when_the_hook_is_declared() {
-        let parse =
-            |text: &str| klf_ridl::parse(FileId::from_u32(0), "KLFFrontend", text).expect("RIDL");
-        assert!(validate_entries(&parse(REQUIRED), false, false, false, false, false).is_ok());
-        assert!(
-            validate_entries(&parse(REQUIRED), true, false, false, false, false)
-                .unwrap_err()
-                .contains("klfFrontendFormat")
-        );
-        let wrong = format!("{REQUIRED}function klfFrontendFormat(a: I64) -> I64\n");
-        assert!(
-            validate_entries(&parse(&wrong), true, false, false, false, false)
-                .unwrap_err()
-                .contains("wrong RIDL signature")
-        );
-        let correct =
-            format!("{REQUIRED}function klfFrontendFormat(a: I64, b: I64, c: I64) -> I64\n");
-        assert!(validate_entries(&parse(&correct), true, false, false, false, false).is_ok());
-        assert!(
-            validate_entries(&parse(&correct), true, true, false, false, false)
-                .unwrap_err()
-                .contains("klfFrontendCompatDriver")
-        );
-        let both = format!("{correct}function klfFrontendCompatDriver(count: I64) -> I64\n");
-        assert!(validate_entries(&parse(&both), true, true, false, false, false).is_ok());
-        assert!(
-            validate_entries(&parse(&both), true, true, true, false, false)
-                .unwrap_err()
-                .contains("klfFrontendRunProgram")
-        );
-        let all = format!("{both}function klfFrontendRunProgram(count: I64, total: I64) -> I64\n");
-        assert!(validate_entries(&parse(&all), true, true, true, false, false).is_ok());
-    }
-
-    #[test]
-    fn shader_emit_requires_a_matching_entry_and_dispatches_it() {
-        let parse =
-            |text: &str| klf_ridl::parse(FileId::from_u32(0), "KLFFrontend", text).expect("RIDL");
-        assert!(
-            validate_entries(&parse(REQUIRED), false, false, false, false, true)
-                .unwrap_err()
-                .contains("klfFrontendEmit")
-        );
-        let contract = format!("{REQUIRED}function klfFrontendEmit(unit: I64) -> I64\n");
-        assert!(validate_entries(&parse(&contract), false, false, false, false, true).is_ok());
-        let source = trampoline("metadata", false, false, false, false, true);
-        assert!(source.contains("case 6: return KLFFrontend_klfFrontendEmit(a);"));
-    }
-
-    #[test]
-    fn package_module_after_kira_dependencies_overrides_construct_name() {
-        let scratch = Scratch::new().unwrap();
-        scratch
-            .write(
-                "package.kira",
-                br#"construct Original extends Package {
-            let dependencies: [Dependency] = [Dependency { name: "KLF", path: "../KLF" }]
-            let moduleRoot: String = "AnotherFrontend"
-        }"#,
-            )
-            .unwrap();
-        let mut session = Session::new("x86_64-pc-windows-msvc".parse().unwrap());
-        assert_eq!(
-            package_module(&mut session, &scratch.0).unwrap(),
-            "AnotherFrontend"
-        );
-    }
-}
+#[path = "kira_frontend/tests.rs"]
+mod tests;

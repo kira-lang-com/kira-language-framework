@@ -6,6 +6,7 @@
 
 use klf_core::Name;
 use klf_source::Span;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Ident {
@@ -21,8 +22,8 @@ pub struct Path {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct File {
-    pub imports: Vec<Import>,
-    pub decls: Vec<Decl>,
+    pub imports: Vec<Arc<Import>>,
+    pub decls: Vec<Arc<Decl>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

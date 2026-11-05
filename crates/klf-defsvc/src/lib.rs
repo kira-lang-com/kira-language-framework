@@ -76,10 +76,6 @@ use klf_services::{
     DriverFlagValue, Exclusivity, FunctionBuilder, MemoryModel, ModuleBuilder, Session,
     SessionHandle, UnitId,
 };
-pub use klf_services::{
-    TirBlockBuilder, TirFunctionBuilder, TirFunctionParameter, TirFunctionSignature,
-    TirModuleBuildError, TirModuleBuilder,
-};
 use klf_source::Span;
 use klf_target::Target;
 use std::collections::{HashMap, HashSet};
@@ -128,6 +124,8 @@ pub struct DefinitionServiceState {
     /// can read a unit other than its own (section 8.1: a `SourceFile` carries
     /// its text).
     sources: Vec<(FileId, String, std::sync::Arc<str>)>,
+    /// Filesystem identities captured with the corresponding source texts.
+    source_identities: Vec<Option<klf_services::FileIdentity>>,
     /// `source_hash` of each entry of `sources`, computed once.
     source_hashes: Vec<u64>,
     /// The first entry of `sources` with each hash, for the entries before
@@ -147,6 +145,8 @@ pub struct DefinitionServiceState {
     expansions: Vec<klf_services::Expansion>,
     /// The files of the last `klf.source.directory` call.
     listing: Vec<FileId>,
+    /// Immediate names of directories queried during this phase.
+    directory_entries: HashMap<std::path::PathBuf, HashSet<std::ffi::OsString>>,
     /// The units the running `units` phase has pushed so far.
     unit_list: Vec<PushedUnit>,
     input_artifact: Option<ArtifactId>,

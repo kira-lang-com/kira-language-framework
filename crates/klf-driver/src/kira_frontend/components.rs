@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn append_languages(
@@ -10,8 +11,8 @@ pub(super) fn append_languages(
     home: &Path,
     library: &Path,
     scratch: &Scratch,
-    seen: &mut Vec<PathBuf>,
-    modules: &mut Vec<String>,
+    seen: &mut HashSet<PathBuf>,
+    modules: &mut HashSet<String>,
     objects: &mut Vec<PathBuf>,
     archives: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
@@ -19,21 +20,19 @@ pub(super) fn append_languages(
         let canonical = language
             .canonicalize()
             .map_err(|error| format!("{}: {error}", language.display()))?;
-        if seen.contains(&canonical) {
+        if !seen.insert(canonical) {
             return Err(format!(
                 "`{}` names a language already linked into this frontend",
                 language.display()
             ));
         }
-        seen.push(canonical);
         let index = offset + 1;
         if is_package(language) {
-            let (other, metadata) = frontend_metadata(session, language, target)?;
+            let (other, metadata, module) = frontend_metadata(session, language, target)?;
             if other.shader.is_none() {
                 return Err(format!("{} is not a shader language", language.display()));
             }
-            let module = package_module(session, language)?;
-            if modules.contains(&module) {
+            if !modules.insert(module.clone()) {
                 return Err(format!(
                     "Kira frontend moduleRoot `{module}` is already linked into this driver"
                 ));
@@ -41,7 +40,6 @@ pub(super) fn append_languages(
             let (component_objects, archive) = compile_component(
                 language, &module, &metadata, index, compiler, home, library, profile, scratch,
             )?;
-            modules.push(module);
             objects.extend(component_objects);
             archives.push(archive);
         } else {

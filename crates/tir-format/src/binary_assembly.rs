@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::leb::{read_uleb, write_uleb};
-use crate::{BinaryModule, FormatError, StringTable};
+use crate::{BinaryModule, FormatError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BinaryAssemblyRecord {
@@ -9,30 +9,38 @@ pub struct BinaryAssemblyRecord {
     pub constraints_index: u64,
 }
 
+/// Encodes ASM records using existing STRINGS indices.
 pub fn encode_assembly_table(
     records: &[BinaryAssemblyRecord],
-    strings: &StringTable,
+    strings: &crate::StringTable,
 ) -> Result<Vec<u8>, FormatError> {
     let mut bytes = Vec::new();
-    write_index(
-        u64::try_from(records.len())
-            .map_err(|_| FormatError::malformed(None, "ASM record count overflows"))?,
+    write_uleb(
+        u64::try_from(records.len()).map_err(|_| malformed(0, "ASM count overflows ULEB128"))?,
         &mut bytes,
-    )?;
+    )
+    .map_err(|error| malformed(0, format!("ASM encoding failed: {error}")))?;
     let mut pairs = HashSet::new();
     for record in records {
-        let template = string(strings, record.template_index)
-            .ok_or_else(|| FormatError::malformed(None, "ASM template index is invalid"))?;
-        let constraints = string(strings, record.constraints_index)
-            .ok_or_else(|| FormatError::malformed(None, "ASM constraints index is invalid"))?;
+        let template = strings
+            .get(
+                usize::try_from(record.template_index)
+                    .map_err(|_| malformed(0, "ASM template index overflows memory"))?,
+            )
+            .ok_or_else(|| malformed(0, "ASM template index is invalid"))?;
+        let constraints = strings
+            .get(
+                usize::try_from(record.constraints_index)
+                    .map_err(|_| malformed(0, "ASM constraint index overflows memory"))?,
+            )
+            .ok_or_else(|| malformed(0, "ASM constraint index is invalid"))?;
         if !pairs.insert((template, constraints)) {
-            return Err(FormatError::malformed(
-                None,
-                "duplicate ASM template/constraint pair",
-            ));
+            return Err(malformed(0, "duplicate ASM template/constraint pair"));
         }
-        write_index(record.template_index, &mut bytes)?;
-        write_index(record.constraints_index, &mut bytes)?;
+        write_uleb(record.template_index, &mut bytes)
+            .map_err(|error| malformed(0, format!("ASM encoding failed: {error}")))?;
+        write_uleb(record.constraints_index, &mut bytes)
+            .map_err(|error| malformed(0, format!("ASM encoding failed: {error}")))?;
     }
     Ok(bytes)
 }
@@ -93,17 +101,6 @@ fn read_index(bytes: &[u8], cursor: &mut usize, label: &str) -> Result<u64, Form
     let offset = *cursor;
     read_uleb(bytes, cursor)
         .map_err(|error| malformed(offset, format!("invalid ASM {label} ULEB128: {error:?}")))
-}
-
-fn string(strings: &StringTable, index: u64) -> Option<&str> {
-    usize::try_from(index)
-        .ok()
-        .and_then(|index| strings.get(index))
-}
-
-fn write_index(index: u64, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(index, bytes)
-        .map_err(|error| FormatError::malformed(None, format!("ASM encoding failed: {error}")))
 }
 
 fn malformed(offset: usize, message: impl Into<String>) -> FormatError {

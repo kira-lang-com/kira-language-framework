@@ -71,12 +71,13 @@ pub(super) fn verify_instruction(instruction: &Instruction) -> Option<Vec<Diagno
         Conversion::Bitcast => bitcast_valid(source, destination).unwrap_or(true),
     };
     if !valid {
-        let code =
-            if matches!(rule, Conversion::Bitcast) && bitcast_v19_violation(source, destination) {
-                V19
-            } else {
-                V2
-            };
+        let code = if matches!(rule, Conversion::Bitcast)
+            && function_bitcast_valid(source, destination).is_some_and(|valid| !valid)
+        {
+            V19
+        } else {
+            V2
+        };
         diagnostics.push(
             Diagnostic::error(
                 code,
@@ -174,18 +175,13 @@ fn element_type(ty: &Type) -> &Type {
 }
 
 fn bitcast_valid(source: &Type, destination: &Type) -> Option<bool> {
-    if bitcast_v19_violation(source, destination) {
-        return Some(false);
+    if let Some(valid) = function_bitcast_valid(source, destination) {
+        return Some(valid);
     }
     if matches!(source, Type::Function(_) | Type::Closure(_))
         || matches!(destination, Type::Function(_) | Type::Closure(_))
     {
-        return Some(matches!(
-            (source, destination),
-            (Type::Function(function), Type::Pointer(AddressSpace::Generic))
-                | (Type::Pointer(AddressSpace::Generic), Type::Function(function))
-                if function.foreign
-        ));
+        return Some(false);
     }
     match (bit_size(source), bit_size(destination)) {
         (Some(source), Some(destination)) => Some(source == destination),
@@ -193,12 +189,17 @@ fn bitcast_valid(source: &Type, destination: &Type) -> Option<bool> {
     }
 }
 
-fn bitcast_v19_violation(source: &Type, destination: &Type) -> bool {
+fn function_bitcast_valid(source: &Type, destination: &Type) -> Option<bool> {
     match (source, destination) {
+        (Type::Function(left), Type::Function(right)) => Some(left == right),
         (Type::Function(function), Type::Pointer(AddressSpace::Generic))
-        | (Type::Pointer(AddressSpace::Generic), Type::Function(function)) => !function.foreign,
-        (Type::Function(_), _) | (_, Type::Function(_)) => true,
-        _ => false,
+        | (Type::Pointer(AddressSpace::Generic), Type::Function(function)) => {
+            Some(function.foreign)
+        }
+        (Type::Function(_), Type::Pointer(_)) | (Type::Pointer(_), Type::Function(_)) => {
+            Some(false)
+        }
+        _ => None,
     }
 }
 

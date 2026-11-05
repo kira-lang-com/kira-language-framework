@@ -7,59 +7,7 @@
 use rustls_pki_types::{CertificateDer, ServerName, SignatureVerificationAlgorithm, UnixTime};
 use webpki::{EndEntityCert, Error, KeyUsage, ring as algorithms};
 
-use crate::{CertificateSignatureAlgorithm, Failure, scheme, word};
-
-/// Verifies an X.509 certificate's `signatureValue` over its complete DER
-/// `tbsCertificate` using the issuer certificate's public key. The caller
-/// parses and validates the AlgorithmIdentifier parameters before selecting
-/// this profile. Answers 1 when the signature verifies.
-#[must_use]
-pub fn certificate_signature_verify(
-    algorithm: CertificateSignatureAlgorithm,
-    issuer_certificate: &[u8],
-    tbs_certificate: &[u8],
-    signature: &[u8],
-) -> i64 {
-    word((|| {
-        let candidates: &[&dyn SignatureVerificationAlgorithm] = match algorithm {
-            CertificateSignatureAlgorithm::EcdsaSha256 => {
-                &[algorithms::ECDSA_P256_SHA256, algorithms::ECDSA_P384_SHA256]
-            }
-            CertificateSignatureAlgorithm::EcdsaSha384 => {
-                &[algorithms::ECDSA_P256_SHA384, algorithms::ECDSA_P384_SHA384]
-            }
-            CertificateSignatureAlgorithm::RsaPkcs1Sha256 => {
-                &[algorithms::RSA_PKCS1_2048_8192_SHA256]
-            }
-            CertificateSignatureAlgorithm::RsaPkcs1Sha384 => {
-                &[algorithms::RSA_PKCS1_2048_8192_SHA384]
-            }
-            CertificateSignatureAlgorithm::RsaPkcs1Sha512 => {
-                &[algorithms::RSA_PKCS1_2048_8192_SHA512]
-            }
-            CertificateSignatureAlgorithm::RsaPssSha256 => {
-                &[algorithms::RSA_PSS_2048_8192_SHA256_LEGACY_KEY]
-            }
-            CertificateSignatureAlgorithm::RsaPssSha384 => {
-                &[algorithms::RSA_PSS_2048_8192_SHA384_LEGACY_KEY]
-            }
-            CertificateSignatureAlgorithm::RsaPssSha512 => {
-                &[algorithms::RSA_PSS_2048_8192_SHA512_LEGACY_KEY]
-            }
-        };
-        let der = CertificateDer::from(issuer_certificate);
-        let issuer = EndEntityCert::try_from(&der).map_err(|_| Failure::BadCertificate)?;
-        for candidate in candidates {
-            if issuer
-                .verify_signature(*candidate, tbs_certificate, signature)
-                .is_ok()
-            {
-                return Ok(1);
-            }
-        }
-        Err(Failure::Rejected)
-    })())
-}
+use crate::{Failure, scheme, word};
 
 /// What a chain's own signatures may use. Certificates are still signed with
 /// PKCS#1 v1.5, which TLS 1.3 forbids only in handshake signatures (RFC 8446

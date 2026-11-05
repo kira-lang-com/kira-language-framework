@@ -13,7 +13,7 @@ pub(crate) fn synthesize_adapters(module: &mut Module) {
     let declarations: HashMap<&Name, &Function> = module
         .functions
         .iter()
-        .map(|function| (&function.name, function))
+        .map(|function| (&function.name, function.as_ref()))
         .collect();
     let mut used_symbols = module_symbols(module);
     let mut adapters: HashMap<(Name, FunctionType), Name> = HashMap::default();
@@ -39,10 +39,13 @@ pub(crate) fn synthesize_adapters(module: &mut Module) {
         rewrites.push((conversion.at, thunk));
     }
     for ((function, block, instruction), thunk) in rewrites {
-        module.functions[function].blocks[block].instructions[instruction].operation =
-            Operation::FunctionReference(thunk);
+        std::sync::Arc::make_mut(&mut module.functions[function]).blocks[block].instructions
+            [instruction]
+            .operation = Operation::FunctionReference(thunk);
     }
-    module.functions.extend(thunks);
+    module
+        .functions
+        .extend(thunks.into_iter().map(std::sync::Arc::new));
 }
 
 /// A direct function reference converted to a function type its callee's
@@ -57,7 +60,7 @@ fn adapted_conversions(module: &Module) -> Vec<Conversion> {
     let declarations: HashMap<&Name, &Function> = module
         .functions
         .iter()
-        .map(|function| (&function.name, function))
+        .map(|function| (&function.name, function.as_ref()))
         .collect();
     let mut conversions = Vec::new();
     for (function_index, function) in module.functions.iter().enumerate() {

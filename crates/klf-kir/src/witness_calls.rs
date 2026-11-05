@@ -47,12 +47,12 @@ pub fn witness_calls_to_direct(module: &Module) -> Option<Module> {
                 else {
                     continue;
                 };
-                result.functions[index].blocks[block_index].instructions[position].operation =
-                    Operation::Call {
-                        callee: callee.clone(),
-                        generic_args: Vec::new(),
-                        arguments: call.arguments.clone(),
-                    };
+                let function = std::sync::Arc::make_mut(&mut result.functions[index]);
+                function.blocks[block_index].instructions[position].operation = Operation::Call {
+                    callee: callee.clone(),
+                    generic_args: Vec::new(),
+                    arguments: call.arguments.clone(),
+                };
                 changed = true;
             }
         }

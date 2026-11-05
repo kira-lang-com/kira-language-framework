@@ -17,6 +17,9 @@ use klf_target::Target;
 use std::any::Any;
 use std::collections::HashSet;
 use std::fmt;
+
+mod descriptor_impl;
+mod registry_impl;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -125,127 +128,15 @@ pub struct LanguageDescriptor {
     pub cli: klf_args::Command,
 }
 
-impl LanguageDescriptor {
-    #[allow(clippy::too_many_arguments)]
-    #[must_use]
-    pub fn new(
-        name: impl Into<String>,
-        driver: impl Into<String>,
-        version: impl Into<String>,
-        extensions: Vec<String>,
-        memory: MemoryModel,
-        exclusivity: Exclusivity,
-        convention: DefaultConvention,
-        std_root: impl Into<String>,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            driver: driver.into(),
-            version: version.into(),
-            extensions,
-            memory,
-            exclusivity,
-            convention,
-            std_root: std_root.into(),
-            entry: EntryConvention::Outcome,
-            file_modes: Vec::new(),
-            flags: Vec::new(),
-            diagnostics: Vec::new(),
-            editor: None,
-            shader: None,
-            cli: klf_args::Command::default(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_cli(mut self, cli: klf_args::Command) -> Self {
-        self.cli = cli;
-        self
-    }
-
-    #[must_use]
-    pub fn with_shader(mut self, shader: Option<crate::ShaderFamily>) -> Self {
-        self.shader = shader;
-        self
-    }
-
-    #[must_use]
-    pub fn with_editor(mut self, editor: Option<klf_facts::spec::EditorSpec>) -> Self {
-        self.editor = editor;
-        self
-    }
-
-    /// The editor spec, `EditorSpec.minimal(name)` when none is declared.
-    #[must_use]
-    pub fn editor_spec(&self) -> klf_facts::spec::EditorSpec {
-        self.editor
-            .clone()
-            .unwrap_or_else(|| klf_facts::spec::EditorSpec::minimal(&self.name))
-    }
-
-    #[must_use]
-    pub fn with_file_modes(mut self, file_modes: Vec<FileMode>) -> Self {
-        self.file_modes = file_modes;
-        self
-    }
-
-    #[must_use]
-    pub fn with_entry(mut self, entry: EntryConvention) -> Self {
-        self.entry = entry;
-        self
-    }
-
-    #[must_use]
-    pub fn with_flags(mut self, flags: Vec<DriverFlag>) -> Self {
-        self.flags = flags;
-        self
-    }
-
-    #[must_use]
-    pub fn file_mode(&self, name: &str) -> Option<&FileMode> {
-        self.file_modes.iter().find(|mode| mode.name == name)
-    }
-
-    #[must_use]
-    pub fn with_diagnostics(mut self, diagnostics: Vec<DiagnosticSpec>) -> Self {
-        self.diagnostics = diagnostics;
-        self
-    }
-
-    #[must_use]
-    pub fn minimal(name: &str, extensions: &[&str]) -> Self {
-        Self::new(
-            name,
-            name,
-            "0.1.0",
-            extensions
-                .iter()
-                .map(|extension| (*extension).to_owned())
-                .collect(),
-            MemoryModel::Counted,
-            Exclusivity::None,
-            DefaultConvention::Platform,
-            "",
-        )
-    }
-
-    #[must_use]
-    pub fn claims_extension(&self, extension: &str) -> bool {
-        self.extensions
-            .iter()
-            .any(|candidate| candidate == extension)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DefinitionSource {
-    pub name: String,
+    pub name: Arc<str>,
     pub text: Arc<str>,
 }
 
 impl DefinitionSource {
     #[must_use]
-    pub fn new(name: impl Into<String>, text: impl Into<Arc<str>>) -> Self {
+    pub fn new(name: impl Into<Arc<str>>, text: impl Into<Arc<str>>) -> Self {
         Self {
             name: name.into(),
             text: text.into(),
@@ -255,7 +146,13 @@ impl DefinitionSource {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DefinitionPackage {
-    sources: Vec<DefinitionSource>,
+    sources: DefinitionSources,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum DefinitionSources {
+    Single(DefinitionSource),
+    Many(Vec<DefinitionSource>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -295,113 +192,40 @@ pub struct DefinitionRegistry {
     definitions: Vec<Box<dyn Definition>>,
 }
 
-impl DefinitionRegistry {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Registers a definition after validating its metadata.
-    ///
-    /// # Errors
-    /// Returns [`DefinitionRegistryError`] when its name or an extension is
-    /// already claimed by a registered definition, or repeated in its own
-    /// metadata.
-    pub fn register<D: Definition + 'static>(
-        &mut self,
-        definition: D,
-    ) -> Result<(), DefinitionRegistryError> {
-        self.register_box(Box::new(definition))
-    }
-
-    /// Registers a boxed definition after validating its metadata.
-    ///
-    /// # Errors
-    /// Returns [`DefinitionRegistryError`] when its name or an extension is
-    /// already claimed by a registered definition, or repeated in its own
-    /// metadata.
-    pub fn register_box(
-        &mut self,
-        definition: Box<dyn Definition>,
-    ) -> Result<(), DefinitionRegistryError> {
-        let language = definition.language();
-        if self
-            .definitions
-            .iter()
-            .any(|existing| existing.language().name == language.name)
-        {
-            return Err(DefinitionRegistryError::DuplicateName {
-                name: language.name,
-            });
-        }
-
-        let mut extensions = HashSet::new();
-        for extension in &language.extensions {
-            if !extensions.insert(extension) {
-                return Err(DefinitionRegistryError::DuplicateExtension {
-                    extension: extension.clone(),
-                    first: language.name.clone(),
-                    second: language.name,
-                });
-            }
-            if let Some(existing) = self
-                .definitions
-                .iter()
-                .find(|existing| existing.language().claims_extension(extension))
-            {
-                return Err(DefinitionRegistryError::DuplicateExtension {
-                    extension: extension.clone(),
-                    first: existing.language().name,
-                    second: language.name,
-                });
-            }
-        }
-
-        self.definitions.push(definition);
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn select(&self, file_name: &str) -> Option<&dyn Definition> {
-        let extension = std::path::Path::new(file_name)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or_default();
-        self.definitions
-            .iter()
-            .find(|definition| definition.language().claims_extension(extension))
-            .map(Box::as_ref)
-    }
-
-    #[must_use]
-    pub fn by_name(&self, name: &str) -> Option<&dyn Definition> {
-        self.definitions
-            .iter()
-            .find(|definition| definition.language().name == name)
-            .map(Box::as_ref)
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.definitions.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.definitions.is_empty()
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct DefinitionUnit {
-    files: Arc<[FileId]>,
+    files: DefinitionUnitFiles,
+    identity_hash: u64,
 }
+
+#[derive(Clone, Debug, Hash)]
+enum DefinitionUnitFiles {
+    Single(FileId),
+    Multiple(Arc<[FileId]>),
+}
+
+impl PartialEq for DefinitionUnitFiles {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Single(left), Self::Single(right)) => left == right,
+            (Self::Multiple(left), Self::Multiple(right)) => {
+                Arc::ptr_eq(left, right) || left.as_ref() == right.as_ref()
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for DefinitionUnitFiles {}
 
 impl DefinitionUnit {
     #[must_use]
     pub fn new(file: FileId) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&file, &mut hasher);
         Self {
-            files: Arc::from(vec![file]),
+            files: DefinitionUnitFiles::Single(file),
+            identity_hash: std::hash::Hasher::finish(&hasher),
         }
     }
 
@@ -410,19 +234,45 @@ impl DefinitionUnit {
         if files.is_empty() {
             return None;
         }
+        if files.len() == 1 {
+            return Some(Self::new(files[0]));
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&files, &mut hasher);
         Some(Self {
-            files: Arc::from(files),
+            files: DefinitionUnitFiles::Multiple(Arc::from(files)),
+            identity_hash: std::hash::Hasher::finish(&hasher),
         })
     }
 
     #[must_use]
     pub fn file(&self) -> FileId {
-        self.files[0]
+        match &self.files {
+            DefinitionUnitFiles::Single(file) => *file,
+            DefinitionUnitFiles::Multiple(files) => files[0],
+        }
     }
 
     #[must_use]
     pub fn files(&self) -> &[FileId] {
-        &self.files
+        match &self.files {
+            DefinitionUnitFiles::Single(file) => std::slice::from_ref(file),
+            DefinitionUnitFiles::Multiple(files) => files,
+        }
+    }
+}
+
+impl PartialEq for DefinitionUnit {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity_hash == other.identity_hash && self.files == other.files
+    }
+}
+
+impl Eq for DefinitionUnit {}
+
+impl std::hash::Hash for DefinitionUnit {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::hash::Hash::hash(&self.identity_hash, state);
     }
 }
 
@@ -474,6 +324,20 @@ impl DefinitionArtifact {
         }
     }
 
+    /// Stores a shared phase value without cloning its payload.
+    #[must_use]
+    pub fn new_shared<T: Any + Send + Sync>(
+        session: &mut Session,
+        unit: DefinitionUnit,
+        payload: Arc<T>,
+    ) -> Self {
+        Self {
+            session: session.handle(),
+            unit,
+            id: session.store_artifact(payload),
+        }
+    }
+
     #[must_use]
     pub fn unit(&self) -> DefinitionUnit {
         self.unit.clone()
@@ -505,26 +369,77 @@ impl DefinitionArtifact {
         if !self.belongs_to(session) {
             return None;
         }
-        session.artifact(self.id)
+        session
+            .artifact::<T>(self.id)
+            .or_else(|| session.artifact::<Arc<T>>(self.id).map(Arc::as_ref))
+    }
+
+    /// Returns a shared phase value when the artifact stores an `Arc<T>`.
+    #[must_use]
+    pub fn downcast_arc<T: Any + Send + Sync>(&self, session: &Session) -> Option<Arc<T>> {
+        if !self.belongs_to(session) {
+            return None;
+        }
+        session.artifact::<Arc<T>>(self.id).cloned()
     }
 }
 
 impl DefinitionPackage {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self {
+            sources: DefinitionSources::Many(Vec::with_capacity(capacity)),
+        }
+    }
+
     #[must_use]
     pub fn single(name: impl Into<String>, text: impl Into<Arc<str>>) -> Self {
+        let name: String = name.into();
+        let name: Arc<str> = Arc::from(name);
         Self {
-            sources: vec![DefinitionSource::new(name, text)],
+            sources: DefinitionSources::Single(DefinitionSource::new(name, text)),
         }
     }
 
     #[must_use]
     pub fn from_sources(sources: Vec<DefinitionSource>) -> Self {
+        let sources = if sources.len() == 1 {
+            DefinitionSources::Single(sources.into_iter().next().expect("one source"))
+        } else {
+            DefinitionSources::Many(sources)
+        };
         Self { sources }
     }
 
     #[must_use]
     pub fn sources(&self) -> &[DefinitionSource] {
-        &self.sources
+        match &self.sources {
+            DefinitionSources::Single(source) => std::slice::from_ref(source),
+            DefinitionSources::Many(sources) => sources,
+        }
+    }
+
+    pub(crate) fn append_source(&mut self, source: DefinitionSource) {
+        if let DefinitionSources::Single(first) = &self.sources {
+            self.sources = DefinitionSources::Many(vec![first.clone(), source]);
+            return;
+        }
+        if let DefinitionSources::Many(sources) = &mut self.sources {
+            sources.push(source);
+        }
+    }
+
+    pub(crate) fn replace_source_text(&mut self, index: usize, text: Arc<str>) -> bool {
+        let source = match &mut self.sources {
+            DefinitionSources::Single(source) if index == 0 => Some(source),
+            DefinitionSources::Many(sources) => sources.get_mut(index),
+            _ => None,
+        };
+        if let Some(source) = source {
+            source.text = text;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -577,6 +492,21 @@ pub trait Definition {
         None
     }
 
+    /// Lowers an elaborated artifact to a shared KIR module. Definitions that
+    /// cache modules can override this to let build services reuse the module
+    /// without cloning its functions and types on a cache hit.
+    fn lower_shared(
+        &self,
+        session: &mut Session,
+        unit: DefinitionUnit,
+        program: &DefinitionArtifact,
+        module_name: &str,
+        target: Target,
+    ) -> Option<Arc<Module>> {
+        self.lower(session, unit, program, module_name, target)
+            .map(Arc::new)
+    }
+
     /// Groups package files into definition translation units.
     fn units(
         &self,
@@ -596,7 +526,7 @@ pub trait Definition {
                 .iter()
                 .map(|source| {
                     let unit = DefinitionUnit::new(
-                        session.add_file(source.name.as_str(), Arc::clone(&source.text)),
+                        session.add_file(source.name.as_ref(), Arc::clone(&source.text)),
                     );
                     session.register_unit(unit.clone());
                     unit
@@ -614,6 +544,19 @@ pub trait Definition {
         module_name: &str,
         target: Target,
     ) -> Option<Module> {
+        self.compile_package_shared(session, package, module_name, target)
+            .map(Arc::unwrap_or_clone)
+    }
+
+    /// Compiles a definition package and keeps the resulting KIR shared with
+    /// the session cache when the language supports phase queries.
+    fn compile_package_shared(
+        &self,
+        session: &mut Session,
+        package: &DefinitionPackage,
+        module_name: &str,
+        target: Target,
+    ) -> Option<Arc<Module>> {
         let units = self.units(session, package)?;
         let unit = units.first().cloned()?;
         if units.len() != 1 {
@@ -630,10 +573,11 @@ pub trait Definition {
             progress!("elaborate {name}");
             let program = self.elaborate(session, unit.clone(), &parsed)?;
             progress!("lower {name}");
-            return self.lower(session, unit, &program, module_name, target);
+            return self.lower_shared(session, unit, &program, module_name, target);
         }
         progress!("lower {name}");
         self.compile_unit(session, unit, module_name, target)
+            .map(Arc::new)
     }
 
     /// Runs the current one-file parse/check/lower implementation for a unit.

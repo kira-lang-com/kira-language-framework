@@ -148,7 +148,7 @@ struct LoopCtx {
 pub(crate) struct Lowerer<'a> {
     pub session: &'a mut Session,
     elaborated: &'a crate::ElaboratedFile,
-    pub signatures: &'a HashMap<Name, Signature>,
+    pub signatures: &'a HashMap<Name, std::sync::Arc<Signature>>,
     pub structs: &'a crate::structs::StructTable,
     pub enums: &'a crate::enums::EnumTable,
     pub types: &'a crate::session_types::TypeHandles,

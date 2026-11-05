@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
-use crate::leb::{read_uleb, write_uleb};
+use crate::leb::read_uleb;
 use crate::{BinaryModule, FormatError};
+
+mod encode;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BinaryFunctionAnalysis {
@@ -31,92 +33,6 @@ pub struct BinaryAnalysisSummary {
     pub sandbox_regions: Vec<BinarySandboxRegion>,
     pub indirect_call_typeids: Vec<u64>,
     pub assembly_regions: Vec<BinaryAssemblyRegion>,
-}
-
-impl BinaryAnalysisSummary {
-    pub fn encode(&self) -> Result<Vec<u8>, FormatError> {
-        let mut output = Vec::new();
-        write_count(self.functions.len(), "function", &mut output)?;
-        for function in &self.functions {
-            if function.trust_class > 2 {
-                return Err(FormatError::malformed(None, "invalid ANALYSIS trust class"));
-            }
-            output.extend_from_slice(&[function.trust_class, function.reason_mask]);
-        }
-
-        write_count(self.sandbox_regions.len(), "sandbox-region", &mut output)?;
-        let mut used_globals = HashSet::new();
-        for (index, region) in self.sandbox_regions.iter().enumerate() {
-            if u64::try_from(index).ok() != Some(region.memory_index)
-                || region.base_global_index == region.size_global_index
-                || !used_globals.insert(region.base_global_index)
-                || !used_globals.insert(region.size_global_index)
-            {
-                return Err(FormatError::malformed(
-                    None,
-                    "invalid or reused ANALYSIS sandbox-region index",
-                ));
-            }
-            for value in [
-                region.memory_index,
-                region.base_global_index,
-                region.size_global_index,
-            ] {
-                write_index(value, "sandbox-region index", &mut output)?;
-            }
-        }
-
-        write_count(
-            self.indirect_call_typeids.len(),
-            "indirect-call typeid",
-            &mut output,
-        )?;
-        let mut previous_typeid = None;
-        for typeid in &self.indirect_call_typeids {
-            if previous_typeid.is_some_and(|previous| *typeid <= previous) {
-                return Err(FormatError::malformed(
-                    None,
-                    "ANALYSIS typeids are not strictly ordered",
-                ));
-            }
-            previous_typeid = Some(*typeid);
-            output.extend_from_slice(&typeid.to_le_bytes());
-        }
-
-        write_count(self.assembly_regions.len(), "assembly-region", &mut output)?;
-        let mut previous_region = None;
-        for region in &self.assembly_regions {
-            let key = (region.function_index, region.instruction_ordinal);
-            if previous_region.is_some_and(|previous| key <= previous)
-                || !(1..=3).contains(&region.architecture)
-                || region.effects & !0x0f != 0
-                || region.effects & (1 << 2) != 0 && region.effects & 0b0011 != 0
-            {
-                return Err(FormatError::malformed(
-                    None,
-                    "invalid or unordered ANALYSIS assembly region",
-                ));
-            }
-            previous_region = Some(key);
-            write_index(
-                region.function_index,
-                "assembly function index",
-                &mut output,
-            )?;
-            write_index(
-                region.instruction_ordinal,
-                "assembly instruction ordinal",
-                &mut output,
-            )?;
-            write_index(
-                region.assembly_record_index,
-                "assembly record index",
-                &mut output,
-            )?;
-            output.extend_from_slice(&[region.architecture, region.effects]);
-        }
-        Ok(output)
-    }
 }
 
 impl BinaryModule {
@@ -168,18 +84,17 @@ impl BinaryModule {
         sandbox_regions
             .try_reserve_exact(sandbox_capacity)
             .map_err(|_| malformed(cursor, "ANALYSIS sandbox-region allocation failed"))?;
-        let mut used_sandbox_globals = HashSet::new();
+        let mut previous_memory = None;
         for _ in 0..sandbox_capacity {
             let start = cursor;
             let memory_index = read_index(&bytes, &mut cursor, "linear-memory index")?;
-            let expected_memory_index = u64::try_from(sandbox_regions.len())
-                .map_err(|_| malformed(start, "sandbox-region count overflows u64"))?;
-            if memory_index != expected_memory_index {
+            if previous_memory.is_some_and(|previous| memory_index <= previous) {
                 return Err(malformed(
                     start,
-                    "sandbox regions are not contiguous from linear-memory index zero",
+                    "sandbox regions are not ordered by memory index",
                 ));
             }
+            previous_memory = Some(memory_index);
             let base_global_index = read_index(&bytes, &mut cursor, "sandbox base global")?;
             let size_global_index = read_index(&bytes, &mut cursor, "sandbox size global")?;
             if base_global_index >= globals.records.len() as u64
@@ -187,14 +102,6 @@ impl BinaryModule {
                 || base_global_index == size_global_index
             {
                 return Err(malformed(start, "ANALYSIS sandbox global index is invalid"));
-            }
-            if !used_sandbox_globals.insert(base_global_index)
-                || !used_sandbox_globals.insert(size_global_index)
-            {
-                return Err(malformed(
-                    start,
-                    "ANALYSIS sandbox globals are reused across linear memories",
-                ));
             }
             sandbox_regions.push(BinarySandboxRegion {
                 memory_index,
@@ -330,19 +237,4 @@ fn read_u64(bytes: &[u8], cursor: &mut usize) -> Result<u64, FormatError> {
 
 fn malformed(offset: usize, message: impl Into<String>) -> FormatError {
     FormatError::malformed(Some(offset), message)
-}
-
-fn write_count(count: usize, label: &str, output: &mut Vec<u8>) -> Result<(), FormatError> {
-    let count = u64::try_from(count)
-        .ok()
-        .filter(|count| *count < 1 << 32)
-        .ok_or_else(|| {
-            FormatError::malformed(None, format!("ANALYSIS {label} count is invalid"))
-        })?;
-    write_index(count, label, output)
-}
-
-fn write_index(value: u64, label: &str, output: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(value, output)
-        .map_err(|_| FormatError::malformed(None, format!("failed to write ANALYSIS {label}")))
 }

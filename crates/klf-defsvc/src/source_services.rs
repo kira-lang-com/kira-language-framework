@@ -1,4 +1,5 @@
 use crate::{DefinitionServiceState, ServiceSink};
+use klf_core::FileId;
 use klf_rt::{MAX_SERVICE_BUFFER_BYTES, ServiceMemory, copy_out};
 use std::sync::{Arc, Mutex};
 
@@ -131,11 +132,17 @@ fn named_len(
 /// neither a source nor on disk is noted as absent.
 fn named_observed(state: &mut DefinitionServiceState, name: &str) -> Option<Arc<str>> {
     let found = named_entry(state, name)
-        .map(|(path, text)| (std::path::PathBuf::from(path), Arc::clone(text)));
-    let observation = if let Some((path, text)) = &found {
+        .map(|(file, path, text)| (file, std::path::PathBuf::from(path), Arc::clone(text)));
+    let observation = if let Some((file, path, text)) = &found {
+        let identity = usize::try_from(file.as_u32())
+            .ok()
+            .and_then(|index| state.source_identities.get(index))
+            .cloned()
+            .flatten();
         klf_services::Observation::Read {
             path: path.clone(),
             text: Some(Arc::clone(text)),
+            identity,
         }
     } else {
         let path = std::path::PathBuf::from(name);
@@ -147,7 +154,7 @@ fn named_observed(state: &mut DefinitionServiceState, name: &str) -> Option<Arc<
     if !state.observations.contains(&observation) {
         state.observations.push(observation);
     }
-    found.map(|(_, text)| text)
+    found.map(|(_, _, text)| text)
 }
 
 fn named_byte(
@@ -188,23 +195,23 @@ fn named_copy(
 }
 
 fn named_source<'a>(state: &'a DefinitionServiceState, name: &str) -> Option<&'a str> {
-    named_entry(state, name).map(|(_, text)| text.as_ref())
+    named_entry(state, name).map(|(_, _, text)| text.as_ref())
 }
 
 /// The name and text of the source named `name`, or ending `/name`.
 fn named_entry<'a>(
     state: &'a DefinitionServiceState,
     name: &str,
-) -> Option<(&'a str, &'a Arc<str>)> {
-    if let Some((_, known, text)) = state.sources.iter().find(|(_, known, _)| known == name) {
-        return Some((known.as_str(), text));
+) -> Option<(FileId, &'a str, &'a Arc<str>)> {
+    if let Some((file, known, text)) = state.sources.iter().find(|(_, known, _)| known == name) {
+        return Some((*file, known.as_str(), text));
     }
     let suffix = format!("/{name}");
     state
         .sources
         .iter()
         .find(|(_, known, _)| source_suffix_matches(known, &suffix, cfg!(windows)))
-        .map(|(_, known, text)| (known.as_str(), text))
+        .map(|(file, known, text)| (*file, known.as_str(), text))
 }
 
 fn source_suffix_matches(known: &str, suffix: &str, windows: bool) -> bool {

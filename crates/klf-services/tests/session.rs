@@ -1,8 +1,8 @@
 use klf_services::{
     Choice, DefinitionArtifact, DefinitionHandleError, DefinitionPackage, DefinitionPhaseArguments,
     DefinitionSource, DefinitionUnit, DiagnosticSpec, Exclusivity, KERNEL_SERVICE_MANIFEST,
-    KernelServiceManifest, LayoutRule, Namespace, Pairing, Policy, QueryDependency, QueryPhase,
-    Requirement, ServiceType, Session, Solution, TypeKind, TypeLayout,
+    KernelServiceManifest, LayoutRule, Namespace, Pairing, Policy, QueryDependency, QueryId,
+    QueryPhase, Requirement, ServiceType, Session, Solution, TypeKind, TypeLayout,
 };
 use klf_source::Span;
 use klf_target::Target;
@@ -15,7 +15,7 @@ fn target() -> Target {
 fn definition_package_exposes_one_phase_input() {
     let package = DefinitionPackage::from_sources(vec![DefinitionSource::new("main.klfd", "body")]);
     assert_eq!(package.sources().len(), 1);
-    assert_eq!(package.sources()[0].name, "main.klfd");
+    assert_eq!(package.sources()[0].name.as_ref(), "main.klfd");
     assert_eq!(&*package.sources()[0].text, "body");
 }
 
@@ -442,4 +442,58 @@ fn session_rejects_artifacts_from_other_sessions() {
         arguments.marshal(&current),
         Err(DefinitionHandleError::ArtifactNotRegistered { .. })
     ));
+}
+
+#[test]
+fn package_indexed_invalidation_scales_at_ten_thousand_sources() {
+    let mut session = Session::new(target());
+    let mut files = Vec::with_capacity(10_000);
+    let mut source_queries = Vec::<QueryId>::with_capacity(10_000);
+    for index in 0..10_000 {
+        let name = format!("package-{index}/app/main.kira");
+        let file = session.upsert_file(name, "source");
+        let unit = DefinitionUnit::new(file);
+        session.register_unit(unit.clone());
+        let query = session.begin_query("test", &unit, QueryPhase::Parse);
+        session.finish_query(query);
+        files.push(file);
+        source_queries.push(query);
+    }
+
+    let graph = DefinitionUnit::from_files(files.clone()).expect("source graph");
+    session.register_unit(graph.clone());
+    let graph_query = session.begin_derived_query("test", &graph, QueryPhase::Elaborate);
+    for query in &source_queries {
+        assert!(session.record_query_dependency_id(*query));
+    }
+    session.finish_query(graph_query);
+
+    let before = session.query_stats();
+    let edited = session.upsert_file("package-5000/app/main.kira", "edited");
+    assert_eq!(edited, files[5_000]);
+    let after = session.query_stats();
+
+    assert_eq!(after.invalidated - before.invalidated, 2);
+    assert_eq!(
+        after.invalidation_edges_visited - before.invalidation_edges_visited,
+        1
+    );
+    assert!(
+        !session
+            .query_record(source_queries[5_000])
+            .expect("edited source query")
+            .valid
+    );
+    assert!(
+        session
+            .query_record(source_queries[4_999])
+            .expect("unrelated source query")
+            .valid
+    );
+    assert!(
+        !session
+            .query_record(graph_query)
+            .expect("unified graph query")
+            .valid
+    );
 }

@@ -23,7 +23,6 @@ struct CallSite {
 }
 
 pub fn verify_gpu_module(module: &TextModule) -> Vec<Diagnostic> {
-    let witness_conformances = super::witness::ConformanceIndex::from_module(module);
     let mut functions = Vec::new();
     let mut diagnostics = Vec::new();
     for item in &module.items {
@@ -51,7 +50,7 @@ pub fn verify_gpu_module(module: &TextModule) -> Vec<Diagnostic> {
         functions.push(GpuFunction {
             item: *item,
             symbol,
-            calls: collect_calls(source, &body, &module.header.path, &witness_conformances),
+            calls: collect_calls(source, &body),
             analysis,
         });
     }
@@ -109,12 +108,7 @@ fn symbol_at(source: &str, tokens: &[Token], start: usize) -> Option<String> {
         })
 }
 
-fn collect_calls(
-    source: &str,
-    body: &FunctionBody,
-    module_path: &str,
-    witness_conformances: &super::witness::ConformanceIndex,
-) -> Vec<CallSite> {
+fn collect_calls(source: &str, body: &FunctionBody) -> Vec<CallSite> {
     body.blocks
         .iter()
         .enumerate()
@@ -125,28 +119,16 @@ fn collect_calls(
                 .filter_map(move |instruction| {
                     let opcode = instruction.opcode.as_str();
                     let indirect = opcode == "gpu.call.vft";
-                    let witness = opcode == "call.witness";
-                    if !indirect && !witness && !matches!(opcode, "call" | "tail.call") {
+                    if !indirect && !matches!(opcode, "call" | "tail.call") {
                         return None;
                     }
-                    let target = if witness {
-                        super::witness::resolve_target(
-                            instruction,
-                            source,
-                            module_path,
-                            witness_conformances,
-                        )
-                        .ok()
-                    } else if !indirect {
-                        symbol_at(source, &instruction.tokens, 0)
-                    } else {
-                        None
-                    };
                     Some(CallSite {
                         block,
                         span: instruction.span,
-                        indirect: indirect || (witness && target.is_none()),
-                        target,
+                        target: (!indirect)
+                            .then(|| symbol_at(source, &instruction.tokens, 0))
+                            .flatten(),
+                        indirect,
                     })
                 })
         })

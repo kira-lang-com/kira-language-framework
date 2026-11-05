@@ -3,21 +3,6 @@ use crate::leb::{LebError, read_uleb};
 use crate::types::{BinaryCodeTable, BinarySignatureTable};
 use crate::{BinaryModule, FormatError};
 
-mod encode;
-
-impl BinaryCodeTable {
-    pub fn encode(
-        &self,
-        signatures: &BinarySignatureTable,
-        types: &crate::types::BinaryTypeTable,
-        constants: &crate::types::BinaryConstantTable,
-        strings: &crate::strings::StringTable,
-        assembly_count: u64,
-    ) -> Result<Vec<u8>, FormatError> {
-        encode::encode_code_table(self, signatures, types, constants, strings, assembly_count)
-    }
-}
-
 const MAX_FUNCTION_COUNT: u64 = 1 << 32;
 
 impl BinaryModule {
@@ -44,6 +29,12 @@ impl BinaryModule {
             return Err(malformed(
                 count_offset,
                 "CODE function count must be less than 2^32",
+            ));
+        }
+        if count > signatures.records.len() {
+            return Err(malformed(
+                count_offset,
+                "CODE function count exceeds SIGNATURES",
             ));
         }
         let mut functions = reserve(count, &bytes, cursor)?;

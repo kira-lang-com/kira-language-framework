@@ -32,7 +32,8 @@ pub fn canonicalize(module: &Module) -> (Module, Vec<Diagnostic>) {
     let mut result = module.clone();
     let mut diagnostics = Vec::new();
     let index = klf_kir::ModuleIndex::of(module);
-    for function in &mut result.functions {
+    for shared in &mut result.functions {
+        let function = std::sync::Arc::make_mut(shared);
         initcheck::check_initialization(function, &mut diagnostics);
         resolve::resolve_copies(function, &index, &mut diagnostics);
         destroy::insert_destroys(function, &index);

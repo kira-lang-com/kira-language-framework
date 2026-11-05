@@ -110,7 +110,6 @@ pub(crate) fn decode_function_body(
         body_byte_size,
         block_count,
         blocks,
-        canonical_bytes: bytes.to_vec(),
     })
 }
 

@@ -2,15 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::text::{Token, TokenKind, lex};
-use tir_format::{
-    FunctionBody, GpuSynchronization, GpuSynchronizationScope, TextInstruction,
-    parse_gpu_synchronization,
-};
+use tir_format::{FunctionBody, TextInstruction};
 
 mod binary;
 mod binary_cfg;
 mod module;
-mod witness;
 
 pub use binary::verify_binary_gpu_module;
 pub use module::verify_gpu_module;
@@ -173,9 +169,7 @@ fn instruction_uniformity(
                 operand_uniformity
             }
         }
-        "call" | "call.indirect" | "call.closure" | "call.witness" | "call.vtable"
-        | "call.foreign" | "call.variadic" | "call.runtime" | "try.call" | "invoke"
-        | "tail.call" | "gpu.call.vft" => Uniformity::Divergent,
+        "call" | "tail.call" | "gpu.call.vft" => Uniformity::Divergent,
         opcode if opcode.starts_with("atomic.") || opcode == "tex.atomic" => Uniformity::Divergent,
         "quad.broadcast" => operands
             .last()
@@ -204,10 +198,7 @@ fn builtin_uniformity(instruction: &TextInstruction) -> Uniformity {
         "threads_per_threadgroup"
         | "threadgroups_per_grid"
         | "subgroups_per_threadgroup"
-        | "subgroup_size"
-        | "base_vertex"
-        | "base_instance"
-        | "draw_index" => Uniformity::Dispatch,
+        | "subgroup_size" => Uniformity::Dispatch,
         _ => Uniformity::Divergent,
     }
 }
@@ -449,16 +440,13 @@ fn verify_required_uniformity(
                     );
                 }
             }
-            let synchronization = parse_gpu_synchronization(instruction).ok().flatten();
-            let Some((required, description)) =
-                required_uniformity(instruction, synchronization.as_ref())
-            else {
+            let Some((required, description)) = required_uniformity(instruction) else {
                 continue;
             };
             required_on_entry = Some(
                 required_on_entry.map_or(required, |current: Uniformity| current.min(required)),
             );
-            if synchronization.is_some_and(|sync| sync.unchecked_uniformity) {
+            if has_atom(&instruction.tokens, "unchecked_uniformity") {
                 continue;
             }
             if control[block_index].satisfies(required) {
@@ -481,19 +469,13 @@ fn dynamic_uniform_operand(instruction: &TextInstruction) -> Option<(Uniformity,
     }
 }
 
-fn required_uniformity(
-    instruction: &TextInstruction,
-    synchronization: Option<&GpuSynchronization>,
-) -> Option<(Uniformity, &'static str)> {
+fn required_uniformity(instruction: &TextInstruction) -> Option<(Uniformity, &'static str)> {
     match instruction.opcode.as_str() {
-        "gpu.barrier" => match synchronization?.scope {
-            GpuSynchronizationScope::Subgroup => Some((Uniformity::Subgroup, "subgroup barrier")),
-            GpuSynchronizationScope::Threadgroup => {
-                Some((Uniformity::Threadgroup, "threadgroup barrier"))
-            }
-            GpuSynchronizationScope::Thread
-            | GpuSynchronizationScope::Device
-            | GpuSynchronizationScope::System => None,
+        "gpu.barrier" => match barrier_scope(&instruction.tokens) {
+            Some("subgroup") => Some((Uniformity::Subgroup, "subgroup barrier")),
+            Some("threadgroup") => Some((Uniformity::Threadgroup, "threadgroup barrier")),
+            None => Some((Uniformity::Threadgroup, "threadgroup barrier")),
+            Some(_) => None,
         },
         "gpu.ddx" | "gpu.ddy" | "gpu.fwidth" | "quad.broadcast" | "quad.swap" | "quad.all"
         | "quad.any" | "tex.sample" | "tex.sample_bias" | "tex.sample_compare" | "tex.gather"
@@ -506,6 +488,18 @@ fn required_uniformity(
         }
         _ => None,
     }
+}
+
+fn barrier_scope(tokens: &[Token]) -> Option<&str> {
+    let start = tokens
+        .iter()
+        .position(|token| atom(token) == Some("barrier"))?
+        + 1;
+    tokens[start..].windows(3).find_map(|window| {
+        (punctuation(&window[0], '[') && punctuation(&window[2], ']'))
+            .then(|| atom(&window[1]))
+            .flatten()
+    })
 }
 
 fn label_after<'a>(tokens: &'a [Token], keyword: &str) -> Option<&'a str> {

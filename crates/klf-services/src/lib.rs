@@ -11,17 +11,19 @@ mod definition;
 mod diagnostics;
 mod driver_request;
 mod file_mode;
+mod filesystem_index;
 mod image;
 mod location;
 mod observe;
 mod query;
+mod scheduler;
 mod service;
 mod session;
 mod shader_family;
 mod snippet;
 mod solver;
-mod tir_builder;
 mod types;
+mod workspace;
 
 pub use arena::{Arena, Id};
 pub use builder::{FunctionBuilder, ModuleBuilder};
@@ -34,14 +36,19 @@ pub use definition::{
 pub use diagnostics::{DiagnosticSpec, ResolvedRuntimeDiagnostic, severity_word};
 pub use driver_request::{DriverRequest, select_driver_arguments};
 pub use file_mode::{FileModeSelectionError, select_file_mode};
+pub use filesystem_index::{DirectoryIndex, DirectorySnapshot, shared_directory_index};
 pub use image::{
     DefinitionHandleError, DefinitionImage, DefinitionImageError, DefinitionPhase,
     DefinitionPhaseArguments, DefinitionPhaseExecutor, DefinitionPhaseResult,
     DefinitionResultError, ExecutableDefinition,
 };
 pub use location::diagnostic_location;
-pub use observe::{Observation, accessed, note_access, record_accesses};
-pub use query::{QueryDependency, QueryId, QueryPhase, QueryRecord};
+pub use observe::{
+    FileIdentity, Observation, accessed, directory_overlay_entries, file_identity,
+    file_identity_from_metadata, note_access, record_accesses,
+};
+pub use query::{QueryDependency, QueryId, QueryPhase, QueryRecord, QueryStats};
+pub use scheduler::parallel_map;
 pub use service::{
     KERNEL_SERVICE_MANIFEST, KernelService, KernelServiceManifest, ServiceManifestError,
     ServiceSignature, ServiceType,
@@ -59,11 +66,8 @@ pub use solver::{
     Binding, Bindings, Choice, Conflict, Conformance, Requirement, Solution, Solver, TraitId,
     TraitInfo,
 };
-pub use tir_builder::{
-    TirBlockBuilder, TirFunctionBuilder, TirFunctionParameter, TirFunctionSignature,
-    TirModuleBuildError, TirModuleBuilder,
-};
 pub use types::{
     CopyPolicy, DestroyPolicy, FunctionSignature, LayoutRule, Pairing, Policy, RelocatePolicy,
     TypeId, TypeInfo, TypeKind, TypeLayout, TypeLayoutInfo,
 };
+pub use workspace::{DefinitionGraph, GraphError, PackageId, PackageNode};

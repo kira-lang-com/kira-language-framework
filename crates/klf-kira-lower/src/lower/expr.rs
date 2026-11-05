@@ -399,22 +399,14 @@ impl Lowerer<'_> {
                     signed: source_signed,
                 },
                 FeType::Int {
-                    bits: target_bits,
-                    signed: target_signed,
+                    bits: target_bits, ..
                 },
             ) => {
-                let kind = match (*source_signed, *target_signed, target_bits.cmp(source_bits)) {
-                    (true, true, Ordering::Less) => ConvertKind::SignedToSignedSaturating,
-                    (true, true, Ordering::Greater) => ConvertKind::SignExtend,
-                    (true, true, Ordering::Equal) => return Some((value, target)),
-                    (false, false, Ordering::Less) => ConvertKind::UnsignedToUnsignedSaturating,
-                    (false, false, Ordering::Greater) => ConvertKind::ZeroExtend,
-                    (false, false, Ordering::Equal) => return Some((value, target)),
-                    (true, false, _) => ConvertKind::SignedToUnsignedSaturating,
-                    (false, true, Ordering::Less | Ordering::Equal) => {
-                        ConvertKind::UnsignedToSignedSaturating
-                    }
-                    (false, true, Ordering::Greater) => ConvertKind::ZeroExtend,
+                let kind = match target_bits.cmp(source_bits) {
+                    Ordering::Less => ConvertKind::Truncate,
+                    Ordering::Greater if *source_signed => ConvertKind::SignExtend,
+                    Ordering::Greater => ConvertKind::ZeroExtend,
+                    Ordering::Equal => return Some((value, target)),
                 };
                 Some((self.fb.convert(kind, value, target.to_kir()), target))
             }
@@ -428,9 +420,9 @@ impl Lowerer<'_> {
             }
             (FeType::Float { .. }, FeType::Int { signed, .. }) => {
                 let kind = if *signed {
-                    ConvertKind::FloatToSignedSaturating
+                    ConvertKind::FloatToSigned
                 } else {
-                    ConvertKind::FloatToUnsignedSaturating
+                    ConvertKind::FloatToUnsigned
                 };
                 Some((self.fb.convert(kind, value, target.to_kir()), target))
             }

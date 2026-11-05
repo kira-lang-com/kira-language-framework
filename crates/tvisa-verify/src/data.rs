@@ -2,7 +2,7 @@ mod model;
 mod parser;
 mod verify;
 
-use model::TargetKind;
+use model::{DataKind, DataObject, Relocation, RelocationKind, TargetKind};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_target::Profile;

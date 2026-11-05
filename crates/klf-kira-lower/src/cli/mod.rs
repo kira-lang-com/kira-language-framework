@@ -108,12 +108,16 @@ pub(crate) fn prepare(session: &mut Session, mut file: File) -> File {
         }
     }
     for decl in &mut file.decls {
+        let DeclKind::Struct(candidate) = &decl.kind else {
+            continue;
+        };
+        if !spec::conforms(candidate) {
+            continue;
+        }
+        let decl = std::sync::Arc::make_mut(decl);
         let DeclKind::Struct(structure) = &mut decl.kind else {
             continue;
         };
-        if !spec::conforms(structure) {
-            continue;
-        }
         structure.conforms.retain(|ty| {
             !matches!(&ty.kind, klf_kira_syntax::ast::TypeKind::Named { path, .. }
                 if path.segments.len() == 1 && path.segments[0].name.as_str() == PARSABLE_COMMAND)
@@ -122,6 +126,10 @@ pub(crate) fn prepare(session: &mut Session, mut file: File) -> File {
             !matches!(&member.kind, MemberKind::Field { name, .. } if name.name.as_str() == "configuration")
         });
     }
-    file.decls.extend(entry::declarations(&commands));
+    file.decls.extend(
+        entry::declarations(&commands)
+            .into_iter()
+            .map(std::sync::Arc::new),
+    );
     file
 }

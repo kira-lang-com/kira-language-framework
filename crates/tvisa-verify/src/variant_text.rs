@@ -1,6 +1,148 @@
 use tir_diag::Span;
-use tir_format::text::{Token, TokenKind};
-use tvisa_format::{TextVariantArchitecture as VariantArchitecture, TextVariantKey as VariantKey};
+use tir_format::text::{Token, TokenKind, lex};
+use tir_target::Architecture;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) enum VariantArchitecture {
+    Portable,
+    Aarch64,
+    X64,
+    Rv64,
+    Wasm,
+}
+
+impl VariantArchitecture {
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "portable" => Some(Self::Portable),
+            "aarch64" => Some(Self::Aarch64),
+            "x64" => Some(Self::X64),
+            "rv64" => Some(Self::Rv64),
+            "wasm" => Some(Self::Wasm),
+            _ => None,
+        }
+    }
+
+    pub(super) const fn target(self) -> Option<Architecture> {
+        match self {
+            Self::Portable => None,
+            Self::Aarch64 => Some(Architecture::Aarch64),
+            Self::X64 => Some(Architecture::X64),
+            Self::Rv64 => Some(Architecture::Rv64),
+            Self::Wasm => Some(Architecture::Wasm),
+        }
+    }
+
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Portable => "portable",
+            Self::Aarch64 => "aarch64",
+            Self::X64 => "x64",
+            Self::Rv64 => "rv64",
+            Self::Wasm => "wasm",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(super) struct VariantKey {
+    pub(super) architecture: VariantArchitecture,
+    pub(super) features: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct VariantMember {
+    pub(super) key: VariantKey,
+    pub(super) function: String,
+    pub(super) span: Span,
+}
+
+pub(super) fn parse_set(source: &str) -> Result<Vec<VariantMember>, (Span, String)> {
+    let tokens = lex(source).map_err(|error| (error.span, error.message.to_owned()))?;
+    let tokens = tokens
+        .into_iter()
+        .filter(|token| !matches!(token.kind, TokenKind::End))
+        .collect::<Vec<_>>();
+    let mut cursor = 0;
+    skip_newlines(&tokens, &mut cursor);
+    expect_atom(&tokens, &mut cursor, "variants")?;
+    let Some((_, end, _)) = read_symbol(&tokens, cursor) else {
+        return Err((
+            peek_span(&tokens, cursor),
+            "expected variant-set symbol".to_owned(),
+        ));
+    };
+    cursor = end;
+    expect_punctuation(&tokens, &mut cursor, '{')?;
+
+    let mut members = Vec::new();
+    loop {
+        skip_newlines(&tokens, &mut cursor);
+        if is_punctuation_at(&tokens, cursor, '}') {
+            cursor += 1;
+            break;
+        }
+        if cursor >= tokens.len() {
+            return Err((
+                peek_span(&tokens, cursor),
+                "unterminated variant set".to_owned(),
+            ));
+        }
+        let start = tokens[cursor].span.start;
+        let arch_name = take_atom(&tokens, &mut cursor, "expected variant architecture")?;
+        let architecture = VariantArchitecture::parse(&arch_name).ok_or_else(|| {
+            (
+                tokens[cursor - 1].span,
+                format!("unknown variant architecture {arch_name}"),
+            )
+        })?;
+        let mut features = Vec::new();
+        if is_punctuation_at(&tokens, cursor, '[') {
+            cursor += 1;
+            loop {
+                features.push(take_atom(&tokens, &mut cursor, "expected variant feature")?);
+                if is_punctuation_at(&tokens, cursor, ',') {
+                    cursor += 1;
+                    continue;
+                }
+                expect_punctuation(&tokens, &mut cursor, ']')?;
+                break;
+            }
+        }
+        features.sort_unstable();
+        expect_punctuation(&tokens, &mut cursor, ':')?;
+        let Some((function, next, symbol_span)) = read_symbol(&tokens, cursor) else {
+            return Err((
+                peek_span(&tokens, cursor),
+                "expected variant member function".to_owned(),
+            ));
+        };
+        cursor = next;
+        members.push(VariantMember {
+            key: VariantKey {
+                architecture,
+                features,
+            },
+            function,
+            span: Span::new(start, symbol_span.end),
+        });
+        skip_newlines(&tokens, &mut cursor);
+    }
+    skip_newlines(&tokens, &mut cursor);
+    if cursor != tokens.len() {
+        return Err((
+            tokens[cursor].span,
+            "unexpected token after variant set".to_owned(),
+        ));
+    }
+    if members.is_empty() {
+        return Err((
+            Span::new(0, source.len()),
+            "variant set must have at least one member".to_owned(),
+        ));
+    }
+    Ok(members)
+}
 
 pub(super) fn parse_function_variant(
     header: &[Token],
@@ -115,6 +257,18 @@ pub(super) fn is_punctuation(token: &Token, expected: char) -> bool {
     matches!(token.kind, TokenKind::Punctuation(value) if value == expected)
 }
 
+fn expect_atom(tokens: &[Token], cursor: &mut usize, expected: &str) -> Result<(), (Span, String)> {
+    if tokens
+        .get(*cursor)
+        .is_some_and(|token| is_atom(token, expected))
+    {
+        *cursor += 1;
+        Ok(())
+    } else {
+        Err((peek_span(tokens, *cursor), format!("expected {expected}")))
+    }
+}
+
 fn take_atom(
     tokens: &[Token],
     cursor: &mut usize,
@@ -140,6 +294,15 @@ fn expect_punctuation(
         Ok(())
     } else {
         Err((peek_span(tokens, *cursor), format!("expected '{expected}'")))
+    }
+}
+
+fn skip_newlines(tokens: &[Token], cursor: &mut usize) {
+    while tokens
+        .get(*cursor)
+        .is_some_and(|token| matches!(token.kind, TokenKind::Newline))
+    {
+        *cursor += 1;
     }
 }
 

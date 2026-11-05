@@ -41,63 +41,74 @@ pub fn parse_function_signature(
     }
 }
 
-/// Returns the token index where declaration attributes begin for a function.
+/// Reports whether a function declaration uses the platform C ABI.
 ///
-/// This is shared with the text-to-binary assembler so signature attributes are
-/// parsed after the result and optional failure types have been consumed using
-/// the same type-prefix rules as the public signature parser.
-pub(super) fn function_attribute_start(source: &str) -> Result<Option<usize>, BodyParseError> {
-    let tokens = lex(source).map_err(|error| BodyParseError {
-        span: error.span,
-        message: error.message.to_owned(),
-    })?;
+/// Only attributes after the declaration's own result and failure types are
+/// considered, so a nested function type with `abi(c)` does not change the
+/// ABI of the declaration containing it.
+pub fn function_uses_c_abi(source: &str) -> bool {
+    let Ok(tokens) = lex(source) else {
+        return false;
+    };
     if tokens.first().and_then(token_atom) != Some("func") {
-        return Ok(None);
+        return false;
     }
-    let (open, close) = parameter_parens(&tokens)?;
-    let arrow = tokens[close + 1..]
+    let Ok((_, close)) = parameter_parens(&tokens) else {
+        return false;
+    };
+    let Some(arrow) = tokens[close + 1..]
         .iter()
         .position(|token| matches!(token.kind, TokenKind::Arrow))
         .map(|index| close + 1 + index)
-        .ok_or_else(|| parse_error(tokens[close].span, "function signature is missing '->'"))?;
-    let (_, result_end) = parse_type_prefix(source, &tokens, arrow + 1)?;
-    let (_, attribute_start) = parse_optional_failure(source, &tokens, result_end)?;
-    let _ = open;
-    Ok(Some(attribute_start))
+    else {
+        return false;
+    };
+    let Ok((_, result_end)) = parse_type_prefix(source, &tokens, arrow + 1) else {
+        return false;
+    };
+    let Ok((_, attributes_start)) = parse_optional_failure(source, &tokens, result_end) else {
+        return false;
+    };
+    let attributes_end = header_end(&tokens, attributes_start);
+    tokens[attributes_start..attributes_end]
+        .windows(4)
+        .any(|attribute| {
+            token_atom(&attribute[0]) == Some("abi")
+                && matches!(attribute[1].kind, TokenKind::Punctuation('('))
+                && token_atom(&attribute[2]) == Some("c")
+                && matches!(attribute[3].kind, TokenKind::Punctuation(')'))
+        })
 }
 
-/// Reports whether a function declaration explicitly selects the C ABI.
-///
-/// Function types nested in parameters, results or failure types are parsed as
-/// part of the signature and do not affect the declaration's own ABI.
-pub fn function_uses_c_abi(source: &str) -> Result<Option<bool>, BodyParseError> {
-    let tokens = lex(source).map_err(|error| BodyParseError {
-        span: error.span,
-        message: error.message.to_owned(),
-    })?;
+/// Reports whether the outer function declaration has a bare header attribute.
+/// Nested function types in parameters and results are excluded.
+pub fn function_has_header_attribute(source: &str, name: &str) -> bool {
+    let Ok(tokens) = lex(source) else {
+        return false;
+    };
     if tokens.first().and_then(token_atom) != Some("func") {
-        return Ok(None);
+        return false;
     }
-    let (_, close) = parameter_parens(&tokens)?;
-    let arrow = tokens[close + 1..]
+    let Ok((_, close)) = parameter_parens(&tokens) else {
+        return false;
+    };
+    let Some(arrow) = tokens[close + 1..]
         .iter()
         .position(|token| matches!(token.kind, TokenKind::Arrow))
         .map(|index| close + 1 + index)
-        .ok_or_else(|| parse_error(tokens[close].span, "function signature is missing '->'"))?;
-    let (_, result_end) = parse_type_prefix(source, &tokens, arrow + 1)?;
-    let (_, attributes_start) = parse_optional_failure(source, &tokens, result_end)?;
-    for (index, token) in tokens.iter().enumerate().skip(attributes_start) {
-        if token_atom(token) != Some("abi") {
-            continue;
-        }
-        let is_c_abi = tokens.get(index + 1..index + 4).is_some_and(|suffix| {
-            matches!(suffix[0].kind, TokenKind::Punctuation('('))
-                && token_atom(&suffix[1]) == Some("c")
-                && matches!(suffix[2].kind, TokenKind::Punctuation(')'))
-        });
-        return Ok(Some(is_c_abi));
-    }
-    Ok(Some(false))
+    else {
+        return false;
+    };
+    let Ok((_, result_end)) = parse_type_prefix(source, &tokens, arrow + 1) else {
+        return false;
+    };
+    let Ok((_, attributes_start)) = parse_optional_failure(source, &tokens, result_end) else {
+        return false;
+    };
+    let attributes_end = header_end(&tokens, attributes_start);
+    tokens[attributes_start..attributes_end]
+        .iter()
+        .any(|token| token_atom(token) == Some(name))
 }
 
 fn parse_func_signature(

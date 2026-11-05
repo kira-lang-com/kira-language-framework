@@ -65,7 +65,7 @@ pub fn load_package(root: &Path) -> Result<DefinitionPackage, PackageError> {
         let mut shared = Vec::new();
         collect_sources(&included.path, &included.path, &mut shared)?;
         for mut source in shared {
-            source.name = format!("{}/{}", included.name, source.name);
+            source.name = format!("{}/{}", included.name, source.name).into();
             sources.push(source);
         }
     }
@@ -315,7 +315,7 @@ impl LanguageDefinition {
         for source in inputs {
             let selected_mode = match select_file_mode(
                 &self.metadata.descriptor.file_modes,
-                Path::new(&source.name),
+                Path::new(source.name.as_ref()),
                 &source.text,
                 &[],
             ) {
@@ -328,7 +328,7 @@ impl LanguageDefinition {
                     return None;
                 }
             };
-            let file = session.add_file(source.name.as_str(), source.text.clone());
+            let file = session.add_file(source.name.as_ref(), source.text.clone());
             let (memory, convention) = effective_file_defaults(
                 self.metadata.descriptor.memory,
                 self.metadata.descriptor.convention,

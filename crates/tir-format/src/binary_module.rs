@@ -1,6 +1,5 @@
 use crate::leb::{LebError, read_uleb, write_uleb};
-use crate::{BinaryModule, FormatError, SemanticsMode, StringTable};
-use tir_target::Profile;
+use crate::{BinaryModule, FormatError, SemanticsMode, StringTable, StringTableBuilder};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BinaryProducer {
@@ -27,26 +26,58 @@ pub struct BinaryModuleRecord {
 }
 
 impl BinaryModuleRecord {
-    pub fn encode(&self, strings: &StringTable, profile: Profile) -> Result<Vec<u8>, FormatError> {
+    /// Adds MODULE strings in their section traversal order to the canonical table.
+    pub fn intern_strings(&self, strings: &mut StringTableBuilder) -> Result<(), FormatError> {
+        intern_string(strings, &self.name)?;
+        if let Some(producer) = &self.producer {
+            intern_string(strings, &producer.name)?;
+            intern_string(strings, &producer.version)?;
+            for language in &producer.languages {
+                intern_string(strings, language)?;
+            }
+        }
+        for (key, value) in &self.attributes {
+            intern_string(strings, key)?;
+            intern_string(strings, value)?;
+        }
+        Ok(())
+    }
+
+    /// Encodes the MODULE payload using indices from the canonical STRINGS table.
+    pub fn encode(
+        &self,
+        strings: &StringTable,
+        profile: tir_target::Profile,
+    ) -> Result<Vec<u8>, FormatError> {
         if self.name.is_empty() {
             return Err(FormatError::malformed(None, "module name is empty"));
         }
-        if (profile == Profile::Driver) != self.source_hash.is_some() {
-            return Err(FormatError::malformed(
-                None,
-                "source hash is required only for the driver profile",
-            ));
+        match (profile, self.source_hash.is_some()) {
+            (tir_target::Profile::Driver, true) => {}
+            (tir_target::Profile::Driver, false) => {
+                return Err(FormatError::malformed(
+                    None,
+                    "driver MODULE record is missing its source hash",
+                ));
+            }
+            (_, true) => {
+                return Err(FormatError::malformed(
+                    None,
+                    "non-driver MODULE record cannot contain a source hash",
+                ));
+            }
+            (_, false) => {}
         }
 
         let mut bytes = Vec::new();
-        write_string(&self.name, strings, &mut bytes)?;
+        write_string_index(&mut bytes, strings, &self.name)?;
         if let Some(producer) = &self.producer {
             bytes.push(1);
-            write_string(&producer.name, strings, &mut bytes)?;
-            write_string(&producer.version, strings, &mut bytes)?;
-            write_count(producer.languages.len(), &mut bytes)?;
+            write_string_index(&mut bytes, strings, &producer.name)?;
+            write_string_index(&mut bytes, strings, &producer.version)?;
+            write_count(&mut bytes, producer.languages.len())?;
             for language in &producer.languages {
-                write_string(language, strings, &mut bytes)?;
+                write_string_index(&mut bytes, strings, language)?;
             }
         } else {
             bytes.push(0);
@@ -55,18 +86,55 @@ impl BinaryModuleRecord {
             SemanticsMode::Defined => 0,
             SemanticsMode::Permissive => 1,
         });
-        write_count(self.attributes.len(), &mut bytes)?;
+        write_count(&mut bytes, self.attributes.len())?;
         for (key, value) in &self.attributes {
-            write_string(key, strings, &mut bytes)?;
-            write_string(value, strings, &mut bytes)?;
+            write_string_index(&mut bytes, strings, key)?;
+            write_string_index(&mut bytes, strings, value)?;
         }
-        write_initializers(&self.initializers, &mut bytes)?;
-        write_initializers(&self.finalizers, &mut bytes)?;
+        write_initializers(&mut bytes, &self.initializers)?;
+        write_initializers(&mut bytes, &self.finalizers)?;
         if let Some(source_hash) = self.source_hash {
             bytes.extend_from_slice(&source_hash);
         }
         Ok(bytes)
     }
+}
+
+fn intern_string(strings: &mut StringTableBuilder, value: &str) -> Result<(), FormatError> {
+    strings
+        .intern(value)
+        .map(|_| ())
+        .map_err(|error| FormatError::malformed(None, error.message))
+}
+
+fn write_string_index(
+    bytes: &mut Vec<u8>,
+    strings: &StringTable,
+    value: &str,
+) -> Result<(), FormatError> {
+    let index = strings
+        .index_of(value)
+        .ok_or_else(|| FormatError::malformed(None, "MODULE string is missing from STRINGS"))?;
+    write_uleb(index, bytes).map_err(|error| FormatError::malformed(None, error.to_string()))
+}
+
+fn write_count(bytes: &mut Vec<u8>, count: usize) -> Result<(), FormatError> {
+    let count = u64::try_from(count)
+        .map_err(|_| FormatError::malformed(None, "MODULE count does not fit in ULEB128"))?;
+    write_uleb(count, bytes).map_err(|error| FormatError::malformed(None, error.to_string()))
+}
+
+fn write_initializers(
+    bytes: &mut Vec<u8>,
+    initializers: &[BinaryInitializer],
+) -> Result<(), FormatError> {
+    write_count(bytes, initializers.len())?;
+    for initializer in initializers {
+        write_uleb(initializer.function_index, bytes)
+            .map_err(|error| FormatError::malformed(None, error.to_string()))?;
+        bytes.extend_from_slice(&initializer.priority.to_le_bytes());
+    }
+    Ok(())
 }
 
 impl BinaryModule {
@@ -184,42 +252,6 @@ fn read_initializers(
         });
     }
     Ok(initializers)
-}
-
-fn write_initializers(
-    initializers: &[BinaryInitializer],
-    bytes: &mut Vec<u8>,
-) -> Result<(), FormatError> {
-    write_count(initializers.len(), bytes)?;
-    for initializer in initializers {
-        write_index(initializer.function_index, bytes)?;
-        bytes.extend_from_slice(&initializer.priority.to_le_bytes());
-    }
-    Ok(())
-}
-
-fn write_string(
-    value: &str,
-    strings: &StringTable,
-    bytes: &mut Vec<u8>,
-) -> Result<(), FormatError> {
-    let index = strings
-        .index_of(value)
-        .ok_or_else(|| FormatError::malformed(None, "MODULE string is absent from STRINGS"))?;
-    let index = u64::try_from(index)
-        .map_err(|_| FormatError::malformed(None, "MODULE string index overflows"))?;
-    write_index(index, bytes)
-}
-
-fn write_count(count: usize, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    let count = u64::try_from(count)
-        .map_err(|_| FormatError::malformed(None, "MODULE record count overflows"))?;
-    write_index(count, bytes)
-}
-
-fn write_index(index: u64, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(index, bytes)
-        .map_err(|error| FormatError::malformed(None, format!("MODULE encoding failed: {error}")))
 }
 
 fn read_string(

@@ -341,13 +341,9 @@ fn verify_convert(
     let is_float = source.is_some_and(Type::is_float);
     let is_ptr = matches!(source, Some(Type::Pointer));
     let ok = match kind {
-        ConvertKind::Truncate
-        | ConvertKind::ZeroExtend
-        | ConvertKind::SignExtend
-        | ConvertKind::SignedToSignedSaturating
-        | ConvertKind::SignedToUnsignedSaturating
-        | ConvertKind::UnsignedToSignedSaturating
-        | ConvertKind::UnsignedToUnsignedSaturating => is_int && ty.is_integer(),
+        ConvertKind::Truncate | ConvertKind::ZeroExtend | ConvertKind::SignExtend => {
+            is_int && ty.is_integer()
+        }
         ConvertKind::FloatTruncate | ConvertKind::FloatExtend => is_float && ty.is_float(),
         ConvertKind::SignedToFloat | ConvertKind::UnsignedToFloat => is_int && ty.is_float(),
         ConvertKind::FloatToSigned

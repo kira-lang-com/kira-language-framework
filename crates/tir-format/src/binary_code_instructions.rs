@@ -572,10 +572,7 @@ fn decode_instruction(
         },
     };
     let Some(((), expected_results, terminator)) = decoded else {
-        return Err(malformed(
-            base + start,
-            format!("unassigned TIR CODE opcode 0x{opcode:03X}"),
-        ));
+        return Ok(None);
     };
     if result_count != expected_results {
         return Err(malformed(

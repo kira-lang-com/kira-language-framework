@@ -84,7 +84,10 @@ pub(super) fn size(function: &Function) -> usize {
 pub(super) fn slow_paths(module: &Module, small: usize, trivial: usize) -> HashSet<Name> {
     let functions = &module.functions;
     let mut callers: HashMap<&Name, Vec<usize>> = HashMap::default();
-    let calls: Vec<Vec<Name>> = functions.iter().map(calls_of).collect();
+    let calls: Vec<Vec<Name>> = functions
+        .iter()
+        .map(|function| calls_of(function))
+        .collect();
     for (position, names) in calls.iter().enumerate() {
         for name in names {
             callers.entry(name).or_default().push(position);

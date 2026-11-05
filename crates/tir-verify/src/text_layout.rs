@@ -30,6 +30,53 @@ pub(super) fn from_module(module: &TextModule) -> (LayoutEngine, Vec<Diagnostic>
             ),
         }
     }
+    for item in module
+        .items
+        .iter()
+        .filter(|item| item.kind == TextItemKind::Import)
+    {
+        let source = module.item_text(*item);
+        let Ok(tokens) = lex(source) else {
+            continue;
+        };
+        for index in 0..tokens.len() {
+            if atom_at(&tokens, index) != Some("type") {
+                continue;
+            }
+            let Some(symbol_start) = (index + 1..tokens.len()).find(|cursor| {
+                punctuation(&tokens[*cursor], '@')
+                    || matches!(tokens[*cursor].kind, TokenKind::Punctuation('}' | '\n'))
+            }) else {
+                continue;
+            };
+            let Some((_, symbol_end, _)) = crate::variant_text::read_symbol(&tokens, symbol_start)
+            else {
+                continue;
+            };
+            let Some(colon) = (symbol_end..tokens.len()).find(|cursor| {
+                punctuation(&tokens[*cursor], ':')
+                    || matches!(tokens[*cursor].kind, TokenKind::Punctuation(',' | '}'))
+            }) else {
+                continue;
+            };
+            if !punctuation(&tokens[colon], ':') {
+                continue;
+            }
+            let end = crate::signature_types::type_item_end(&tokens, colon + 1);
+            let Some(first) = tokens.get(colon + 1) else {
+                continue;
+            };
+            let Some(last) = tokens.get(end.saturating_sub(1)) else {
+                continue;
+            };
+            let Some(text) = source.get(first.span.start..last.span.end) else {
+                continue;
+            };
+            if let Ok(Type::Nominal { path, .. }) = parse_type(text) {
+                engine.register_imported_nominal(path);
+            }
+        }
+    }
     (engine, diagnostics)
 }
 

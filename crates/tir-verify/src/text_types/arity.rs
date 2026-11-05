@@ -11,7 +11,6 @@ pub(super) fn expected_operand_count(opcode: &str) -> Option<usize> {
         || matches!(
             opcode,
             "field.addr"
-                | "stack.dealloc"
                 | "enum.payload.addr"
                 | "addr.cast"
                 | "addr.toptr"

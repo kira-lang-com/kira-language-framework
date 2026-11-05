@@ -10,6 +10,7 @@ mod editor;
 mod emit;
 mod expansion;
 mod flags;
+mod query_diagnostics;
 mod runtime_diagnostics;
 mod scope;
 
@@ -24,7 +25,7 @@ use crate::definition::{
     DefaultConvention, DefinitionUnit, DriverFlagValue, Exclusivity, MemoryModel,
 };
 use crate::diagnostics::{DiagnosticSpec, ResolvedRuntimeDiagnostic};
-use crate::query::QueryStore;
+use crate::query::{QueryId, QueryStore};
 use crate::service::{KERNEL_SERVICE_MANIFEST, KernelService, KernelServiceManifest};
 use crate::shader_family::ShaderSettings;
 use crate::solver::TraitStore;
@@ -118,6 +119,8 @@ pub struct Session {
     std_root: String,
     pub(crate) shader: Option<ShaderSettings>,
     files: Vec<SourceFile>,
+    file_identities: Vec<Option<crate::FileIdentity>>,
+    file_ids: HashMap<Name, FileId>,
     file_modes: Vec<Option<usize>>,
     file_memories: Vec<Option<MemoryModel>>,
     file_exclusivities: Vec<Option<Exclusivity>>,
@@ -128,7 +131,10 @@ pub struct Session {
     language_defaults: Option<LanguageDefaults>,
     units: Vec<DefinitionUnit>,
     unit_ids: HashMap<DefinitionUnit, UnitId>,
+    units_by_file: HashMap<FileId, Vec<UnitId>>,
     diagnostics: Vec<Diagnostic>,
+    diagnostic_owners: Vec<Option<QueryId>>,
+    query_diagnostics: HashMap<QueryId, Vec<Diagnostic>>,
     runtime_diagnostics: Vec<ResolvedRuntimeDiagnostic>,
     diagnostic_specs: HashMap<i64, DiagnosticSpec>,
     symbols: HashMap<Name, Name>,
@@ -158,6 +164,8 @@ impl Session {
             std_root: String::new(),
             shader: None,
             files: Vec::new(),
+            file_identities: Vec::new(),
+            file_ids: HashMap::new(),
             file_modes: Vec::new(),
             file_memories: Vec::new(),
             file_exclusivities: Vec::new(),
@@ -166,7 +174,10 @@ impl Session {
             language_defaults: None,
             units: Vec::new(),
             unit_ids: HashMap::new(),
+            units_by_file: HashMap::new(),
             diagnostics: Vec::new(),
+            diagnostic_owners: Vec::new(),
+            query_diagnostics: HashMap::new(),
             runtime_diagnostics: Vec::new(),
             diagnostic_specs: HashMap::new(),
             symbols: HashMap::new(),
@@ -236,8 +247,23 @@ impl Session {
         name: impl Into<Name>,
         text: impl Into<std::sync::Arc<str>>,
     ) -> FileId {
+        self.add_file_with_identity(name, text, None)
+    }
+
+    /// Registers source text with the filesystem identity captured when it
+    /// was read. The identity is used to validate cached query inputs without
+    /// rereading unchanged source text.
+    pub fn add_file_with_identity(
+        &mut self,
+        name: impl Into<Name>,
+        text: impl Into<std::sync::Arc<str>>,
+        identity: Option<crate::FileIdentity>,
+    ) -> FileId {
+        let name = name.into();
         let id = FileId::from_u32(u32::try_from(self.files.len()).expect("file count fits u32"));
-        self.files.push(SourceFile::new(id, name, text));
+        self.files.push(SourceFile::new(id, name.clone(), text));
+        self.file_identities.push(identity);
+        self.file_ids.entry(name).or_insert(id);
         self.file_modes.push(None);
         self.file_memories.push(None);
         self.file_exclusivities.push(None);
@@ -266,12 +292,38 @@ impl Session {
                 }
                 Err(error) => {
                     let message = format!("{}: {error}", file.name());
-                    self.diagnostics
-                        .push(Diagnostic::error("KLF-DRV-0022", message));
+                    self.report(Diagnostic::error("KLF-DRV-0022", message));
                 }
             }
         }
         id
+    }
+
+    /// The filesystem identity captured for `file`, when it came from an
+    /// unchanged on-disk read.
+    #[must_use]
+    pub fn file_identity(&self, file: FileId) -> Option<&crate::FileIdentity> {
+        self.file_identities
+            .get(file.index())
+            .and_then(Option::as_ref)
+    }
+
+    /// Registers a source by its stable name, replacing its text when it
+    /// already belongs to this session.
+    pub fn upsert_file(
+        &mut self,
+        name: impl AsRef<str>,
+        text: impl Into<std::sync::Arc<str>>,
+    ) -> FileId {
+        let name = name.as_ref();
+        let text = text.into();
+        if let Some(id) = self.file_ids.get(name).copied() {
+            if !self.file(id).shares_text_with(&text) && self.file(id).text() != text.as_ref() {
+                self.replace_file(id, text);
+            }
+            return id;
+        }
+        self.add_file(Name::new(name), text)
     }
 
     #[must_use]
@@ -385,6 +437,9 @@ impl Session {
         }
         let id = UnitId(u32::try_from(self.units.len()).expect("unit count fits u32"));
         self.unit_ids.insert(unit.clone(), id);
+        for file in unit.files() {
+            self.units_by_file.entry(*file).or_default().push(id);
+        }
         self.units.push(unit);
         id
     }
@@ -402,18 +457,15 @@ impl Session {
     /// The first registered unit holding `file`.
     #[must_use]
     pub fn unit_holding(&self, file: FileId) -> Option<UnitId> {
-        let index = self
-            .units
-            .iter()
-            .position(|unit| unit.files().contains(&file))?;
-        u32::try_from(index).ok().map(UnitId)
+        self.units_by_file.get(&file)?.first().copied()
     }
 
     /// Replaces a registered file and invalidates queries that read it.
     pub fn replace_file(&mut self, id: FileId, text: impl Into<std::sync::Arc<str>>) {
         let name = self.file(id).name().clone();
         self.files[id.index()] = SourceFile::new(id, name, text);
-        self.invalidate_file(id);
+        let invalidated = self.invalidate_file(id);
+        self.invalidate_query_diagnostics(&invalidated);
     }
 
     #[must_use]
@@ -424,10 +476,8 @@ impl Session {
     /// Returns a registered source's current text by path/name.
     #[must_use]
     pub fn input(&self, name: &str) -> Option<String> {
-        self.files
-            .iter()
-            .find(|file| file.name().as_str() == name)
-            .map(|file| file.text().to_owned())
+        let id = self.file_ids.get(name)?;
+        Some(self.file(*id).text().to_owned())
     }
 
     /// All source files registered in this session, in file-id order.
@@ -488,10 +538,6 @@ impl Session {
         &mut self.traits
     }
 
-    pub fn report(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics.push(diagnostic);
-    }
-
     pub fn report_error(&mut self, code: &'static str, span: Span, message: impl Into<String>) {
         self.report(Diagnostic::error_at(code, span, message));
     }
@@ -547,6 +593,8 @@ impl Session {
         let snapshot = SessionSnapshot {
             flags: self.flags.clone(),
             files: self.files.clone(),
+            file_identities: self.file_identities.clone(),
+            file_ids: self.file_ids.clone(),
             file_modes: self.file_modes.clone(),
             file_memories: self.file_memories.clone(),
             file_exclusivities: self.file_exclusivities.clone(),
@@ -554,7 +602,10 @@ impl Session {
             expansions: self.expansions.clone(),
             units: self.units.clone(),
             unit_ids: self.unit_ids.clone(),
+            units_by_file: self.units_by_file.clone(),
             diagnostics: self.diagnostics.clone(),
+            diagnostic_owners: self.diagnostic_owners.clone(),
+            query_diagnostics: self.query_diagnostics.clone(),
             runtime_diagnostics: self.runtime_diagnostics.clone(),
             diagnostic_specs: self.diagnostic_specs.clone(),
             symbols: self.symbols.clone(),
@@ -574,6 +625,8 @@ impl Session {
             self.arenas.rollback_speculation(marker);
             self.flags = snapshot.flags;
             self.files = snapshot.files;
+            self.file_identities = snapshot.file_identities;
+            self.file_ids = snapshot.file_ids;
             self.file_modes = snapshot.file_modes;
             self.file_memories = snapshot.file_memories;
             self.file_exclusivities = snapshot.file_exclusivities;
@@ -581,7 +634,10 @@ impl Session {
             self.expansions = snapshot.expansions;
             self.units = snapshot.units;
             self.unit_ids = snapshot.unit_ids;
+            self.units_by_file = snapshot.units_by_file;
             self.diagnostics = snapshot.diagnostics;
+            self.diagnostic_owners = snapshot.diagnostic_owners;
+            self.query_diagnostics = snapshot.query_diagnostics;
             self.runtime_diagnostics = snapshot.runtime_diagnostics;
             self.diagnostic_specs = snapshot.diagnostic_specs;
             self.symbols = snapshot.symbols;
@@ -612,6 +668,8 @@ impl Session {
 struct SessionSnapshot {
     flags: HashMap<String, DriverFlagValue>,
     files: Vec<SourceFile>,
+    file_identities: Vec<Option<crate::FileIdentity>>,
+    file_ids: HashMap<Name, FileId>,
     file_modes: Vec<Option<usize>>,
     file_memories: Vec<Option<MemoryModel>>,
     file_exclusivities: Vec<Option<Exclusivity>>,
@@ -619,7 +677,10 @@ struct SessionSnapshot {
     expansions: Vec<Expansion>,
     units: Vec<DefinitionUnit>,
     unit_ids: HashMap<DefinitionUnit, UnitId>,
+    units_by_file: HashMap<FileId, Vec<UnitId>>,
     diagnostics: Vec<Diagnostic>,
+    diagnostic_owners: Vec<Option<QueryId>>,
+    query_diagnostics: HashMap<QueryId, Vec<Diagnostic>>,
     runtime_diagnostics: Vec<ResolvedRuntimeDiagnostic>,
     diagnostic_specs: HashMap<i64, DiagnosticSpec>,
     symbols: HashMap<Name, Name>,

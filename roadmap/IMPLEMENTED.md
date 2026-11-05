@@ -3,6 +3,50 @@
 This file records behavior present in the current tree and its validation
 evidence. The normative requirements remain in the applicable specification.
 
+
+## TIR T0/T1 work in progress (2026-11-05)
+
+T0 and T1 remain **open**. The TIR text assembler now accepts SSA sequences
+of `const.int`, `const.bool`, integer operations, `icmp`, `select`, and `return`,
+including intermediate values within multiple basic blocks. The control-flow
+path also supports `br`/`cond.br`, typed block parameters and edge arguments,
+conditional branches after local operations, and loop back-edges. SSA value
+numbering spans block parameters and instruction results in CODE order. The
+paired disassembler reconstructs these supported sequences, interns implicit
+`i1` results for `icmp`, and round-trips canonical binary bytes. Unsupported
+instructions and block annotations still fail explicitly; this is not a
+general-purpose CODE assembler or disassembler.
+
+The active `tirc asm` path now verifies decoded binary records before writing;
+`tirc dis` checks that its text reassembles to exactly the source bytes. The
+TIR text verifier now invokes the existing SSA value-dominance analysis,
+reporting undefined/non-dominating operands under V1. The binary dominance
+verifier now also reports non-dominance as V1 instead of incorrectly labeling
+it V4 (which is reserved for ownership consumption). The binary call-signature
+verifier's generic type-argument integration was repaired: its call checker
+compiles and compares specialized result/error edge types for `try.call` and
+`invoke`, with generic argument inference retained.
+
+Validation evidence in this tree:
+
+- `cargo nextest run -p tir-format -p tir-verify --no-fail-fast`: **18 passed**
+  (text/binary verifier positive and negative cases, V1/V3 regressions,
+  SSA chains, mixed constants, typed multi-block edge arguments, local
+  operations in several blocks, loop back-edges, and exact binary-text-binary
+  round trips).
+- `cargo check -p klf-cli`: **passed** after the multi-block assembly work.
+  A full rebuilt CLI executable was **not validated**: an earlier full build
+  ran out of disk space. Only regenerable Cargo release dependency caches
+  were cleared; the existing release CLI executable was preserved.
+
+Remaining to close T0: full section/item support, additional operation and
+block-annotation encoding, unrestricted SSA references across dominating
+blocks, a canonical encoding corpus, and the complete encoding suite. Remaining to close T1: type/layout edge cases, full V1–V21 and S1–S7
+positive/negative conformance suites, and mandatory `tirc canonicalize` passes
+(definite initialization, copy/move resolution, borrow checking, destroy
+insertion, address-only lowering). No end-to-end T1 certification is claimed.
+
+
 ## What remains (audited against the tree, 2026-10-17)
 
 The dated sections below are a log. Their "deferred" and "not done" lists are

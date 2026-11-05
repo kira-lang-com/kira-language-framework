@@ -181,7 +181,8 @@ fn fold(
         memory_bytes: 256 << 20,
     };
     let mut globals = Vec::new();
-    for function in &mut module.functions {
+    for shared in &mut module.functions {
+        let function = std::sync::Arc::make_mut(shared);
         if marked.contains(&function.name) {
             continue;
         }
@@ -303,13 +304,19 @@ fn evaluator(module: &Module, called: Vec<&Name>) -> Module {
         .enumerate()
         .filter(|(position, _)| reached.contains(position))
         .map(|(_, function)| {
-            let mut function = function.clone();
-            if !needed.contains(&&function.name) {
+            if needed.contains(&&function.name)
+                || !function
+                    .attributes
+                    .contains(&klf_kir::FunctionAttribute::Initializer)
+            {
+                std::sync::Arc::clone(function)
+            } else {
+                let mut function = function.as_ref().clone();
                 function
                     .attributes
                     .retain(|attribute| *attribute != klf_kir::FunctionAttribute::Initializer);
+                std::sync::Arc::new(function)
             }
-            function
         })
         .collect();
     Module {
@@ -344,6 +351,7 @@ fn needed_initializers<'a>(module: &'a Module, called: &[&'a Name]) -> Vec<&'a N
                 .attributes
                 .contains(&klf_kir::FunctionAttribute::Initializer)
         })
+        .map(std::sync::Arc::as_ref)
         .collect();
     let mut globals = addressed_globals(module, called.iter().copied());
     let mut needed: Vec<&'a Name> = Vec::new();

@@ -12,7 +12,6 @@ mod format;
 mod kir;
 mod ksir;
 mod lsp;
-mod pipeline;
 mod push;
 mod ridl;
 mod setup;
@@ -20,6 +19,7 @@ mod test;
 mod tirc;
 mod trap;
 
+use klf_cli::pipeline;
 use klf_diag::{err, out, raw, raw_err};
 use klf_driver::{Backend, LanguageDefinition};
 use klf_services::Session;

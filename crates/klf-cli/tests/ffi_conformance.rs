@@ -174,7 +174,10 @@ fn records_cross_a_foreign_call_by_value_through_the_c_shim() {
     ))
     .expect("the header parses");
     module.types = klf_klffi::type_declarations(&ffi, &rules).expect("the records lay out");
-    module.functions = foreign_declarations(&ffi, &rules);
+    module.functions = foreign_declarations(&ffi, &rules)
+        .into_iter()
+        .map(std::sync::Arc::new)
+        .collect();
     let make = module
         .functions
         .iter()

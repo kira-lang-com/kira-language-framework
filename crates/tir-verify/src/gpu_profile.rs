@@ -13,7 +13,6 @@ use crate::variant_text::read_symbol;
 
 mod advanced_types;
 mod capabilities;
-mod geometry_flow;
 mod graph;
 pub(crate) mod instructions;
 pub(super) mod policy;
@@ -93,9 +92,6 @@ pub(super) fn verify_module(module: &TextModule, layouts: &mut LayoutEngine) -> 
             symbol_span,
             body,
             entry: item.kind == TextItemKind::Entry,
-            subgroup_size: (item.kind == TextItemKind::Entry)
-                .then(|| graph::entry_subgroup_size(header))
-                .flatten(),
             exported: item.kind == TextItemKind::Function
                 && has_linkage(header, "exported")
                 && has_gpu_only_target(header),

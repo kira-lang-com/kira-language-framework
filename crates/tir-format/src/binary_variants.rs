@@ -4,116 +4,137 @@ use crate::leb::{read_uleb, write_uleb};
 use crate::types::{
     BinaryEngine, BinarySignatureTable, BinaryTarget, BinaryVariantMember, BinaryVariantSet,
 };
-use crate::{BinaryModule, FormatError, StringTable};
+use crate::{BinaryModule, FormatError, StringTable, StringTableBuilder};
 
+/// Adds VARIANTS names and features to STRINGS in record order.
+pub fn intern_variant_strings(
+    sets: &[BinaryVariantSet],
+    strings: &mut StringTableBuilder,
+) -> Result<(), FormatError> {
+    for set in sets {
+        intern_nonempty(strings, &set.name, "variant-set name")?;
+        for member in &set.members {
+            for feature in &member.features {
+                intern_nonempty(strings, feature, "variant feature")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Encodes VARIANTS and validates member/function correspondence.
 pub fn encode_variant_sets(
     sets: &[BinaryVariantSet],
     strings: &StringTable,
     signatures: &BinarySignatureTable,
 ) -> Result<Vec<u8>, FormatError> {
-    let count = u64::try_from(sets.len())
-        .map_err(|_| FormatError::malformed(None, "variant set count overflows"))?;
-    if count >= 1 << 32 {
-        return Err(FormatError::malformed(
-            None,
-            "variant set count must be less than 2^32",
-        ));
-    }
     let mut bytes = Vec::new();
-    write_index(count, &mut bytes)?;
-    let mut names = HashSet::new();
+    write_count(&mut bytes, sets.len())?;
+    let mut set_names = HashSet::new();
     let mut functions = HashSet::new();
     for set in sets {
-        if set.name.is_empty() || strings.index_of(&set.name).is_none() {
-            return Err(FormatError::malformed(
-                None,
-                "variant-set name is empty or absent from STRINGS",
-            ));
+        if set.name.is_empty() || !set_names.insert(&set.name) {
+            return Err(malformed(0, "variant-set name is empty or duplicated"));
         }
-        if !names.insert(set.name.as_str()) {
-            return Err(FormatError::malformed(None, "duplicate variant-set name"));
+        if set.members.is_empty() {
+            return Err(malformed(0, "variant set has no members"));
         }
-        let member_count = u64::try_from(set.members.len())
-            .map_err(|_| FormatError::malformed(None, "variant member count overflows"))?;
-        if member_count == 0 || member_count >= 1 << 32 {
-            return Err(FormatError::malformed(
-                None,
-                "variant set must have between 1 and 2^32-1 members",
-            ));
-        }
-        write_string(&set.name, strings, &mut bytes)?;
-        write_index(member_count, &mut bytes)?;
+        write_string_index(&mut bytes, strings, &set.name)?;
+        write_count(&mut bytes, set.members.len())?;
         let mut keys = HashSet::new();
         for member in &set.members {
-            if member.architecture > 4 {
-                return Err(FormatError::malformed(None, "invalid variant architecture"));
-            }
-            if member.architecture == 0 && !member.features.is_empty() {
-                return Err(FormatError::malformed(
-                    None,
-                    "portable variant cannot name architecture features",
-                ));
-            }
-            if member.features.iter().any(String::is_empty)
+            if member.architecture > 4
+                || (member.architecture == 0 && !member.features.is_empty())
                 || member.features.windows(2).any(|pair| pair[0] >= pair[1])
             {
-                return Err(FormatError::malformed(
-                    None,
-                    "variant features must be nonempty and strictly ordered",
+                return Err(malformed(
+                    0,
+                    "invalid architecture or variant feature order",
                 ));
             }
-            if !keys.insert((member.architecture, member.features.clone())) {
-                return Err(FormatError::malformed(
-                    None,
-                    "duplicate architecture and feature variant",
+            if !keys.insert((member.architecture, &member.features)) {
+                return Err(malformed(0, "duplicate architecture and feature variant"));
+            }
+            if !functions.insert(member.function_index) {
+                return Err(malformed(
+                    0,
+                    "variant function belongs to more than one set",
                 ));
             }
             let signature = signatures
                 .records
-                .get(usize::try_from(member.function_index).map_err(|_| {
-                    FormatError::malformed(None, "variant function index overflows memory")
-                })?)
-                .ok_or_else(|| FormatError::malformed(None, "variant function index is invalid"))?;
-            if !functions.insert(member.function_index) {
-                return Err(FormatError::malformed(
-                    None,
-                    "variant function belongs to more than one set",
-                ));
-            }
+                .get(
+                    usize::try_from(member.function_index)
+                        .map_err(|_| malformed(0, "variant function index overflows memory"))?,
+                )
+                .ok_or_else(|| malformed(0, "variant function index is invalid"))?;
             if signature.engine != Some(BinaryEngine::Native)
                 || signature.target != BinaryTarget::Cpu
             {
-                return Err(FormatError::malformed(
-                    None,
-                    "variant member must be a native CPU function",
-                ));
+                return Err(malformed(0, "variant member must be a native CPU function"));
             }
-            let expected_variant = if member.architecture == 0 {
+            let expected = if member.architecture == 0 {
                 None
             } else {
                 Some((member.architecture, member.features.as_slice()))
             };
-            let actual_variant = signature
+            let actual = signature
                 .variant
                 .as_ref()
                 .map(|variant| (variant.architecture, variant.features.as_slice()));
-            if actual_variant != expected_variant {
-                return Err(FormatError::malformed(
-                    None,
+            if expected != actual {
+                return Err(malformed(
+                    0,
                     "variant member does not match its SIGNATURES variant attribute",
                 ));
             }
             bytes.push(member.architecture);
-            let feature_count = u64::try_from(member.features.len())
-                .map_err(|_| FormatError::malformed(None, "variant feature count overflows"))?;
-            write_index(feature_count, &mut bytes)?;
+            write_count(&mut bytes, member.features.len())?;
             for feature in &member.features {
-                write_string(feature, strings, &mut bytes)?;
+                write_string_index(&mut bytes, strings, feature)?;
             }
-            write_index(member.function_index, &mut bytes)?;
+            write_uleb(member.function_index, &mut bytes).map_err(io_error)?;
         }
     }
     Ok(bytes)
+}
+
+fn intern_nonempty(
+    strings: &mut StringTableBuilder,
+    value: &str,
+    label: &str,
+) -> Result<(), FormatError> {
+    if value.is_empty() {
+        return Err(malformed(0, format!("{label} is empty")));
+    }
+    strings
+        .intern(value)
+        .map(|_| ())
+        .map_err(|error| malformed(0, error.message))
+}
+
+fn write_string_index(
+    bytes: &mut Vec<u8>,
+    strings: &StringTable,
+    value: &str,
+) -> Result<(), FormatError> {
+    let index = strings
+        .index_of(value)
+        .ok_or_else(|| malformed(0, "VARIANTS string is missing from STRINGS"))?;
+    write_uleb(index, bytes).map_err(io_error)
+}
+
+fn write_count(bytes: &mut Vec<u8>, count: usize) -> Result<(), FormatError> {
+    let count =
+        u64::try_from(count).map_err(|_| malformed(0, "VARIANTS count overflows ULEB128"))?;
+    if count >= 1 << 32 {
+        return Err(malformed(0, "VARIANTS count must be less than 2^32"));
+    }
+    write_uleb(count, bytes).map_err(io_error)
+}
+
+fn io_error(error: std::io::Error) -> FormatError {
+    malformed(0, format!("VARIANTS encoding failed: {error}"))
 }
 
 impl BinaryModule {
@@ -253,24 +274,6 @@ fn read_string(
         .get(index)
         .map(str::to_owned)
         .ok_or_else(|| malformed(offset, format!("{label} index is out of range")))
-}
-
-fn write_string(
-    value: &str,
-    strings: &StringTable,
-    bytes: &mut Vec<u8>,
-) -> Result<(), FormatError> {
-    let index = strings
-        .index_of(value)
-        .ok_or_else(|| FormatError::malformed(None, "variant string is absent from STRINGS"))?;
-    let index = u64::try_from(index)
-        .map_err(|_| FormatError::malformed(None, "variant string index overflows"))?;
-    write_index(index, bytes)
-}
-
-fn write_index(index: u64, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(index, bytes)
-        .map_err(|error| FormatError::malformed(None, format!("VARIANTS encoding failed: {error}")))
 }
 
 fn read_count(

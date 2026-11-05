@@ -53,7 +53,7 @@ pub struct SourceFile {
     name: Name,
     text: Arc<str>,
     hash: u64,
-    line_starts: Vec<u32>,
+    line_starts: Arc<[u32]>,
 }
 
 impl SourceFile {
@@ -77,7 +77,7 @@ impl SourceFile {
             name: name.into(),
             hash: source_hash(&text),
             text,
-            line_starts,
+            line_starts: line_starts.into(),
         }
     }
 
@@ -94,6 +94,14 @@ impl SourceFile {
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Whether `text` is the same shared allocation already held by this
+    /// source file. This avoids comparing source bytes when an incremental
+    /// caller reuses an unchanged input buffer.
+    #[must_use]
+    pub fn shares_text_with(&self, text: &Arc<str>) -> bool {
+        Arc::ptr_eq(&self.text, text)
     }
 
     /// The text, shared without copying.

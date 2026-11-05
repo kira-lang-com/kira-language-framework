@@ -1,23 +1,16 @@
 use tir_format::{
-    BinaryImport, BinaryInstruction, BinaryOperand, BinarySignatureTable, BinaryType,
-    BinaryTypeTable,
+    BinaryInstruction, BinaryOperand, BinarySignatureTable, BinaryType, BinaryTypeTable,
 };
 
 pub(super) fn infer_start_result(
     instruction: &BinaryInstruction,
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
-    imports: Option<&[BinaryImport]>,
 ) -> Option<u64> {
-    let symbol_index = function_index(instruction)?;
-    let symbol = crate::binary_symbols::resolve_function_symbol(
-        symbol_index,
-        signatures,
-        types,
-        imports.unwrap_or_default(),
-    )?;
-    let signature = symbol.signature?;
-    symbol.local_index?;
+    let function_index = function_index(instruction)?;
+    let signature = signatures
+        .records
+        .get(usize::try_from(function_index).ok()?)?;
     if !signature.generic_parameters.is_empty() {
         return None;
     }

@@ -54,7 +54,12 @@ pub(super) fn declarations(commands: &[CommandDecl]) -> Vec<Decl> {
         let _ = writeln!(source, "    return .{}\n}}", cases[0]);
     }
     let file = SourceFile::new(FileId::from_u32(0), "<klf-command>", source.as_str());
-    let mut decls = klf_kira_syntax::parse(&file).file.decls;
+    let mut decls = klf_kira_syntax::parse(&file)
+        .file
+        .decls
+        .into_iter()
+        .map(|decl| std::sync::Arc::try_unwrap(decl).unwrap_or_else(|decl| (*decl).clone()))
+        .collect::<Vec<_>>();
     for decl in &mut decls {
         if let DeclKind::Function(function) = &mut decl.kind
             && let Some(body) = &mut function.body

@@ -619,6 +619,7 @@ impl<'a, 'o> FnEmitter<'a, 'o> {
             .functions
             .iter()
             .find(|function| function.name.as_str() == name)
+            .map(std::sync::Arc::as_ref)
     }
 }
 

@@ -68,11 +68,11 @@ pub(crate) fn desugar(session: &mut Session, file: File) -> (File, WrappedTable)
     let mut decls = Vec::with_capacity(file.decls.len());
     for decl in file.decls {
         if is_template(&decl) {
-            let DeclKind::Struct(template) = decl.kind else {
+            let DeclKind::Struct(template) = &decl.kind else {
                 continue;
             };
-            if validate_template(session, &template) {
-                templates.insert(template.name.name.clone(), template);
+            if validate_template(session, template) {
+                templates.insert(template.name.name.clone(), template.clone());
             }
         } else {
             decls.push(decl);
@@ -81,6 +81,18 @@ pub(crate) fn desugar(session: &mut Session, file: File) -> (File, WrappedTable)
     let mut table = WrappedTable::new();
     let mut instances: HashMap<String, StructDecl> = HashMap::new();
     for decl in &mut decls {
+        let needs_rewrite = matches!(
+            &decl.kind,
+            DeclKind::Struct(owner)
+                if owner.members.iter().any(|member| member.annotations.iter().any(|annotation|
+                    annotation_name(&annotation.path)
+                        .is_some_and(|name| templates.contains_key(&Name::new(name)))
+                ))
+        );
+        if !needs_rewrite {
+            continue;
+        }
+        let decl = std::sync::Arc::make_mut(decl);
         let DeclKind::Struct(owner) = &mut decl.kind else {
             continue;
         };
@@ -96,10 +108,12 @@ pub(crate) fn desugar(session: &mut Session, file: File) -> (File, WrappedTable)
     }
     let mut instances: Vec<StructDecl> = instances.into_values().collect();
     instances.sort_by(|a, b| a.name.name.as_str().cmp(b.name.name.as_str()));
-    decls.extend(instances.into_iter().map(|instance| Decl {
-        annotations: Vec::new(),
-        span: instance.span,
-        kind: DeclKind::Struct(instance),
+    decls.extend(instances.into_iter().map(|instance| {
+        std::sync::Arc::new(Decl {
+            annotations: Vec::new(),
+            span: instance.span,
+            kind: DeclKind::Struct(instance),
+        })
     }));
     (
         File {

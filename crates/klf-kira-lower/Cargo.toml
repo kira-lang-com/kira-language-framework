@@ -23,5 +23,9 @@ klf-kir-passes = { path = "../klf-kir-passes" }
 klf-kir-verify = { path = "../klf-kir-verify" }
 klf-llvm = { path = "../klf-llvm" }
 
+[[bench]]
+name = "package_frontend_scaling"
+harness = false
+
 [lints]
 workspace = true

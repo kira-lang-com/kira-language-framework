@@ -137,6 +137,7 @@ klf.source.path_exists klfsvc_source_path_exists (i64, ptr, i64) -> i64 # sessio
 klf.source.read klfsvc_source_read (i64, ptr, i64) -> i64 # session, path buffer, byte length -> source file or -1 (section 8.1 Session.read)
 klf.source.directory klfsvc_source_directory (i64, ptr, i64, ptr, i64) -> i64 # session, directory, length, extension, length -> files read or -1
 klf.source.directory_file klfsvc_source_directory_file (i64, i64) -> i64 # session, index -> source file of the last directory read
+klf.source.directory_child klfsvc_source_directory_child (i64, ptr, i64, ptr, i64) -> i64 # session, directory and child name buffers -> 1 when child is an immediate directory entry
 klf.session.flag klfsvc_session_flag (i64, ptr, i64, ptr) -> i64 # session, name buffer, byte length, output [tag, value-or-length]
 klf.session.flag_string_copy klfsvc_session_flag_string_copy (i64, ptr, i64, ptr, i64) -> i64 # session, name buffer, byte length, output buffer, output byte length
 klf.session.std_root_len klfsvc_session_std_root_len (i64) -> i64 # session -> byte length of the std source directory, empty when unknown (D-327)

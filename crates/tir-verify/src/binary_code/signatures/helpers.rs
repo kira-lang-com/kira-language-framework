@@ -1,76 +1,30 @@
-use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryFunctionType, BinaryImport, BinaryInstruction, BinaryOperand, BinarySignatureTable,
+    BinaryFunctionType, BinaryInstruction, BinaryOperand, BinarySignature, BinarySignatureTable,
     BinaryType, BinaryTypeTable,
 };
-
-const V11: Code = Code::new(Dialect::Tir, Area::Verifier, 11);
-
-pub(super) fn check_call_type_argument_count(
-    instruction: &BinaryInstruction,
-    callee: &ResolvedDirectCallee<'_>,
-    caller: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if !matches!(instruction.opcode, 0x1a0 | 0x1e7) {
-        return;
-    }
-    let expected = callee.generic_parameter_count;
-    let Some(arguments) = instruction
-        .operands
-        .iter()
-        .find_map(|operand| match operand {
-            BinaryOperand::Types(arguments) => Some(arguments),
-            _ => None,
-        })
-    else {
-        if expected > 0 {
-            diagnostics.push(Diagnostic::error(
-                V11,
-                format!(
-                    "function @{caller} CODE offset {}: call to @{} has no generic type arguments; expected {expected}",
-                    instruction.offset, callee.name
-                ),
-            ));
-        }
-        return;
-    };
-    if arguments.len() != expected {
-        diagnostics.push(Diagnostic::error(
-            V11,
-            format!(
-                "function @{caller} CODE offset {}: call to @{} has {} generic type arguments; expected {expected}",
-                instruction.offset,
-                callee.name,
-                arguments.len()
-            ),
-        ));
-    }
-}
-
-pub(super) use crate::binary_symbols::ResolvedFunctionSymbol as ResolvedDirectCallee;
-
-pub(super) fn resolve_direct_callee<'a>(
-    instruction: &BinaryInstruction,
-    signatures: &'a BinarySignatureTable,
-    types: &'a BinaryTypeTable,
-    imports: &'a [BinaryImport],
-) -> Option<ResolvedDirectCallee<'a>> {
-    let symbol_index = instruction
-        .operands
-        .iter()
-        .find_map(|operand| match operand {
-            BinaryOperand::Symbol { kind: 0, index } => Some(*index),
-            _ => None,
-        })?;
-    crate::binary_symbols::resolve_function_symbol(symbol_index, signatures, types, imports)
-}
 
 pub(super) fn result_edge_types(types: &BinaryTypeTable, result: u64) -> Vec<u64> {
     match type_at(types, result) {
         Some(BinaryType::Unit | BinaryType::Never) | None => Vec::new(),
         Some(_) => vec![result],
     }
+}
+
+pub(super) fn direct_callee<'a>(
+    instruction: &BinaryInstruction,
+    signatures: &'a BinarySignatureTable,
+) -> Option<(u64, &'a BinarySignature)> {
+    let index = instruction
+        .operands
+        .iter()
+        .find_map(|operand| match operand {
+            BinaryOperand::Symbol { kind: 0, index } => Some(*index),
+            _ => None,
+        })?;
+    let signature = usize::try_from(index)
+        .ok()
+        .and_then(|index| signatures.records.get(index))?;
+    Some((index, signature))
 }
 
 pub(super) fn frame_type(types: &BinaryTypeTable, function_index: u64) -> Option<u64> {
@@ -99,6 +53,17 @@ pub(super) fn type_at(types: &BinaryTypeTable, index: u64) -> Option<&BinaryType
     types.entries.get(usize::try_from(index).ok()?)
 }
 
+pub(super) fn is_generic_call(function: &BinaryFunctionType, types: &BinaryTypeTable) -> bool {
+    function
+        .parameters
+        .iter()
+        .any(|parameter| contains_generic(types, parameter.ty, &mut Vec::new()))
+        || contains_generic(types, function.result, &mut Vec::new())
+        || function
+            .error
+            .is_some_and(|ty| contains_generic(types, ty, &mut Vec::new()))
+}
+
 pub(super) fn contains_generic(types: &BinaryTypeTable, index: u64, seen: &mut Vec<u64>) -> bool {
     if seen.contains(&index) {
         return false;
@@ -116,7 +81,6 @@ pub(super) fn contains_generic(types: &BinaryTypeTable, index: u64, seen: &mut V
         | BinaryType::Tensor {
             element: pointee, ..
         } => vec![*pointee],
-        BinaryType::Texture { component, .. } => vec![*component],
         BinaryType::FixedVector { element, .. }
         | BinaryType::ScalableVector { element }
         | BinaryType::Array { element, .. }
@@ -146,6 +110,7 @@ pub(super) fn contains_generic(types: &BinaryTypeTable, index: u64, seen: &mut V
         | BinaryType::Unit
         | BinaryType::Never
         | BinaryType::Frame { .. }
+        | BinaryType::Texture { .. }
         | BinaryType::Sampler
         | BinaryType::AccelerationStructure
         | BinaryType::RayQuery

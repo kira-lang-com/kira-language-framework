@@ -68,6 +68,18 @@ impl Lowerer<'_> {
             let closure = self.lower_path(path, span)?;
             return self.lower_closure_call(closure, args, span);
         }
+        if path.segments.len() == 1
+            && self
+                .signatures
+                .get(&name)
+                .is_some_and(|signature| signature.source_function || signature.service.is_some())
+            && !matches!(
+                name.as_str(),
+                "abort" | "expect!" | "floatToBits" | "bitsToFloat" | "artifactHandle"
+            )
+        {
+            return self.lower_direct_call(&name, args, span, expected);
+        }
         if path.segments.len() == 1 {
             if let Some(receiver) = self.lookup(&Name::new("self")) {
                 let method = methods::qualified(&receiver.ty, name.as_str());
@@ -401,9 +413,9 @@ impl Lowerer<'_> {
         argument_values.extend(self.lower_arguments(args, &signature, &mut substitutions)?);
         self.check_inference(name, &signature, &substitutions, span)?;
         let result = signature.result.substitute(&substitutions);
-        if let Some(service) = crate::builtins::service(self.session, name.as_str()).cloned() {
+        if let Some(service) = &signature.service {
             let argument_values = self.text_arguments(&signature, argument_values);
-            return Some(self.lower_service_call(&service, argument_values, result));
+            return Some(self.lower_service_call(service, argument_values, result));
         }
         if signature.generics.is_empty() {
             return Some(self.emit_call(name, &signature, &substitutions, argument_values, result));
@@ -418,7 +430,7 @@ impl Lowerer<'_> {
                 .map(|param| param.substitute(&substitutions))
                 .collect(),
             result: result.clone(),
-            ..signature
+            ..(*signature).clone()
         };
         let callee = instance.name.clone();
         self.counts.borrow_mut().request_instance(instance);

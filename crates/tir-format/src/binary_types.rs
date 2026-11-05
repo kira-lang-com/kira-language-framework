@@ -15,12 +15,6 @@ use tir_types::FloatType;
 const MAX_TYPE_COUNT: u64 = 1 << 32;
 const MAX_NESTING_DEPTH: usize = 256;
 
-impl BinaryTypeTable {
-    pub fn encode(&self, strings: &StringTable) -> Result<Vec<u8>, FormatError> {
-        encode::encode_type_table(self, strings)
-    }
-}
-
 impl BinaryModule {
     /// Decodes and structurally validates the TIR TYPES section.
     pub fn type_table(&self, memory_limit: u64) -> Result<BinaryTypeTable, FormatError> {
@@ -372,11 +366,8 @@ impl TypeDecoder<'_> {
             }
             0x44 => {
                 let rank = self.read_uleb()?;
-                if !matches!(rank, 1 | 2 | 3 | 4 | 8) {
-                    return Err(malformed(
-                        *self.cursor,
-                        "tensor rank is not one of 1, 2, 3, 4, or 8",
-                    ));
+                if !(1..=8).contains(&rank) {
+                    return Err(malformed(*self.cursor, "tensor rank is outside 1..=8"));
                 }
                 let element = self.read_type_ref(&mut child_depth)?;
                 BinaryType::Tensor { rank, element }

@@ -43,11 +43,24 @@ pub(crate) fn register(
             if !known.insert(identity) {
                 continue;
             }
+            let overlay = session.overlay();
+            let overlaid = overlay.contains_key(&klf_services::overlay_key(&include));
+            let before = (!overlaid)
+                .then(|| klf_services::file_identity(&include))
+                .flatten();
             let include_text = session
                 .read_text(&include)
                 .map_err(|error| format!("cannot read {}: {error}", include.display()))?
                 .to_string();
-            let file = session.add_file(include.to_string_lossy().as_ref(), include_text.clone());
+            let after = (!overlaid)
+                .then(|| klf_services::file_identity(&include))
+                .flatten();
+            let identity = before.filter(|before| Some(before) == after.as_ref());
+            let file = session.add_file_with_identity(
+                include.to_string_lossy().as_ref(),
+                include_text.clone(),
+                identity,
+            );
             let (memory, convention) =
                 effective_file_defaults(metadata.memory, metadata.convention, None);
             session

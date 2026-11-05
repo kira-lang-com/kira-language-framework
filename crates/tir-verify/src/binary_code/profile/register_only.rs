@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryFunctionBody, BinaryImport, BinaryLinkage, BinaryOperand, BinarySignatureTable,
-    BinaryTarget, BinaryType, BinaryTypeTable,
+    BinaryFunctionBody, BinaryLinkage, BinaryOperand, BinarySignatureTable, BinaryTarget,
+    BinaryType, BinaryTypeTable,
 };
 
 const V15: Code = Code::new(Dialect::Tir, Area::Verifier, 15);
@@ -12,7 +12,6 @@ pub(super) fn verify(
     bodies: &[Option<&BinaryFunctionBody>],
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
-    imports: Option<&[BinaryImport]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (function_index, signature) in signatures.records.iter().enumerate() {
@@ -54,7 +53,7 @@ pub(super) fn verify(
         let Some(body) = bodies.get(function_index).copied().flatten() else {
             continue;
         };
-        verify_body(body, signature, signatures, types, imports, diagnostics);
+        verify_body(body, signature, signatures, types, diagnostics);
     }
 }
 
@@ -63,10 +62,9 @@ fn verify_body(
     signature: &tir_format::BinarySignature,
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
-    imports: Option<&[BinaryImport]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let value_types = super::super::infer_value_types(body, signatures, types, imports);
+    let value_types = super::super::infer_value_types(body, signatures, types);
     let mut value_cursor = 0usize;
     for block in &body.blocks {
         value_cursor = value_cursor.saturating_add(block.parameters.len());
@@ -115,7 +113,7 @@ fn verify_body(
                     value_type(&value_types, *value)
                         .is_some_and(|type_index| contains_register_only(types, type_index))
                 })
-                && !module_gpu_callee(instruction, signatures, imports)
+                && !module_gpu_callee(instruction, signatures)
             {
                 report(
                     diagnostics,
@@ -147,23 +145,17 @@ fn verify_body(
 fn module_gpu_callee(
     instruction: &tir_format::BinaryInstruction,
     signatures: &BinarySignatureTable,
-    imports: Option<&[BinaryImport]>,
 ) -> bool {
     if !matches!(instruction.opcode, 0x1a0 | 0x1a7 | 0x1aa | 0x1e7) {
         return false;
     }
-    let Some(symbol_index) = instruction
+    let Some(target) = instruction
         .operands
         .iter()
         .find_map(|operand| match operand {
-            BinaryOperand::Symbol { kind: 0, index } => Some(*index),
+            BinaryOperand::Symbol { kind: 0, index } => usize::try_from(*index).ok(),
             _ => None,
         })
-    else {
-        return false;
-    };
-    let Some(target) = crate::binary_symbols::local_function_index(symbol_index, imports)
-        .and_then(|index| usize::try_from(index).ok())
     else {
         return false;
     };

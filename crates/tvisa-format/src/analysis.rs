@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use tir_format::leb::{read_uleb, write_uleb};
+use tir_format::leb::read_uleb;
 
 use crate::binary::{FormatError, TvisaImage};
 
@@ -38,102 +38,6 @@ pub struct AnalysisSummary {
     pub sandbox_regions: Vec<SandboxRegionSummary>,
     pub indirect_call_types: Vec<IndirectCallType>,
     pub assembly_regions: Vec<AssemblyRegionSummary>,
-}
-
-impl AnalysisSummary {
-    pub fn encode(&self) -> Result<Vec<u8>, FormatError> {
-        let mut output = Vec::new();
-        write_count(self.functions.len(), "ANALYSIS function", &mut output)?;
-        for function in &self.functions {
-            if function.trust_class > 2 {
-                return Err(encode_error("invalid ANALYSIS trust class"));
-            }
-            output.extend_from_slice(&[function.trust_class, function.reason_mask]);
-        }
-
-        write_count(
-            self.sandbox_regions.len(),
-            "ANALYSIS sandbox-region",
-            &mut output,
-        )?;
-        let mut used_data = HashSet::new();
-        for (index, region) in self.sandbox_regions.iter().enumerate() {
-            if u64::try_from(index).ok() != Some(region.memory_index)
-                || region.base_data_index == region.size_data_index
-                || !used_data.insert(region.base_data_index)
-                || !used_data.insert(region.size_data_index)
-            {
-                return Err(encode_error(
-                    "invalid or reused ANALYSIS sandbox-region index",
-                ));
-            }
-            for value in [
-                region.memory_index,
-                region.base_data_index,
-                region.size_data_index,
-            ] {
-                write_index(value, "ANALYSIS sandbox-region index", &mut output)?;
-            }
-        }
-
-        write_count(
-            self.indirect_call_types.len(),
-            "ANALYSIS indirect-call type",
-            &mut output,
-        )?;
-        let mut previous_type = None;
-        for indirect_call_type in &self.indirect_call_types {
-            if previous_type.is_some_and(|previous| *indirect_call_type <= previous) {
-                return Err(encode_error(
-                    "ANALYSIS indirect-call types are not strictly ordered",
-                ));
-            }
-            previous_type = Some(*indirect_call_type);
-            write_index(
-                indirect_call_type.signature_index,
-                "ANALYSIS indirect-call signature",
-                &mut output,
-            )?;
-            output.extend_from_slice(&indirect_call_type.type_tag.to_le_bytes());
-        }
-
-        write_count(
-            self.assembly_regions.len(),
-            "ANALYSIS assembly-region",
-            &mut output,
-        )?;
-        let mut previous_assembly = None;
-        for region in &self.assembly_regions {
-            let key = (region.function_index, region.instruction_ordinal);
-            if previous_assembly.is_some_and(|previous| key <= previous)
-                || !(1..=3).contains(&region.architecture)
-                || region.effects & !0x0f != 0
-                || region.effects & (1 << 2) != 0 && region.effects & 0b0011 != 0
-            {
-                return Err(encode_error(
-                    "invalid or unordered ANALYSIS assembly region",
-                ));
-            }
-            previous_assembly = Some(key);
-            write_index(
-                region.function_index,
-                "ANALYSIS assembly function",
-                &mut output,
-            )?;
-            write_index(
-                region.instruction_ordinal,
-                "ANALYSIS assembly instruction ordinal",
-                &mut output,
-            )?;
-            write_index(
-                region.assembly_record_index,
-                "ANALYSIS assembly record index",
-                &mut output,
-            )?;
-            output.extend_from_slice(&[region.architecture, region.effects]);
-        }
-        Ok(output)
-    }
 }
 
 impl TvisaImage {
@@ -191,38 +95,24 @@ impl TvisaImage {
         sandbox_regions
             .try_reserve_exact(sandbox_capacity)
             .map_err(|_| malformed(cursor, "ANALYSIS sandbox-region allocation failed"))?;
-        let mut used_sandbox_data = HashSet::new();
+        let mut previous_memory = None;
         for _ in 0..sandbox_capacity {
             let start = cursor;
             let memory_index = read_index(&bytes, &mut cursor, "linear-memory index")?;
-            let expected_memory_index = u64::try_from(sandbox_regions.len())
-                .map_err(|_| malformed(start, "sandbox-region count overflows u64"))?;
-            if memory_index != expected_memory_index {
+            if previous_memory.is_some_and(|previous| memory_index <= previous) {
                 return Err(malformed(
                     start,
-                    "ANALYSIS sandbox regions are not contiguous from linear-memory index zero",
+                    "ANALYSIS sandbox regions are not ordered by linear-memory index",
                 ));
             }
+            previous_memory = Some(memory_index);
             let base_data_index = read_index(&bytes, &mut cursor, "sandbox base DATA index")?;
             let size_data_index = read_index(&bytes, &mut cursor, "sandbox size DATA index")?;
             if base_data_index >= total_data
                 || size_data_index >= total_data
-                || base_data_index < imports.data
-                || size_data_index < imports.data
                 || base_data_index == size_data_index
             {
-                return Err(malformed(
-                    start,
-                    "ANALYSIS sandbox DATA index must name a distinct defined object",
-                ));
-            }
-            if !used_sandbox_data.insert(base_data_index)
-                || !used_sandbox_data.insert(size_data_index)
-            {
-                return Err(malformed(
-                    start,
-                    "ANALYSIS sandbox DATA objects are reused across linear memories",
-                ));
+                return Err(malformed(start, "ANALYSIS sandbox DATA index is invalid"));
             }
             sandbox_regions.push(SandboxRegionSummary {
                 memory_index,
@@ -379,20 +269,4 @@ fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, FormatError> {
 
 fn malformed(offset: usize, message: impl Into<String>) -> FormatError {
     FormatError::malformed(Some(offset), message)
-}
-
-fn write_count(count: usize, label: &str, output: &mut Vec<u8>) -> Result<(), FormatError> {
-    let count = u64::try_from(count)
-        .ok()
-        .filter(|count| *count < 1 << 32)
-        .ok_or_else(|| encode_error(format!("{label} count is invalid")))?;
-    write_index(count, label, output)
-}
-
-fn write_index(value: u64, label: &str, output: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(value, output).map_err(|_| encode_error(format!("failed to write {label}")))
-}
-
-fn encode_error(message: impl Into<String>) -> FormatError {
-    FormatError::malformed(None, message)
 }

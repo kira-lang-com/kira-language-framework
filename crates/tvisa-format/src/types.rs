@@ -1,10 +1,7 @@
 use tir_format::leb::read_uleb;
 
 use crate::binary::FormatError;
-mod encode;
-mod text_encode;
 mod value_types;
-pub use text_encode::{encode_text_signature_records, encode_text_type_section};
 pub use value_types::TvisaValueTypeRecord;
 use value_types::{ValueTypeInfo, decode_value_type};
 

@@ -1,7 +1,7 @@
 use tir_format::{BinaryFunctionType, BinaryInstruction, BinaryTypeTable};
 
 use super::generic_types::{call_result_edge_types, type_matches_with_arguments};
-use super::{report, report_v10};
+use super::{V10, report, report_with_code};
 use tir_diag::Diagnostic;
 
 pub(super) fn verify_call(
@@ -16,10 +16,11 @@ pub(super) fn verify_call(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if function.error.is_some() && !matches!(instruction.opcode, 0x1a7 | 0x1e7 | 0x404) {
-        report_v10(
+        report_with_code(
             diagnostics,
             caller,
             instruction,
+            V10,
             "a callee with fails must use try.call",
         );
     }

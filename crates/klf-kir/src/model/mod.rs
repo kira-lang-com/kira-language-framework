@@ -21,6 +21,7 @@ pub use types::{Convention, FunctionType, ParameterType, Type};
 use klf_core::Name;
 use klf_source::Span;
 use klf_target::Target;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Stage {
@@ -43,7 +44,9 @@ pub struct Module {
     pub imports: Vec<ImportRecord>,
     pub exports: Vec<ExportRecord>,
     pub witnesses: Vec<crate::witness::WitnessDeclaration>,
-    pub functions: Vec<Function>,
+    /// Functions are shared so incremental builds can compose a new module
+    /// from unchanged function bodies without cloning their KIR graphs.
+    pub functions: Vec<Arc<Function>>,
 }
 
 impl Module {

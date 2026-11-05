@@ -25,7 +25,7 @@ impl TypeHandles {
         session: &mut Session,
         structs: &StructTable,
         enums: &EnumTable,
-        signatures: &HashMap<Name, Signature>,
+        signatures: &HashMap<Name, Arc<Signature>>,
     ) -> Self {
         let mut handles = Self {
             named: HashMap::new(),

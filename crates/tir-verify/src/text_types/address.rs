@@ -50,11 +50,6 @@ pub(super) fn verify_instruction(
     };
     let mut diagnostics = Vec::new();
     match instruction.opcode.as_str() {
-        "stack.dealloc" => {
-            if !matches!(address, Type::Address { .. }) {
-                diagnostics.push(error("stack.dealloc requires a stack allocation address"));
-            }
-        }
         "field.addr" => {
             let Some(index) = immediate_index(instruction) else {
                 return vec![error(

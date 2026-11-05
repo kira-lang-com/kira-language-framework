@@ -66,7 +66,7 @@ pub fn run_unit_tests(session: &mut Session, package: &Path) -> Result<Vec<CaseR
     let target = session.target().clone();
     let mut results = Vec::new();
     for test in &tests {
-        let file = SourceFile::new(FileId::from_u32(0), test.name.as_str(), test.text.clone());
+        let file = SourceFile::new(FileId::from_u32(0), test.name.as_ref(), test.text.clone());
         for name in klf_kira_lower::testing::tests(&klf_kira_syntax::parse(&file).file) {
             let state = Arc::new(Mutex::new(TestState::default()));
             let mut sink = ServiceSink::new();

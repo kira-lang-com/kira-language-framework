@@ -29,7 +29,11 @@ use std::collections::{HashMap, HashSet};
 /// it holds none this can move.
 #[must_use]
 pub fn aggregates_to_memory(module: &Module) -> Option<Module> {
-    if !module.functions.iter().any(holds_aggregate_values) {
+    if !module
+        .functions
+        .iter()
+        .any(|function| holds_aggregate_values(function))
+    {
         return None;
     }
     let index = ModuleIndex::of(module);
@@ -79,7 +83,7 @@ pub fn aggregates_to_memory(module: &Module) -> Option<Module> {
         let mut result = module.clone();
         for function in &mut result.functions {
             if let Some(new) = rewritten.remove(&function.name) {
-                *function = new;
+                *function = std::sync::Arc::new(new);
             }
         }
         return Some(result);

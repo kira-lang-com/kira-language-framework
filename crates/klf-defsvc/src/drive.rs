@@ -17,8 +17,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-/// What runs one phase of one unit. The implementation owns the call into the
-/// definition's compiled code and the transport of the diagnostics it reports.
+/// What runs definition phases for one compilation. A runner is reused for the
+/// units it lowers; [`PhaseRunner::balanced`] closes one unit's temporary
+/// artifact frame before the next unit starts.
 pub trait PhaseRunner {
     /// # Errors
     /// Returns a rendered message when the phase fails or reports errors.
@@ -70,9 +71,10 @@ impl fmt::Display for DriveError {
 
 /// Runs `units` and then one full pipeline per unit, merging and verifying.
 ///
-/// `make_runner` is called once for the `units` phase and once per unit: one
-/// unit's `parse` allocates the tree its `lower` reads back, so the artifact
-/// heap has to stay alive across exactly those three calls.
+/// `make_runner` is called once for the whole compilation. One unit's `parse`
+/// allocates the tree its `lower` reads back, so the runner keeps its backend
+/// and artifact heap alive across those phases, then `balanced` closes that
+/// unit's temporary frame before the next one begins.
 ///
 /// # Errors
 /// Returns [`DriveError`] when a phase fails, returns the wrong handle, leaks,
@@ -83,8 +85,10 @@ pub fn drive<R: PhaseRunner>(
     inputs: &[FileId],
     make_runner: &mut dyn FnMut() -> Result<R, String>,
 ) -> Result<Module, DriveError> {
-    let units = run_units(session, inputs, make_runner)?;
-    let module = lower_units(session, units, make_runner)?;
+    let mut runner = make_runner().map_err(DriveError::Runner)?;
+    let units = run_units_with_runner(session, inputs, &mut runner)?;
+    progress!("compilation graph units={} phase_runners=1", units.len());
+    let module = lower_units(session, units, &mut runner)?;
     progress!("verify");
     verify(&module)?;
     Ok(module)
@@ -100,12 +104,12 @@ pub(crate) use merge::{same_operation, same_parameters};
 fn lower_units<R: PhaseRunner>(
     session: &mut Session,
     units: Vec<DefinitionUnit>,
-    make_runner: &mut dyn FnMut() -> Result<R, String>,
+    runner: &mut R,
 ) -> Result<Module, DriveError> {
     let program = program_files(&units);
     let mut lowered = Vec::new();
     for unit in units {
-        lowered.push(lower_one(session, unit, &program, make_runner)?);
+        lowered.push(lower_one(session, unit, &program, runner)?);
     }
     merge_units(session, lowered)
 }
@@ -121,11 +125,9 @@ fn lower_one<R: PhaseRunner>(
     session: &mut Session,
     unit: DefinitionUnit,
     program: &[FileId],
-    make_runner: &mut dyn FnMut() -> Result<R, String>,
+    runner: &mut R,
 ) -> Result<Module, DriveError> {
-    let mut runner = make_runner().map_err(DriveError::Runner)?;
-    let DefinitionPhaseResult::Module(module) = lower_unit(&mut runner, session, unit, program)?
-    else {
+    let DefinitionPhaseResult::Module(module) = lower_unit(runner, session, unit, program)? else {
         return Err(DriveError::Mismatch(DefinitionPhase::Lower));
     };
     if !runner.balanced() {
@@ -146,11 +148,12 @@ pub fn drive_shaders<R: PhaseRunner>(
     inputs: &[FileId],
     make_runner: &mut dyn FnMut() -> Result<R, String>,
 ) -> Result<Vec<(DefinitionUnit, klf_shader::Module)>, DriveError> {
+    let mut runner = make_runner().map_err(DriveError::Runner)?;
     let mut modules = Vec::new();
-    let units = run_units(session, inputs, make_runner)?;
+    let units = run_units_with_runner(session, inputs, &mut runner)?;
+    progress!("shader graph units={} phase_runners=1", units.len());
     let program = program_files(&units);
     for unit in units {
-        let mut runner = make_runner().map_err(DriveError::Runner)?;
         let DefinitionPhaseResult::Shader(module) =
             lower_unit(&mut runner, session, unit.clone(), &program)?
         else {
@@ -170,12 +173,20 @@ pub(crate) fn run_units<R: PhaseRunner>(
     inputs: &[FileId],
     make_runner: &mut dyn FnMut() -> Result<R, String>,
 ) -> Result<Vec<DefinitionUnit>, DriveError> {
+    let mut runner = make_runner().map_err(DriveError::Runner)?;
+    run_units_with_runner(session, inputs, &mut runner)
+}
+
+pub(crate) fn run_units_with_runner<R: PhaseRunner>(
+    session: &mut Session,
+    inputs: &[FileId],
+    runner: &mut R,
+) -> Result<Vec<DefinitionUnit>, DriveError> {
     if inputs.is_empty() {
         return Err(DriveError::NoInputs);
     }
-    let mut runner = make_runner().map_err(DriveError::Runner)?;
     let result = run_phase(
-        &mut runner,
+        runner,
         session,
         DefinitionPhase::Units,
         &DefinitionPhaseArguments::Units {
@@ -185,6 +196,9 @@ pub(crate) fn run_units<R: PhaseRunner>(
     let DefinitionPhaseResult::Units(units) = result else {
         return Err(DriveError::Mismatch(DefinitionPhase::Units));
     };
+    if !runner.balanced() {
+        return Err(DriveError::Leaked);
+    }
     if units.is_empty() || units.iter().any(|unit| session.unit_id(unit).is_none()) {
         return Err(DriveError::Mismatch(DefinitionPhase::Units));
     }

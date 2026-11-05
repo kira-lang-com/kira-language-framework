@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
+use tir_format::parse_tvisa_function_body;
 use tir_format::text::{Token, TokenKind, lex};
-use tvisa_format::{DataKind, TextCallingConvention, TextImage, TextImportPayload, TextItemKind};
+use tvisa_format::{TextCallingConvention, TextImage, TextItemKind};
 
 const VFY21: Code = Code::new(Dialect::Tvisa, Area::Verifier, 21);
 
@@ -32,10 +33,7 @@ pub(super) fn verify_image(image: &TextImage) -> Vec<Diagnostic> {
         ) {
             continue;
         }
-        let Some(body) = image
-            .function_body_for_item(*item)
-            .and_then(|parsed| parsed.body.as_ref())
-        else {
+        let Ok(Some(body)) = parse_tvisa_function_body(source) else {
             continue;
         };
 
@@ -43,7 +41,7 @@ pub(super) fn verify_image(image: &TextImage) -> Vec<Diagnostic> {
             if instruction.opcode == "global.addr"
                 && let Some((name, _)) = super::symbols::instruction_symbol_operand(instruction)
                 && let Some(kind) = data_kinds.get(&name)
-                && *kind != Some(DataKind::GpuConstant)
+                && kind.as_deref() != Some("gpu_constant")
             {
                 diagnostics.push(
                     Diagnostic::error(
@@ -87,20 +85,19 @@ pub(super) fn verify_image(image: &TextImage) -> Vec<Diagnostic> {
     diagnostics
 }
 
-fn data_kinds(image: &TextImage) -> HashMap<String, Option<DataKind>> {
+fn data_kinds(image: &TextImage) -> HashMap<String, Option<String>> {
     let mut kinds = HashMap::new();
     for item in &image.items {
+        let source = image.item_text(*item);
         match item.kind {
             TextItemKind::Data => {
-                if let Some(data) = image.data_for_item(*item) {
-                    kinds.insert(data.symbol.clone(), Some(data.kind));
+                if let Some((name, kind, _per_cpu)) = data_record(source) {
+                    kinds.insert(name, Some(kind));
                 }
             }
             TextItemKind::Import => {
-                if let Some(import) = image.import_for_item(*item)
-                    && matches!(&import.payload, TextImportPayload::Data { .. })
-                {
-                    kinds.insert(import.symbol.clone(), None);
+                if let Some(name) = imported_data_name(source) {
+                    kinds.insert(name, None);
                 }
             }
             _ => {}
@@ -117,7 +114,7 @@ pub(super) fn callable_symbols(
     for item in &image.items {
         let source = image.item_text(*item);
         match item.kind {
-            TextItemKind::Function => {
+            TextItemKind::Function | TextItemKind::Import => {
                 let (Some(name), Some(signature_name)) = (
                     item_symbol(source),
                     super::gpu::function_signature_name(source),
@@ -132,21 +129,6 @@ pub(super) fn callable_symbols(
                     functions.insert(name, signature.convention);
                 }
             }
-            TextItemKind::Import => {
-                let Some(import) = image.import_for_item(*item) else {
-                    continue;
-                };
-                let TextImportPayload::Function { signature, .. } = &import.payload else {
-                    continue;
-                };
-                if let Some(signature) = image
-                    .signatures
-                    .iter()
-                    .find(|signature_item| signature_item.name == *signature)
-                {
-                    functions.insert(import.symbol.clone(), signature.convention);
-                }
-            }
             TextItemKind::Variants | TextItemKind::Dispatch => {
                 if let Some(name) = item_symbol(source) {
                     indirect_sets.insert(name);
@@ -156,6 +138,35 @@ pub(super) fn callable_symbols(
         }
     }
     (functions, indirect_sets)
+}
+
+pub(super) fn data_record(source: &str) -> Option<(String, String, bool)> {
+    let tokens = significant_tokens(source)?;
+    if atom(tokens.first()?)? != "data" {
+        return None;
+    }
+    let at = tokens.iter().position(|token| punctuation(token, '@'))?;
+    let references: Vec<_> = tokens.iter().collect();
+    let (name, next, _) = super::symbols::read_symbol_refs(&references, at)?;
+    let kind_index = if atom(tokens.get(next)?).is_some_and(is_linkage) {
+        next + 1
+    } else {
+        next
+    };
+    let per_cpu = tokens
+        .get(kind_index + 1)
+        .is_some_and(|token| atom(token) == Some("percpu"));
+    Some((name, atom(tokens.get(kind_index)?)?.to_owned(), per_cpu))
+}
+
+pub(super) fn imported_data_name(source: &str) -> Option<String> {
+    let tokens = significant_tokens(source)?;
+    if atom(tokens.first()?)? != "import" || atom(tokens.get(1)?)? != "data" {
+        return None;
+    }
+    let at = tokens.iter().position(|token| punctuation(token, '@'))?;
+    let references: Vec<_> = tokens.iter().collect();
+    super::symbols::read_symbol_refs(&references, at).map(|(name, _, _)| name)
 }
 
 pub(super) fn item_symbol(source: &str) -> Option<String> {
@@ -175,8 +186,19 @@ fn significant_tokens(source: &str) -> Option<Vec<Token>> {
     )
 }
 
+fn atom(token: &Token) -> Option<&str> {
+    match &token.kind {
+        TokenKind::Atom(value) => Some(value),
+        _ => None,
+    }
+}
+
 fn punctuation(token: &Token, expected: char) -> bool {
     matches!(token.kind, TokenKind::Punctuation(value) if value == expected)
+}
+
+fn is_linkage(value: &str) -> bool {
+    matches!(value, "local" | "image" | "exported")
 }
 
 fn shift(span: Span, base: usize) -> Span {

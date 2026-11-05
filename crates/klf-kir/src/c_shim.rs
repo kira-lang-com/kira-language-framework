@@ -43,7 +43,7 @@ pub fn c_shim_source(
             function
                 .c_prototype
                 .as_ref()
-                .map(|prototype| (function, prototype))
+                .map(|prototype| (function.as_ref(), prototype))
         })
         .filter(|(function, prototype)| function.foreign || prototype.needs_shim())
         .collect();

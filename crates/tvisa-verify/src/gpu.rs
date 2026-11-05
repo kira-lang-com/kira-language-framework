@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
 use tir_format::text::TokenKind;
-use tir_format::{FunctionBody, TextInstruction};
+use tir_format::{FunctionBody, TextInstruction, parse_tvisa_function_body};
 use tir_types::{AddressSpace, FloatType, Type};
 use tvisa_format::{
     ParameterItem, ResultItem, TextCallingConvention, TextImage, TextItemKind, TextSignature,
@@ -46,10 +46,7 @@ pub(super) fn verify_call_graph(image: &TextImage) -> Vec<Diagnostic> {
         let Some(name) = function_symbol(source) else {
             continue;
         };
-        let Some(body) = image
-            .function_body_for_item(*item)
-            .and_then(|parsed| parsed.body.as_ref())
-        else {
+        let Ok(Some(body)) = parse_tvisa_function_body(source) else {
             continue;
         };
         let callees = body
@@ -133,13 +130,10 @@ pub(super) fn verify_builtin_stages(image: &TextImage) -> Vec<Diagnostic> {
         let Some(name) = function_symbol(source) else {
             continue;
         };
-        let Some(body) = image
-            .function_body_for_item(*item)
-            .and_then(|parsed| parsed.body.as_ref())
-        else {
+        let Ok(Some(body)) = parse_tvisa_function_body(source) else {
             continue;
         };
-        functions.push((name, body.clone(), item.span.start));
+        functions.push((name, body, item.span.start));
     }
     let indices: HashMap<_, _> = functions
         .iter()
@@ -151,16 +145,15 @@ pub(super) fn verify_builtin_stages(image: &TextImage) -> Vec<Diagnostic> {
         if item.kind != TextItemKind::Entry {
             continue;
         }
-        let Some(entry) = image.gpu_entry_for_item(*item) else {
+        let Some(entry) = image
+            .entries
+            .iter()
+            .find(|entry| entry.span.start == item.span.start)
+        else {
             continue;
         };
-        let (Some(stage), Some(target)) = (entry.kind.as_deref(), entry.function.as_deref()) else {
-            continue;
-        };
-        if !entry.header_valid {
-            continue;
-        }
-        let Some(root) = indices.get(target).copied() else {
+        let stage = super::gpu_entries::gpu_entry_kind_name(entry.kind);
+        let Some(root) = indices.get(entry.function.as_str()).copied() else {
             continue;
         };
         let mut pending = vec![root];

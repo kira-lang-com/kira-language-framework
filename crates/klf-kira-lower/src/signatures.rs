@@ -8,11 +8,14 @@ use crate::{builtins, trait_id_for};
 use klf_core::Name;
 use klf_diag::Diagnostic;
 use klf_kira_syntax::ast::{CMember, DeclKind, File, FunctionDecl, MemberKind, Mode, Param};
-use klf_services::{Session, TraitId};
+use klf_services::{KernelService, Session, TraitId};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Signature {
+    pub service: Option<KernelService>,
+    pub source_function: bool,
     pub generics: Vec<Name>,
     pub bounds: HashMap<Name, Vec<TraitId>>,
     /// The parameter types, the receiver first when `receiver` is set.
@@ -28,6 +31,8 @@ impl Signature {
     /// A non-generic free function.
     pub(crate) fn free(params: Vec<FeType>, result: FeType) -> Self {
         Self {
+            service: None,
+            source_function: false,
             generics: Vec::new(),
             bounds: HashMap::new(),
             moves: vec![false; params.len()],
@@ -68,16 +73,16 @@ pub(crate) fn collect(
     file: &File,
     methods: &[Method],
     scope: &TypeNames<'_>,
-) -> HashMap<Name, Signature> {
+) -> HashMap<Name, Arc<Signature>> {
     let mut signatures = HashMap::new();
     for function in free_functions(file) {
         let signature = signature(session, function, None, scope);
-        signatures.insert(function.name.name.clone(), signature);
+        signatures.insert(function.name.name.clone(), Arc::new(signature));
     }
     for method in methods {
         let signature = signature(session, &method.decl, Some(&method.owner), scope);
         if signatures
-            .insert(method.decl.name.name.clone(), signature)
+            .insert(method.decl.name.name.clone(), Arc::new(signature))
             .is_some()
         {
             session.report(
@@ -90,7 +95,9 @@ pub(crate) fn collect(
         }
     }
     for (name, signature) in builtins::signatures(session) {
-        signatures.entry(name).or_insert(signature);
+        signatures
+            .entry(name)
+            .or_insert_with(|| Arc::new(signature));
     }
     signatures
 }
@@ -171,6 +178,8 @@ fn signature(
         .as_ref()
         .map_or(FeType::Void, |ty| resolve(session, ty));
     Signature {
+        service: None,
+        source_function: true,
         generics,
         bounds,
         params,

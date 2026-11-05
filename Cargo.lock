@@ -36,24 +36,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
-name = "autocfg"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
-
-[[package]]
-name = "base64"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "base64ct"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -115,12 +97,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
-name = "cmov"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
-
-[[package]]
 name = "cobs"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -128,12 +104,6 @@ checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
  "thiserror",
 ]
-
-[[package]]
-name = "const-oid"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "constant_time_eq"
@@ -350,40 +320,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "crypto-common"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
-dependencies = [
- "getrandom 0.4.3",
- "hybrid-array",
- "rand_core",
-]
-
-[[package]]
-name = "ctutils"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "261af4dc7a06ea8a527a8717d8cbba3417530d6ea14e1edb3de6b67806be474f"
-dependencies = [
- "cmov",
-]
-
-[[package]]
 name = "cty"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
-
-[[package]]
-name = "der"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a996a108feb8b427a6e12fcf6af4aa83409b79d72c15337d7741368131ee004"
-dependencies = [
- "const-oid",
- "zeroize",
-]
 
 [[package]]
 name = "digest"
@@ -392,16 +332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
- "crypto-common 0.1.7",
-]
-
-[[package]]
-name = "digest"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
-dependencies = [
- "crypto-common 0.2.2",
+ "crypto-common",
 ]
 
 [[package]]
@@ -511,7 +442,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi",
- "rand_core",
 ]
 
 [[package]]
@@ -550,16 +480,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hybrid-array"
-version = "0.4.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27f864f10dfb56725ce5ce5472bc52252c8f93a4ab86327122cebf62c5f59a17"
-dependencies = [
- "ctutils",
- "typenum",
-]
-
-[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -586,32 +506,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "keccak"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8f198d1db720e4940b5a493201d199d9f24f568f8f746bd13706243a2f71598"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.1",
-]
-
-[[package]]
 name = "klf-args"
-version = "26.10.4"
+version = "26.11.1"
 
 [[package]]
 name = "klf-cli"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
- "base64",
- "blake3",
  "klf-core",
  "klf-cranelift",
  "klf-diag",
  "klf-driver",
  "klf-editor-gen",
  "klf-format",
- "klf-host-crypto",
  "klf-kernel-ide",
  "klf-kir",
  "klf-kir-passes",
@@ -629,28 +536,25 @@ dependencies = [
  "klf-target",
  "klf-toy-calc",
  "klf-vm",
- "ml-dsa",
- "serde",
- "serde_jcs",
  "serde_json",
  "tir-diag",
  "tir-format",
+ "tir-own",
  "tir-verify",
  "tvisa-format",
  "tvisa-verify",
- "zstd",
 ]
 
 [[package]]
 name = "klf-core"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "klf-cranelift"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "cranelift",
  "cranelift-codegen",
@@ -675,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "klf-defsvc"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-args",
  "klf-core",
@@ -698,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "klf-diag"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-source",
@@ -706,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "klf-driver"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-args",
  "klf-core",
@@ -732,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "klf-editor-gen"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-facts",
  "klf-lsp",
@@ -744,22 +648,23 @@ dependencies = [
 
 [[package]]
 name = "klf-facts"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
 ]
 
 [[package]]
 name = "klf-format"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-facts",
 ]
 
 [[package]]
 name = "klf-frontend-rt"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
+ "blake3",
  "klf-args",
  "klf-core",
  "klf-cranelift",
@@ -795,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "klf-host-crypto"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -805,11 +710,11 @@ dependencies = [
 
 [[package]]
 name = "klf-host-files"
-version = "26.10.4"
+version = "26.11.1"
 
 [[package]]
 name = "klf-host-net"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "mio",
  "socket2",
@@ -817,14 +722,14 @@ dependencies = [
 
 [[package]]
 name = "klf-host-process"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "rustix",
 ]
 
 [[package]]
 name = "klf-ide"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -834,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "klf-kernel-ide"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -852,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "klf-kir"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-source",
@@ -864,7 +769,7 @@ dependencies = [
 
 [[package]]
 name = "klf-kir-passes"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -880,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "klf-kir-verify"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -891,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "klf-kira-lower"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-args",
  "klf-core",
@@ -911,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "klf-kira-syntax"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -920,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "klf-klffi"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-kir",
@@ -933,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "klf-layout"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-kir",
@@ -941,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "klf-live"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-kir",
@@ -952,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "klf-llvm"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-kir",
@@ -965,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "klf-lsp"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "crossbeam-channel",
  "klf-core",
@@ -982,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "klf-native-rt"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-defsvc",
  "klf-diag",
@@ -999,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "klf-ridl"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -1010,18 +915,18 @@ dependencies = [
 
 [[package]]
 name = "klf-ridl-wire"
-version = "26.10.4"
+version = "26.11.1"
 
 [[package]]
 name = "klf-rt"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "klf-services"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-args",
  "klf-core",
@@ -1031,18 +936,15 @@ dependencies = [
  "klf-shader",
  "klf-source",
  "klf-target",
- "tir-diag",
- "tir-format",
- "tir-verify",
 ]
 
 [[package]]
 name = "klf-shader"
-version = "26.10.4"
+version = "26.11.1"
 
 [[package]]
 name = "klf-shader-bind"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-shader",
  "klf-shader-valid",
@@ -1050,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "klf-shader-driver"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -1068,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "klf-shader-ide"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-facts",
@@ -1079,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "klf-shader-out"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-shader",
  "klf-shader-bind",
@@ -1089,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "klf-shader-passes"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-shader",
  "klf-shader-valid",
@@ -1097,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "klf-shader-reflect"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-shader",
  "klf-shader-bind",
@@ -1107,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "klf-shader-spirv"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-shader",
  "klf-shader-bind",
@@ -1117,14 +1019,14 @@ dependencies = [
 
 [[package]]
 name = "klf-shader-valid"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-shader",
 ]
 
 [[package]]
 name = "klf-source"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "serde",
@@ -1132,18 +1034,18 @@ dependencies = [
 
 [[package]]
 name = "klf-target"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "klf-text"
-version = "26.10.4"
+version = "26.11.1"
 
 [[package]]
 name = "klf-toy-calc"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -1159,7 +1061,7 @@ dependencies = [
 
 [[package]]
 name = "klf-vm"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-core",
  "klf-diag",
@@ -1176,7 +1078,7 @@ dependencies = [
 
 [[package]]
 name = "klf-vm-rt"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-diag",
  "klf-host-process",
@@ -1284,42 +1186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ml-dsa"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f6d49c3f3f0e10e18ca975ffda66f8da0ec36521c1d911adcbc521bf0743f5c"
-dependencies = [
- "const-oid",
- "crypto-common 0.2.2",
- "ctutils",
- "hybrid-array",
- "module-lattice",
- "pkcs8",
- "shake",
- "signature",
-]
-
-[[package]]
-name = "module-lattice"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4a1e412c8ee83a1c678f427806219c49c96b2511b9f07497514f0e43fb26155"
-dependencies = [
- "ctutils",
- "hybrid-array",
- "num-traits",
-]
-
-[[package]]
-name = "num-traits"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "object"
 version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1336,16 +1202,6 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
-
-[[package]]
-name = "pkcs8"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
-dependencies = [
- "der",
- "spki",
-]
 
 [[package]]
 name = "pkg-config"
@@ -1388,12 +1244,6 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
-
-[[package]]
-name = "rand_core"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "regalloc2"
@@ -1493,12 +1343,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ryu-js"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6518fc26bced4d53678a22d6e423e9d8716377def84545fe328236e3af070e7f"
-
-[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1539,17 +1383,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_jcs"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3a60f3fda61525e439ef6d67422118f11e986566997d9021c56867ad814a0aa"
-dependencies = [
- "ryu-js",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "serde_json"
 version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1582,7 +1415,7 @@ checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
- "digest 0.10.7",
+ "digest",
  "sha2-asm",
 ]
 
@@ -1596,31 +1429,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "shake"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09057cb2149ad4cbd2da1e26b351f9a4c354219421229c69c3063e6f61947c4a"
-dependencies = [
- "digest 0.11.3",
- "keccak",
- "sponge-cursor",
-]
-
-[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
-
-[[package]]
-name = "signature"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
-dependencies = [
- "digest 0.11.3",
- "rand_core",
-]
 
 [[package]]
 name = "smallvec"
@@ -1640,22 +1452,6 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "spki"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
-dependencies = [
- "base64ct",
- "der",
-]
-
-[[package]]
-name = "sponge-cursor"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
 name = "stable_deref_trait"
@@ -1721,20 +1517,19 @@ dependencies = [
 
 [[package]]
 name = "tir-core"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "blake3",
 ]
 
 [[package]]
 name = "tir-diag"
-version = "26.10.4"
+version = "26.11.1"
 
 [[package]]
 name = "tir-format"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
- "blake3",
  "tir-core",
  "tir-diag",
  "tir-target",
@@ -1744,25 +1539,35 @@ dependencies = [
 
 [[package]]
 name = "tir-layout"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "tir-types",
 ]
 
 [[package]]
+name = "tir-own"
+version = "26.11.1"
+dependencies = [
+ "tir-diag",
+ "tir-format",
+ "tir-types",
+ "tir-verify",
+]
+
+[[package]]
 name = "tir-target"
-version = "26.10.4"
+version = "26.11.1"
 
 [[package]]
 name = "tir-types"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "tir-core",
 ]
 
 [[package]]
 name = "tir-uniformity"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "tir-diag",
  "tir-format",
@@ -1770,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "tir-verify"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "tir-diag",
  "tir-format",
@@ -1874,7 +1679,7 @@ dependencies = [
 
 [[package]]
 name = "tvisa-format"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "tir-core",
  "tir-diag",
@@ -1886,7 +1691,7 @@ dependencies = [
 
 [[package]]
 name = "tvisa-verify"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "tir-diag",
  "tir-format",
@@ -2036,7 +1841,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "xtask"
-version = "26.10.4"
+version = "26.11.1"
 dependencies = [
  "klf-target",
  "sha2",

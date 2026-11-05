@@ -192,21 +192,18 @@ fn call_function_type(
     globals: Option<&BinaryGlobalTable>,
 ) -> Option<u64> {
     match instruction.opcode {
-        0x1a0 | 0x1a7 | 0x1a8 | 0x1aa | 0x1e7 => {
-            let symbol_index = instruction
+        0x1a0 | 0x1a7 | 0x1aa | 0x1e7 => {
+            let signature = instruction
                 .operands
                 .iter()
                 .find_map(|operand| match operand {
                     BinaryOperand::Symbol { kind: 0, index } => Some(*index),
                     _ => None,
                 })?;
-            crate::binary_symbols::resolve_function_symbol(
-                symbol_index,
-                signatures,
-                types,
-                imports.unwrap_or_default(),
-            )
-            .map(|symbol| symbol.function_type_index)
+            usize::try_from(signature)
+                .ok()
+                .and_then(|index| signatures.records.get(index))
+                .map(|signature| signature.function_type)
         }
         0x1a1 | 0x1a9 => instruction
             .operands

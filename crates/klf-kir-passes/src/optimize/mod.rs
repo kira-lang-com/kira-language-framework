@@ -182,7 +182,7 @@ pub fn optimize_with(module: &mut Module, level: Level, backend: Backend, memo: 
     };
     for (position, body) in made::bodies(made, memo).into_iter().enumerate() {
         if let Some(body) = body {
-            module.functions[position] = body;
+            module.functions[position] = std::sync::Arc::new(body);
         }
     }
 }
@@ -213,7 +213,11 @@ fn run(
         placeless,
         ..
     } = *this;
-    let functions = std::mem::take(&mut module.functions);
+    let shared_functions = std::mem::take(&mut module.functions);
+    let functions: Vec<Function> = shared_functions
+        .iter()
+        .map(|function| function.as_ref().clone())
+        .collect();
     let count = functions.len();
     let before: Vec<Option<Made>> = if before.is_empty() {
         (0..count).map(|_| None).collect()
@@ -411,9 +415,10 @@ fn run(
         module.functions = shaped
             .into_iter()
             .map(|function| function.into_inner().expect("every function is shaped"))
+            .map(std::sync::Arc::new)
             .collect();
     } else {
-        module.functions = functions;
+        module.functions = shared_functions;
     }
     made
 }
@@ -614,9 +619,11 @@ fn signatures(module: &Module, functions: &[Function]) -> Module {
     let mut shell = module.clone();
     shell.functions = functions
         .iter()
-        .map(|function| Function {
-            blocks: Vec::new(),
-            ..function.clone()
+        .map(|function| {
+            std::sync::Arc::new(Function {
+                blocks: Vec::new(),
+                ..function.clone()
+            })
         })
         .collect();
     shell

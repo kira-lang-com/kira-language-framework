@@ -1,4 +1,4 @@
-use tir_format::leb::{read_uleb, write_uleb};
+use tir_format::leb::read_uleb;
 
 use crate::binary::FormatError;
 use crate::types::{TvisaValueTypeRecord, TypeSection};
@@ -8,36 +8,6 @@ pub struct ConstantRecord {
     pub type_index: u64,
     /// Scalar payload bytes, or fixed-vector lane payloads in lane order.
     pub value_bytes: Vec<u8>,
-}
-
-/// Encode pooled constants using the payload size implied by `types`.
-///
-/// An empty table is represented by omitting the CONSTANTS section.
-pub fn encode_constant_records(
-    constants: &[ConstantRecord],
-    types: &TypeSection,
-) -> Result<Vec<u8>, FormatError> {
-    if constants.is_empty() {
-        return Err(malformed(
-            0,
-            "CONSTANTS section must be absent when it has no records",
-        ));
-    }
-
-    let mut output = Vec::new();
-    for constant in constants {
-        write_uleb(constant.type_index, &mut output)
-            .map_err(|error| malformed(output.len(), error.to_string()))?;
-        output.extend_from_slice(&constant.value_bytes);
-    }
-    let decoded = decode(&output, types)?;
-    if decoded != constants {
-        return Err(malformed(
-            0,
-            "CONSTANTS records are inconsistent with their binary encoding",
-        ));
-    }
-    Ok(output)
 }
 
 pub(crate) fn decode(

@@ -1,41 +1,12 @@
 use std::collections::HashSet;
 
 use crate::binary::{FormatError, TvisaImage};
-use tir_format::StringTable;
-use tir_format::leb::{read_uleb, write_uleb};
+use tir_format::leb::read_uleb;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AssemblyRecord {
     pub template_index: u64,
     pub constraints_index: u64,
-}
-
-pub fn encode_assembly_records(
-    records: &[AssemblyRecord],
-    strings: &StringTable,
-) -> Result<Vec<u8>, FormatError> {
-    let mut bytes = Vec::new();
-    write_index(
-        u64::try_from(records.len())
-            .map_err(|_| FormatError::malformed(None, "ASM record count overflows"))?,
-        &mut bytes,
-    )?;
-    let mut unique = HashSet::new();
-    for record in records {
-        let template = string(strings, record.template_index)
-            .ok_or_else(|| FormatError::malformed(None, "ASM template index is invalid"))?;
-        let constraints = string(strings, record.constraints_index)
-            .ok_or_else(|| FormatError::malformed(None, "ASM constraints index is invalid"))?;
-        if !unique.insert((template, constraints)) {
-            return Err(FormatError::malformed(
-                None,
-                "duplicate ASM template/constraints pair",
-            ));
-        }
-        write_index(record.template_index, &mut bytes)?;
-        write_index(record.constraints_index, &mut bytes)?;
-    }
-    Ok(bytes)
 }
 
 impl TvisaImage {
@@ -102,17 +73,6 @@ fn read_index(bytes: &[u8], cursor: &mut usize) -> Result<u64, FormatError> {
     let offset = *cursor;
     read_uleb(bytes, cursor)
         .map_err(|error| malformed(offset, format!("invalid ASM ULEB128: {error:?}")))
-}
-
-fn string(strings: &StringTable, index: u64) -> Option<&str> {
-    usize::try_from(index)
-        .ok()
-        .and_then(|index| strings.get(index))
-}
-
-fn write_index(index: u64, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(index, bytes)
-        .map_err(|error| FormatError::malformed(None, format!("ASM encoding failed: {error}")))
 }
 
 fn malformed(offset: usize, message: impl Into<String>) -> FormatError {

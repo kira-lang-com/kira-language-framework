@@ -1,10 +1,10 @@
-//! Running a definition's phases on the VM, over one machine per unit.
+//! Running a definition's phases on one reusable VM machine per compilation.
 //!
 //! A phase artifact is a definition-owned value that the kernel only holds a
 //! token for, so the heap the value lives on has to outlive the phase that
 //! produced it. `parse`, `elaborate` and `lower` for one unit therefore run as
-//! separate entry points over a single [`Machine`], and the section 15.6
-//! heap-balance check applies to the unit rather than to each call.
+//! separate entry points over one [`Machine`], and the section 15.6
+//! heap-balance check closes each unit's artifacts before the next unit runs.
 
 use crate::Backend;
 use klf_defsvc::{
@@ -21,7 +21,7 @@ use klf_vm::{
 };
 
 /// A definition image lowered to bytecode once, so every unit of a compilation
-/// shares one lowering.
+/// shares one lowering and one machine.
 pub(crate) struct PhaseProgram {
     program: Program,
 }
@@ -42,8 +42,8 @@ impl PhaseProgram {
     }
 }
 
-/// Where one unit's phases run. The VM variant keeps the machine alive across
-/// the phases; other backends re-enter through the image each time and cannot
+/// Where a compilation's phases run. The VM variant keeps one machine alive
+/// across units; other backends re-enter through the image each time and cannot
 /// carry a definition-owned artifact.
 pub(crate) enum PhaseHost<'a> {
     Vm {

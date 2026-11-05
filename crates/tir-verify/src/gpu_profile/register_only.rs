@@ -20,7 +20,7 @@ pub(super) fn verify(
     policies: &TypePolicies,
     layouts: &LayoutEngine,
 ) -> Vec<Diagnostic> {
-    let types = inferred_value_types(source, body, layouts, policies, None);
+    let types = inferred_value_types(source, body, layouts, policies);
     let current_is_inlineable =
         item.kind == TextItemKind::Function && has_module_gpu_linkage(source);
     let mut diagnostics = Vec::new();

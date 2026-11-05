@@ -3,14 +3,16 @@
 //!
 //! An entry's file name is the SHA-256 of its key: the KLF release, the
 //! definition hash and this frontend binary, the target, the profile (what to
-//! emit, the flags set and the file-mode selections), the query, and the name
-//! and SHA-256 of each of the unit's files.
+//! emit, the flags set and the file-mode selections), the query, and the names
+//! of the unit and program files. File contents are checked from the entry's
+//! observations, so finding a warm entry does not hash every source first.
 //! The entry holds what the phases then read from the file system, with the
 //! SHA-256 of each file, the diagnostics they kept, and the answer: the module
 //! as `.kirb`, or the phase that rejected the unit with its diagnostics. It
-//! answers a later build only when every file still hashes the same, every
-//! path still exists or not as it did, and every directory lists the same
-//! files: red-green validation of the `lower` query (section 8.9).
+//! answers a later build only when each file's identity still matches (or its
+//! content hash does), every path still exists or not as it did, and every
+//! directory lists the same files: red-green validation of the `lower` query
+//! (section 8.9).
 //!
 //! A `.ridl` contract is kept not by its whole text but by the declarations
 //! the unit reaches of it, from the names its sources spell
@@ -38,11 +40,44 @@ use std::sync::Arc;
 /// One thing the phases observed, as an entry keeps it.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 enum Seen {
-    Read(PathBuf, Option<[u8; 32]>),
+    Read(PathBuf, Option<[u8; 32]>, Option<FileSignature>),
     /// A contract, by the digest of what the entry's seed reaches of it.
     Contract(PathBuf, [u8; 32]),
     Exists(PathBuf, bool),
-    Listing(PathBuf, String, Option<Vec<PathBuf>>),
+    Listing(
+        PathBuf,
+        String,
+        Option<Vec<PathBuf>>,
+        Option<FileSignature>,
+        Vec<PathBuf>,
+    ),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+struct FileSignature {
+    length: u64,
+    modified: u128,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    changed: i128,
+}
+
+impl From<&klf_services::FileIdentity> for FileSignature {
+    fn from(identity: &klf_services::FileIdentity) -> Self {
+        Self {
+            length: identity.length,
+            modified: identity.modified,
+            #[cfg(unix)]
+            device: identity.device,
+            #[cfg(unix)]
+            inode: identity.inode,
+            #[cfg(unix)]
+            changed: identity.changed,
+        }
+    }
 }
 
 /// What an entry holds ahead of its module.
@@ -115,10 +150,14 @@ impl DiskModuleCache {
         }
         let root = klf_target::cache_root()?;
         let directory = root.join("queries");
-        let mut profile = format!(
-            "target {triple}\nemit {}\nstd {std_root}\n",
-            invocation.emit
-        );
+        // Check, binary, run and test requests share the same frontend graph
+        // when their semantic flags and inputs match. Keep output modes that
+        // change Kira's frontend interpretation distinct.
+        let emit = match invocation.emit.as_str() {
+            "shared" | "ridl" | "format" => invocation.emit.as_str(),
+            _ => "program",
+        };
+        let mut profile = format!("target {triple}\nemit {emit}\nstd {std_root}\n");
         let mut overrides: Vec<String> = invocation
             .flag_overrides
             .iter()
@@ -172,7 +211,8 @@ impl DiskModuleCache {
     /// decides which packages the parse reads, so the same unit under another
     /// program is another answer. Whatever else its phases read is checked
     /// against what the entry saw, so the other units' sources, which this
-    /// one may never read, leave its entry alone.
+    /// one may never read, leave its entry alone. File contents are validated
+    /// against the stored observations instead of being hashed to find it.
     fn entry_path(
         &self,
         session: &Session,
@@ -186,15 +226,6 @@ impl DiskModuleCache {
         }
         slot.push('\n');
         let mut key = format!("{}{slot}", self.toolchain);
-        for file in unit.files() {
-            let file = session.file(*file);
-            let _ = writeln!(
-                key,
-                "source {} {}",
-                file.name(),
-                hex(&sha256(file.text().as_bytes()))
-            );
-        }
         for file in program {
             let _ = writeln!(key, "program {}", session.file(*file).name());
         }
@@ -221,8 +252,29 @@ impl ModuleCache for DiskModuleCache {
         Some(Box::new(move || {
             let bytes = std::fs::read(&path).ok()?;
             let (header, module): (Header, &[u8]) = postcard::take_from_bytes(&bytes).ok()?;
-            let held = in_parallel(&header.seen, |seen| holds(seen, &overlay))?;
-            if !held.into_iter().all(|held| held) || !contracts_hold(&header, &overlay) {
+            let held = in_parallel(&header.seen, |seen| {
+                let mut work = ValidationWork::default();
+                let holds = holds(seen, &overlay, &mut work);
+                (holds, work)
+            })?;
+            let mut work = ValidationWork::default();
+            let mut unchanged = true;
+            for (holds, part_work) in held {
+                unchanged &= holds;
+                work.include(part_work);
+            }
+            unchanged &= contracts_hold(&header, &overlay, &mut work);
+            klf_diag::progress!(
+                "query cache validation paths={} files={} directories={} content_reads={} content_hashes={} directory_lists={} contract_reads={}",
+                work.paths,
+                work.files,
+                work.directories,
+                work.content_reads,
+                work.content_hashes,
+                work.directory_lists,
+                work.contract_reads
+            );
+            if !unchanged {
                 return None;
             }
             let start = bytes.len() - module.len();
@@ -275,6 +327,7 @@ impl ModuleCache for DiskModuleCache {
                             Observation::Read {
                                 path,
                                 text: Some(text),
+                                ..
                             } if !contract(path) => Some(&**text),
                             _ => None,
                         }),
@@ -285,6 +338,7 @@ impl ModuleCache for DiskModuleCache {
             if let Observation::Read {
                 path,
                 text: Some(text),
+                ..
             } = observation
                 && contract(path)
                 && !contracts.iter().any(|(known, _)| *known == path)
@@ -297,12 +351,14 @@ impl ModuleCache for DiskModuleCache {
             &contracts.iter().map(|(_, text)| *text).collect::<Vec<_>>(),
         );
         let mut kept = HashSet::new();
-        let seen: Vec<Seen> = observations
+        let mut observed_reads = HashSet::new();
+        let mut seen: Vec<Seen> = observations
             .iter()
             .map(|observation| match observation {
                 Observation::Read {
                     path,
                     text: Some(_),
+                    ..
                 } if contract(path) => {
                     let at = contracts
                         .iter()
@@ -310,19 +366,55 @@ impl ModuleCache for DiskModuleCache {
                         .unwrap_or_default();
                     Seen::Contract(path.clone(), digests[at])
                 }
-                Observation::Read { path, text } => Seen::Read(
+                Observation::Read {
+                    path,
+                    text,
+                    identity,
+                } => Seen::Read(
                     path.clone(),
                     text.as_deref().map(|text| sha256(text.as_bytes())),
+                    identity.as_ref().map(FileSignature::from),
                 ),
                 Observation::Exists { path, found } => Seen::Exists(path.clone(), *found),
                 Observation::Listing {
                     directory,
                     extension,
                     paths,
-                } => Seen::Listing(directory.clone(), extension.clone(), paths.clone()),
+                    identity,
+                    overlay_entries,
+                } => Seen::Listing(
+                    directory.clone(),
+                    extension.clone(),
+                    paths.clone(),
+                    identity.as_ref().map(FileSignature::from),
+                    overlay_entries.clone(),
+                ),
             })
-            .filter(|seen| kept.insert(seen.clone()))
+            .filter(|seen| {
+                if let Seen::Read(path, ..) = seen {
+                    observed_reads.insert(path.clone());
+                }
+                kept.insert(seen.clone())
+            })
             .collect();
+        // The driver's input files may not have been opened through the
+        // observable filesystem service. Record them explicitly so the
+        // path-only key still validates their contents before reuse.
+        for file in unit.files() {
+            let source = session.file(*file);
+            let path = PathBuf::from(source.name().as_str());
+            if observed_reads.contains(&path) {
+                continue;
+            }
+            let source_seen = Seen::Read(
+                path,
+                Some(sha256(source.text().as_bytes())),
+                session.file_identity(*file).map(FileSignature::from),
+            );
+            if kept.insert(source_seen.clone()) {
+                seen.push(source_seen);
+            }
+        }
         let rejected = answer.err().and_then(|(phase, message)| {
             let index = PHASES.iter().position(|known| *known == phase)?;
             Some((u8::try_from(index).ok()?, message.to_owned()))
@@ -401,10 +493,37 @@ fn in_parallel<T: Sync, R: Send>(items: &[T], check: impl Fn(&T) -> R + Sync) ->
     })
 }
 
+#[derive(Default)]
+struct ValidationWork {
+    paths: usize,
+    files: usize,
+    directories: usize,
+    content_reads: usize,
+    content_hashes: usize,
+    directory_lists: usize,
+    contract_reads: usize,
+}
+
+impl ValidationWork {
+    fn include(&mut self, other: Self) {
+        self.paths += other.paths;
+        self.files += other.files;
+        self.directories += other.directories;
+        self.content_reads += other.content_reads;
+        self.content_hashes += other.content_hashes;
+        self.directory_lists += other.directory_lists;
+        self.contract_reads += other.contract_reads;
+    }
+}
+
 /// Whether what the entry's seed reaches of each contract it read is what it
 /// reached then. The contracts are reached together, as one names the types
 /// of another, so they are checked together.
-fn contracts_hold(header: &Header, overlay: &HashMap<PathBuf, Arc<str>>) -> bool {
+fn contracts_hold(
+    header: &Header,
+    overlay: &HashMap<PathBuf, Arc<str>>,
+    work: &mut ValidationWork,
+) -> bool {
     let mut paths = Vec::new();
     let mut digests = Vec::new();
     for seen in &header.seen {
@@ -418,6 +537,9 @@ fn contracts_hold(header: &Header, overlay: &HashMap<PathBuf, Arc<str>>) -> bool
     }
     let mut texts = Vec::new();
     for path in paths {
+        work.paths += 1;
+        work.contract_reads += 1;
+        work.content_reads += 1;
         match klf_services::read_through(overlay, path) {
             Ok(text) => texts.push(text),
             Err(_) => return false,
@@ -428,18 +550,57 @@ fn contracts_hold(header: &Header, overlay: &HashMap<PathBuf, Arc<str>>) -> bool
         == digests
 }
 
-fn holds(seen: &Seen, overlay: &HashMap<PathBuf, Arc<str>>) -> bool {
+fn holds(seen: &Seen, overlay: &HashMap<PathBuf, Arc<str>>, work: &mut ValidationWork) -> bool {
     match seen {
         Seen::Contract(..) => true,
-        Seen::Read(path, hash) => {
-            klf_services::read_through(overlay, path)
-                .ok()
-                .map(|text| sha256(text.as_bytes()))
-                == *hash
+        Seen::Read(path, hash, signature) => {
+            work.paths += 1;
+            work.files += 1;
+            let overlaid = overlay.contains_key(&klf_services::overlay_key(path));
+            if !overlaid
+                && signature.as_ref().is_some_and(|signature| {
+                    klf_services::file_identity(path)
+                        .as_ref()
+                        .is_some_and(|identity| FileSignature::from(identity) == *signature)
+                })
+            {
+                klf_services::note_access(path);
+                return true;
+            }
+            if hash.is_none() && !overlaid {
+                klf_services::note_access(path);
+                return std::fs::metadata(path).is_err();
+            }
+            work.content_reads += 1;
+            klf_services::read_through(overlay, path).ok().map(|text| {
+                work.content_hashes += 1;
+                sha256(text.as_bytes())
+            }) == *hash
         }
-        Seen::Exists(path, found) => klf_defsvc::path_present(overlay, path) == *found,
-        Seen::Listing(directory, extension, paths) => {
-            klf_defsvc::listing(directory, extension) == *paths
+        Seen::Exists(path, found) => {
+            work.paths += 1;
+            klf_defsvc::path_present(overlay, path) == *found
+        }
+        Seen::Listing(directory, extension, paths, signature, overlay_entries) => {
+            work.paths += 1;
+            work.directories += 1;
+            let current_overlay_entries =
+                klf_services::directory_overlay_entries(overlay, directory);
+            if current_overlay_entries != *overlay_entries {
+                klf_services::note_access(directory);
+                return false;
+            }
+            if signature.as_ref().is_some_and(|signature| {
+                klf_services::file_identity(directory)
+                    .as_ref()
+                    .is_some_and(|identity| FileSignature::from(identity) == *signature)
+            }) {
+                klf_services::note_access(directory);
+                true
+            } else {
+                work.directory_lists += 1;
+                klf_defsvc::listing(directory, extension) == *paths
+            }
         }
     }
 }

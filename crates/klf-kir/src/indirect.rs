@@ -19,7 +19,7 @@ pub fn indirect_branches_to_switches(module: &Module) -> Option<Module> {
     let mut changed = false;
     for function in &mut result.functions {
         if let Some(rewritten) = rewrite(function) {
-            *function = rewritten;
+            *function = std::sync::Arc::new(rewritten);
             changed = true;
         }
     }

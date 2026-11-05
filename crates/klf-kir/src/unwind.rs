@@ -23,7 +23,7 @@ pub fn unwinding_without_handlers(module: &Module) -> Option<Module> {
     let mut changed = false;
     for function in &mut result.functions {
         if let Some(rewritten) = rewrite(function, &index) {
-            *function = rewritten;
+            *function = std::sync::Arc::new(rewritten);
             changed = true;
         }
     }

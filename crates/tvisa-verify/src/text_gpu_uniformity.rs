@@ -4,7 +4,10 @@ use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
 use tir_format::FunctionBody;
 use tir_types::Type;
 use tir_uniformity::Uniformity;
-use tvisa_format::{TextCallingConvention, TextImage, TextItemKind, TextSignature};
+use tvisa_format::{
+    GpuEntryKind, TextCallingConvention, TextEntryValueKind, TextGpuEntry, TextImage, TextItemKind,
+    TextSignature,
+};
 
 const VFY22: Code = Code::new(Dialect::Tvisa, Area::Verifier, 22);
 
@@ -117,11 +120,12 @@ pub(super) fn verify_calls(image: &TextImage, functions: &[FunctionInfo]) -> Vec
         .iter()
         .filter(|item| item.kind == TextItemKind::Entry)
         .filter_map(|item| {
-            let entry = image.gpu_entry_for_item(*item)?;
-            let kind = entry.kind.as_deref()?;
-            let target = entry.function.as_ref()?;
-            (entry.header_valid && kind == "visible")
-                .then(|| (target.clone(), visible_type_id(entry)))
+            let entry = image
+                .entries
+                .iter()
+                .find(|entry| entry.span.start == item.span.start)?;
+            (entry.kind == GpuEntryKind::Visible)
+                .then(|| (entry.function.clone(), visible_type_id(entry)))
         })
         .filter(|(target, _)| function_by_name.contains_key(target.as_str()))
         .collect::<Vec<_>>();
@@ -210,15 +214,11 @@ fn target_indexes(
         .collect()
 }
 
-fn visible_type_id(entry: &tvisa_format::TextGpuEntry) -> Option<u64> {
-    let value = entry
-        .fields
-        .iter()
-        .find(|field| field.name == "typeid")
-        .and_then(|field| match &field.value.kind {
-            tvisa_format::TextGpuEntryValueKind::Scalar(value) => Some(value.as_str()),
-            _ => None,
-        })?;
+fn visible_type_id(entry: &TextGpuEntry) -> Option<u64> {
+    let value = entry.fields.iter().find(|field| field.name == "typeid")?;
+    let TextEntryValueKind::Atom(value) = &value.value.kind else {
+        return None;
+    };
     u64::try_from(tir_format::numeric_literals::parse_unsigned_integer(value)?).ok()
 }
 

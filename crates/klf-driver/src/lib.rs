@@ -53,6 +53,7 @@ use klf_vm::{
     Outcome, RuntimeDiagnostic, kernel_services_with_source_and_diagnostics,
     run_module_with_capabilities,
 };
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Backend {
@@ -139,6 +140,19 @@ pub fn compile_package(
     target: Target,
 ) -> Option<Module> {
     definition.compile_package(session, package, module_name, target)
+}
+
+/// Loads and compiles a definition package while keeping cached KIR shared
+/// with the compiler session.
+#[must_use]
+pub fn compile_package_shared(
+    definition: &dyn Definition,
+    session: &mut Session,
+    package: &DefinitionPackage,
+    module_name: &str,
+    target: Target,
+) -> Option<Arc<Module>> {
+    definition.compile_package_shared(session, package, module_name, target)
 }
 
 /// Runs one function of a module on the chosen backend.

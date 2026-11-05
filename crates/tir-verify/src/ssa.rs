@@ -11,7 +11,6 @@ use crate::model::{Function, TerminatorKind, ValueDefinition, ValueUse};
 const V1: Code = Code::new(Dialect::Tir, Area::Verifier, 1);
 const V2: Code = Code::new(Dialect::Tir, Area::Verifier, 2);
 const V3: Code = Code::new(Dialect::Tir, Area::Verifier, 3);
-const V4: Code = Code::new(Dialect::Tir, Area::Verifier, 4);
 const S7: Code = Code::new(Dialect::Tir, Area::ControlFlow, 7);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -284,7 +283,7 @@ pub fn verify_text_value_dominance(body: &FunctionBody) -> Vec<Diagnostic> {
                     definitions.get(name.as_str())
                 else {
                     diagnostics.push(
-                        Diagnostic::error(V4, format!("value %{name} is used but not defined"))
+                        Diagnostic::error(V1, format!("value %{name} is used but not defined"))
                             .with_primary_span(span),
                     );
                     continue;
@@ -297,7 +296,7 @@ pub fn verify_text_value_dominance(body: &FunctionBody) -> Vec<Diagnostic> {
                 if !dominates {
                     diagnostics.push(
                         Diagnostic::error(
-                            V4,
+                            V1,
                             format!("definition of %{name} does not dominate this use"),
                         )
                         .with_primary_span(span),
@@ -310,6 +309,9 @@ pub fn verify_text_value_dominance(body: &FunctionBody) -> Vec<Diagnostic> {
 }
 
 pub(super) fn text_value_uses(instruction: &TextInstruction) -> Vec<(String, Span)> {
+    if instruction.opcode == "func.ref" {
+        return Vec::new();
+    }
     let start = aggregate_value_list_start(instruction)
         .unwrap_or_else(|| text_instruction_operands_start(&instruction.tokens));
     let mut uses = Vec::new();
@@ -543,26 +545,11 @@ fn verify_reverse_postorder(
     roots: &[usize],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let ordered_successors = successors
-        .iter()
-        .map(|targets| {
-            let mut targets = targets.clone();
-            targets.sort_unstable();
-            targets.dedup();
-            targets
-        })
-        .collect::<Vec<_>>();
     let mut visited = vec![false; function.blocks.len()];
     let mut order = Vec::with_capacity(function.blocks.len());
     for root in roots {
         let mut postorder = Vec::new();
-        visit_postorder(
-            *root,
-            &ordered_successors,
-            component,
-            &mut visited,
-            &mut postorder,
-        );
+        visit_postorder(*root, successors, component, &mut visited, &mut postorder);
         order.extend(postorder.into_iter().rev());
     }
     for (expected, actual) in order.iter().copied().enumerate() {

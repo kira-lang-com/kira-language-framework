@@ -92,7 +92,8 @@ pub(super) fn keep<T: serde::Serialize>(memo: &dyn Memo, key: [u8; 32], entry: &
 /// written, which move whenever a source file above them changes.
 pub(super) fn shell_digest(memo: &dyn Memo, shell: &Module, run: &str) -> [u8; 32] {
     let mut placeless = shell.clone();
-    for function in &mut placeless.functions {
+    for shared in &mut placeless.functions {
+        let function = std::sync::Arc::make_mut(shared);
         function.span = placeless_span(function.span);
         for parameter in &mut function.parameters {
             parameter.span = placeless_span(parameter.span);

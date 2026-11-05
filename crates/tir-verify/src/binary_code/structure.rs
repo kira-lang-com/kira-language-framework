@@ -4,8 +4,6 @@ use tir_format::{BinaryInstruction, BinaryOperand};
 use crate::DominatorTree;
 
 const V1: Code = Code::new(Dialect::Tir, Area::Verifier, 1);
-const V4: Code = Code::new(Dialect::Tir, Area::Verifier, 4);
-const S7: Code = Code::new(Dialect::Tir, Area::ControlFlow, 7);
 
 #[derive(Clone, Copy)]
 struct Definition {
@@ -16,7 +14,6 @@ struct Definition {
 pub(super) fn verify_body(
     body: &tir_format::BinaryFunctionBody,
     value_types: &[Option<u64>],
-    structured: bool,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let successors = body
@@ -37,62 +34,6 @@ pub(super) fn verify_body(
     let dominators = DominatorTree::compute(&successors);
     verify_reverse_postorder(body, &successors, &dominators, &mut diagnostics);
     verify_edges(body, value_types, &mut diagnostics);
-    let graph_blocks = body
-        .blocks
-        .iter()
-        .map(|block| crate::StructuredGraphBlock {
-            loop_merge: block
-                .loop_merge
-                .and_then(|index| usize::try_from(index).ok()),
-            loop_continue: block
-                .loop_continue
-                .and_then(|index| usize::try_from(index).ok()),
-            selection: block
-                .instructions
-                .as_ref()
-                .and_then(|items| items.last())
-                .is_some_and(|instruction| matches!(instruction.opcode, 0x1e1 | 0x1e2)),
-            selection_merge: block
-                .instructions
-                .as_ref()
-                .and_then(|items| items.last())
-                .and_then(selection_merge),
-        })
-        .collect::<Vec<_>>();
-    let structured = structured
-        || graph_blocks.iter().any(|block| {
-            block.loop_merge.is_some()
-                || block.loop_continue.is_some()
-                || block.selection_merge.is_some()
-        });
-    if structured {
-        diagnostics.extend(crate::verify_structured_graph(
-            &graph_blocks,
-            &successors,
-            Dialect::Tir,
-        ));
-        diagnostics.extend(
-            body.blocks
-                .iter()
-                .filter_map(|block| block.instructions.as_ref())
-                .flatten()
-                .filter(|instruction| {
-                    matches!(
-                        instruction.opcode,
-                        0x1aa | 0x1d0..=0x1d2 | 0x1e4 | 0x214..=0x215
-                    )
-                })
-                .map(|instruction| {
-                    Diagnostic::error(
-                        S7,
-                        format!(
-                            "instruction opcode 0x{:03X} is forbidden by structured control flow",
-                            instruction.opcode
-                        ),
-                    )
-                }),
-        );
-    }
 
     let definitions = collect_definitions(body);
     for (block_index, block) in body.blocks.iter().enumerate() {
@@ -114,18 +55,6 @@ pub(super) fn verify_body(
         }
     }
     diagnostics
-}
-
-fn selection_merge(instruction: &BinaryInstruction) -> Option<usize> {
-    let encoded = instruction
-        .operands
-        .iter()
-        .rev()
-        .find_map(|operand| match operand {
-            BinaryOperand::Index(index) => Some(*index),
-            _ => None,
-        })?;
-    usize::try_from(encoded.checked_sub(1)?).ok()
 }
 
 fn verify_edges(
@@ -237,7 +166,7 @@ fn verify_use(
     };
     if !dominates {
         diagnostics.push(Diagnostic::error(
-            V4,
+            V1,
             format!("definition of value {value} does not dominate its use in block {block}"),
         ));
     }
@@ -355,22 +284,13 @@ fn verify_reverse_postorder(
     dominators: &DominatorTree,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let ordered_successors = successors
-        .iter()
-        .map(|targets| {
-            let mut targets = targets.clone();
-            targets.sort_unstable();
-            targets.dedup();
-            targets
-        })
-        .collect::<Vec<_>>();
     let mut visited = vec![false; body.blocks.len()];
     let mut order = Vec::with_capacity(body.blocks.len());
     for root in dominators.roots() {
         let mut postorder = Vec::new();
         visit_postorder(
             *root,
-            &ordered_successors,
+            successors,
             dominators.components(),
             &mut visited,
             &mut postorder,
@@ -419,5 +339,48 @@ fn visit_postorder(
             postorder.push(block);
             stack.pop();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tir_format::{BinaryModule, BinaryOperand, assemble_text_module, parse_text_module};
+
+    #[test]
+    fn cross_block_non_dominating_value_is_v1_not_v4() {
+        let text = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.route(%a: i32, %cond: i1) -> i32 engine(native) {\nbb0(%a: i32, %cond: i1):\n  cond.br %cond, bb1(%a), bb2(%a)\nbb1(%left: i32):\n  br bb2(%left)\nbb2(%right: i32):\n  return %right\n}\n";
+        let module = BinaryModule::decode(
+            &assemble_text_module(&parse_text_module(text).expect("text parses"))
+                .expect("text assembles"),
+        )
+        .expect("binary decodes");
+        let types = module.type_table(u64::MAX).expect("types decode");
+        let signatures = module
+            .signature_table(u64::MAX, &types)
+            .expect("signatures decode");
+        let mut code = module
+            .code_table(u64::MAX, &signatures)
+            .expect("CODE decodes");
+        let body = &mut code.functions[0];
+        let value_types = super::super::types::infer_value_types(body, &signatures, &types);
+        assert!(
+            super::verify_body(body, &value_types).is_empty(),
+            "valid body must pass V1"
+        );
+        let instructions = body.blocks[2]
+            .instructions
+            .as_mut()
+            .expect("decoded instructions");
+        let return_value = &mut instructions[0].operands[0];
+        assert!(matches!(return_value, BinaryOperand::Value(_)));
+        *return_value = BinaryOperand::Value(2);
+        let diagnostics = super::verify_body(body, &value_types);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.to_string() == "TIR-VFY-0001"
+                    && diagnostic.message.contains("does not dominate")),
+            "cross-block non-dominance must be V1: {diagnostics:?}"
+        );
     }
 }

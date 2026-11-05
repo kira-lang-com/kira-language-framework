@@ -5,16 +5,13 @@ use tir_format::FunctionBody;
 use tir_format::TextInstruction;
 use tir_format::text::{Token, TokenKind, lex};
 use tir_types::Type;
-use tvisa_format::{
-    TextCallingConvention, TextImage, TextImportPayload, TextItemKind, TextSignature,
-};
+use tvisa_format::{TextCallingConvention, TextImage, TextItemKind, TextSignature};
 
 use crate::call_types::{
     infer_instruction_results, signature_parameter_types, signature_result_types,
     verify_indirect_callee, verify_runtime_call,
 };
 use crate::symbols::{instruction_symbol_operand, symbol_references};
-use crate::type_tags::verify_text_indirect_type_tag;
 
 const VFY5: Code = Code::new(Dialect::Tvisa, Area::Verifier, 5);
 const VFY30: Code = Code::new(Dialect::Tvisa, Area::Verifier, 30);
@@ -200,9 +197,6 @@ impl SignatureIndex {
             value_types,
             is_indirect,
         ));
-        if is_indirect {
-            diagnostics.extend(verify_text_indirect_type_tag(instruction, signature));
-        }
         let Some(arguments) = call_arguments(instruction) else {
             diagnostics.push(
                 Diagnostic::error(VFY5, "call is missing its argument list")
@@ -587,10 +581,13 @@ fn signature_sources(image: &TextImage) -> (HashMap<String, String>, HashMap<Str
                 }
             }
             TextItemKind::Import => {
-                if let Some(import) = image.import_for_item(*item)
-                    && let TextImportPayload::Function { signature, .. } = &import.payload
+                if tokens.first().is_some_and(|token| is_atom(token, "import"))
+                    && tokens
+                        .get(1)
+                        .is_some_and(|token| is_atom(token, "function"))
+                    && let Some(signature) = signature_reference_refs(&tokens)
                 {
-                    functions.insert(import.symbol.clone(), signature.clone());
+                    functions.insert(symbol, signature);
                 }
             }
             TextItemKind::Variants | TextItemKind::Dispatch => {

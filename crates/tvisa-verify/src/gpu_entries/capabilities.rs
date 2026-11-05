@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tir_format::text::{Token, TokenKind};
-use tir_format::{FunctionBody, TextInstruction, parse_tvisa_type};
+use tir_format::{FunctionBody, TextInstruction, parse_tvisa_function_body, parse_tvisa_type};
 use tir_types::{AddressSpace, FloatType, Type};
 use tvisa_format::{TextCallingConvention, TextImage, TextItemKind, TextSignature};
 
@@ -47,16 +47,13 @@ pub(super) fn analyze(image: &TextImage, root: &str, stage: &str) -> EntryUse {
         let Some(name) = function_symbol(source) else {
             continue;
         };
-        let Some(body) = image
-            .function_body_for_item(*item)
-            .and_then(|parsed| parsed.body.as_ref())
-        else {
+        let Ok(Some(body)) = parse_tvisa_function_body(source) else {
             continue;
         };
         functions.push(Function {
             name,
             signature: signature.clone(),
-            body: body.clone(),
+            body,
             source: source.to_owned(),
         });
     }
@@ -344,14 +341,6 @@ fn collect_instruction_capabilities(
         "frag.load_attachment" => add(required, "framebuffer_fetch"),
         "frag.raster_order.begin" | "frag.raster_order.end" => add(required, "raster_order"),
         "tile.imageblock.addr" | "frag.imageblock.addr" => add(required, "tile"),
-        "gpu.barrier" | "gpu.memfence"
-            if tir_format::parse_gpu_synchronization(instruction)
-                .ok()
-                .flatten()
-                .is_some_and(|sync| sync.memory.contains(tir_format::GpuMemoryDomain::Tile)) =>
-        {
-            add(required, "tile")
-        }
         "node.input.addr"
         | "node.input.count"
         | "node.output.allocate"

@@ -3,57 +3,6 @@ use tir_types::FloatType;
 
 use super::{float_type, integer_type, selector, type_at, type_index, vector_type};
 
-mod advanced_types;
-mod collective_types;
-mod geometry_types;
-mod ray_types;
-mod texture_types;
-
-pub(crate) fn verify_texture_instructions(
-    body: &tir_format::BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    types: &BinaryTypeTable,
-    function_name: &str,
-) -> Vec<tir_diag::Diagnostic> {
-    texture_types::verify(body, value_types, types, function_name)
-}
-
-pub(crate) fn verify_ray_instructions(
-    body: &tir_format::BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    types: &BinaryTypeTable,
-    function_name: &str,
-) -> Vec<tir_diag::Diagnostic> {
-    ray_types::verify(body, value_types, types, function_name)
-}
-
-pub(crate) fn verify_advanced_instructions(
-    body: &tir_format::BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    types: &BinaryTypeTable,
-    function_name: &str,
-) -> Vec<tir_diag::Diagnostic> {
-    advanced_types::verify(body, value_types, types, function_name)
-}
-
-pub(crate) fn verify_geometry_instructions(
-    body: &tir_format::BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    types: &BinaryTypeTable,
-    function_name: &str,
-) -> Vec<tir_diag::Diagnostic> {
-    geometry_types::verify(body, value_types, types, function_name)
-}
-
-pub(crate) fn verify_collective_instructions(
-    body: &tir_format::BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    types: &BinaryTypeTable,
-    function_name: &str,
-) -> Vec<tir_diag::Diagnostic> {
-    collective_types::verify(body, value_types, types, function_name)
-}
-
 pub(super) fn infer_texture_results(
     instruction: &BinaryInstruction,
     texture_type_index: Option<u64>,

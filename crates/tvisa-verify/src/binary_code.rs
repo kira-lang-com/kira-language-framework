@@ -1,6 +1,4 @@
 mod atomics;
-#[path = "binary_structured.rs"]
-mod binary_structured;
 mod calls;
 mod gpu_collectives;
 mod gpu_control;
@@ -10,7 +8,6 @@ mod memory;
 mod semantics;
 mod slots;
 mod symbol_operands;
-mod tv_only;
 mod unwind;
 mod vectors;
 
@@ -18,9 +15,8 @@ use infer::infer_value_types;
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_verify::DominatorTree;
 use tvisa_format::{
-    AssemblyRecord, BinaryFunctionBody, BinaryInstruction, BinaryOperand, FunctionRecordSummary,
-    ImportCounts, ParameterItemSummary, TvisaImage, TvisaValueTypeRecord, TypeSection,
-    VariantIndex,
+    AssemblyRecord, BinaryFunctionBody, BinaryInstruction, BinaryOperand, ParameterItemSummary,
+    TvisaImage, TvisaValueTypeRecord, TypeSection,
 };
 
 const VFY1: Code = Code::new(Dialect::Tvisa, Area::Verifier, 1);
@@ -29,25 +25,6 @@ const VFY50: Code = Code::new(Dialect::Tvisa, Area::Verifier, 50);
 const ARCH3: Code = Code::new(Dialect::Tvisa, Area::Architecture, 3);
 const HAS_ASSEMBLY: u32 = 1 << 1;
 const FUNCTION_HAS_ASSEMBLY: u64 = 1 << 8;
-
-pub(super) fn gpu_value_types(
-    body: &BinaryFunctionBody,
-    function: &FunctionRecordSummary,
-    types: &TypeSection,
-    functions: &[FunctionRecordSummary],
-    imports: &ImportCounts,
-    variants: &VariantIndex,
-) -> Vec<Option<u64>> {
-    infer_value_types(body, function, types, functions, imports, variants)
-}
-
-pub(super) fn gpu_atomic_capabilities(
-    body: &BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    types: &TypeSection,
-) -> std::collections::HashSet<(u8, &'static str)> {
-    atomics::gpu_capability_requirements(body, value_types, types)
-}
 
 pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
     let bodies = match image.function_bodies(memory_limit) {
@@ -99,13 +76,7 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
         .flatten();
     let mut diagnostics = unwind::verify_section(&unwind_section, &functions, &imports);
     diagnostics.extend(crate::binary_analysis::verify(
-        image,
-        &bodies,
-        &functions,
-        &imports,
-        &types,
-        &analysis,
-        data.as_ref(),
+        image, &bodies, &functions, &imports, &types, &analysis,
     ));
     verify_assembly_inventory(
         image,
@@ -125,7 +96,7 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
                     body.header.function_index
                 ),
             ));
-            diagnostics.extend(verify_body(body, &[], false));
+            diagnostics.extend(verify_body(body, &[]));
             continue;
         };
         let Some(function) = usize::try_from(function_index)
@@ -139,19 +110,17 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
                     body.header.function_index
                 ),
             ));
-            diagnostics.extend(verify_body(body, &[], false));
+            diagnostics.extend(verify_body(body, &[]));
             continue;
         };
         let value_types =
             infer_value_types(body, function, &types, &functions, &imports, &variants);
-        diagnostics.extend(verify_body(body, &value_types, function.target != 0));
+        diagnostics.extend(verify_body(body, &value_types));
         diagnostics.extend(instruction_types::verify_function(
             body,
             &value_types,
             &types,
         ));
-        diagnostics.extend(tv_only::verify_function(body, &value_types, &types));
-        diagnostics.extend(crate::type_tags::verify_binary_function(body, &types));
         diagnostics.extend(vectors::verify_function(body, &value_types, &types));
         diagnostics.extend(atomics::verify_function(
             body,
@@ -332,11 +301,7 @@ fn verify_assembly_inventory(
     }
 }
 
-fn verify_body(
-    body: &BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    gpu: bool,
-) -> Vec<Diagnostic> {
+fn verify_body(body: &BinaryFunctionBody, value_types: &[Option<u64>]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let successors = body
         .blocks
@@ -355,9 +320,6 @@ fn verify_body(
         .collect::<Vec<_>>();
     let dominators = DominatorTree::compute(&successors);
     verify_reverse_postorder(body, &successors, &dominators, &mut diagnostics);
-    if gpu {
-        diagnostics.extend(binary_structured::verify(body, &successors));
-    }
 
     for block in &body.blocks {
         let Some(terminator) = block.instructions.last() else {
@@ -468,22 +430,13 @@ fn verify_reverse_postorder(
     dominators: &DominatorTree,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let ordered_successors = successors
-        .iter()
-        .map(|targets| {
-            let mut targets = targets.clone();
-            targets.sort_unstable();
-            targets.dedup();
-            targets
-        })
-        .collect::<Vec<_>>();
     let mut visited = vec![false; body.blocks.len()];
     let mut order = Vec::with_capacity(body.blocks.len());
     for &root in dominators.roots() {
         let mut postorder = Vec::new();
         visit_postorder(
             root,
-            &ordered_successors,
+            successors,
             dominators.components(),
             &mut visited,
             &mut postorder,

@@ -69,7 +69,7 @@ pub fn vectors_to_lanes(module: &Module) -> Option<Module> {
         let mut result = module.clone();
         for function in &mut result.functions {
             if let Some(new) = rewritten.remove(&function.name) {
-                *function = new;
+                *function = std::sync::Arc::new(new);
             }
         }
         return Some(result);

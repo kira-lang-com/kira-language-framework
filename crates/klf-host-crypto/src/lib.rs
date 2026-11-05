@@ -15,7 +15,7 @@ mod certificates;
 mod keys;
 mod primitives;
 
-pub use certificates::{certificate_signature_verify, certificate_verify, verify};
+pub use certificates::{certificate_verify, verify};
 pub use keys::{
     agreement_create, agreement_finish, key_generate, key_load, key_public, release, sign,
 };
@@ -44,22 +44,6 @@ pub enum Failure {
     WrongName = -8,
     /// Any other reason the chain is not acceptable.
     BadCertificate = -9,
-}
-
-/// Signature algorithms accepted for X.509 certificate signatures.
-///
-/// This is separate from [`scheme`]: certificate signatures use the X.509
-/// AlgorithmIdentifier profile, not TLS handshake signature-scheme values.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CertificateSignatureAlgorithm {
-    EcdsaSha256,
-    EcdsaSha384,
-    RsaPkcs1Sha256,
-    RsaPkcs1Sha384,
-    RsaPkcs1Sha512,
-    RsaPssSha256,
-    RsaPssSha384,
-    RsaPssSha512,
 }
 
 /// Hash code points (RFC 5246 section 7.4.1.4.1), which HKDF and HMAC name.

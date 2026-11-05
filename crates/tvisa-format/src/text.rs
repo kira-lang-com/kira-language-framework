@@ -5,24 +5,8 @@ use tir_target::Profile;
 
 use tir_format::text::{Token, TokenKind, lex};
 
-mod data;
-mod function_bodies;
-mod gpu_entries;
-mod image_metadata;
-mod imports;
-mod runtime_metadata;
-mod variants;
-
 use crate::signature::{TextSignature, parse_signature};
-pub use data::{TextData, TextDataElement, TextDataInitializer, TextDataRelocation};
-pub use function_bodies::TextFunctionBody;
-pub use gpu_entries::{
-    TextGpuEntry, TextGpuEntryError, TextGpuEntryField, TextGpuEntryValue, TextGpuEntryValueKind,
-};
-pub use image_metadata::{TextImageFunction, TextImageMetadata};
-pub use imports::{TextImport, TextImportModule, TextImportPayload};
-pub use runtime_metadata::TextRuntimeMetadata;
-pub use variants::{TextVariantArchitecture, TextVariantKey, TextVariantMember, TextVariantSet};
+use crate::text_entries::{TextGpuEntry, parse_gpu_entry_text};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TvisaVersion {
@@ -69,15 +53,9 @@ pub struct TextItem {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextImage {
     pub header: TextImageHeader,
-    pub image_metadata: TextImageMetadata,
-    pub data_objects: Vec<TextData>,
-    pub imports: Vec<TextImport>,
-    pub gpu_entries: Vec<TextGpuEntry>,
-    pub function_bodies: Vec<TextFunctionBody>,
-    pub runtime_metadata: Vec<TextRuntimeMetadata>,
-    pub variant_sets: Vec<TextVariantSet>,
     pub items: Vec<TextItem>,
     pub signatures: Vec<TextSignature>,
+    pub entries: Vec<TextGpuEntry>,
     source: String,
 }
 
@@ -92,42 +70,6 @@ impl TextImage {
         self.source
             .get(item.span.start..item.span.end)
             .unwrap_or_default()
-    }
-
-    #[must_use]
-    pub fn import_for_item(&self, item: TextItem) -> Option<&TextImport> {
-        (item.kind == TextItemKind::Import)
-            .then(|| self.imports.iter().find(|import| import.span == item.span))
-            .flatten()
-    }
-
-    #[must_use]
-    pub fn data_for_item(&self, item: TextItem) -> Option<&TextData> {
-        (item.kind == TextItemKind::Data)
-            .then(|| self.data_objects.iter().find(|data| data.span == item.span))
-            .flatten()
-    }
-
-    #[must_use]
-    pub fn gpu_entry_for_item(&self, item: TextItem) -> Option<&TextGpuEntry> {
-        (item.kind == TextItemKind::Entry)
-            .then(|| {
-                self.gpu_entries
-                    .iter()
-                    .find(|entry| entry.span == item.span)
-            })
-            .flatten()
-    }
-
-    #[must_use]
-    pub fn function_body_for_item(&self, item: TextItem) -> Option<&TextFunctionBody> {
-        (item.kind == TextItemKind::Function)
-            .then(|| {
-                self.function_bodies
-                    .iter()
-                    .find(|body| body.span == item.span)
-            })
-            .flatten()
     }
 }
 
@@ -282,24 +224,28 @@ pub fn parse_text_image(source: &str) -> Result<TextImage, TextParseError> {
         }
         signatures.push(signature);
     }
-    let image_metadata = image_metadata::parse(source, &items, &header)?;
-    let data_objects = data::parse(source, &items)?;
-    let imports = imports::parse(source, &items)?;
-    let gpu_entries = gpu_entries::parse_all(source, &items);
-    let function_bodies = function_bodies::parse_all(source, &items);
-    let runtime_metadata = runtime_metadata::parse(source, &items)?;
-    let variant_sets = variants::parse(source, &items)?;
+    let mut entries = Vec::new();
+    for item in items.iter().filter(|item| item.kind == TextItemKind::Entry) {
+        let source_slice = source
+            .get(item.span.start..item.span.end)
+            .unwrap_or_default();
+        let entry = parse_gpu_entry_text(source_slice, item.span.start)?;
+        if entries
+            .iter()
+            .any(|existing: &TextGpuEntry| existing.function == entry.function)
+        {
+            return Err(error(
+                entry.span,
+                &format!("duplicate TVISA GPU entry {}", entry.function),
+            ));
+        }
+        entries.push(entry);
+    }
     Ok(TextImage {
         header,
-        image_metadata,
-        data_objects,
-        imports,
-        gpu_entries,
-        function_bodies,
-        runtime_metadata,
-        variant_sets,
         items,
         signatures,
+        entries,
         source: source.to_owned(),
     })
 }
@@ -394,8 +340,7 @@ fn parse_header(tokens: &[Token]) -> Result<TextImageHeader, TextParseError> {
     };
     if !(1..=99).contains(&year)
         || !(1..=12).contains(&month)
-        || !has_week
-        || !(1..=5).contains(&week)
+        || (has_week && !(1..=5).contains(&week))
     {
         return Err(cursor.error("TVISA version is outside the supported range"));
     }
@@ -409,9 +354,6 @@ fn parse_header(tokens: &[Token]) -> Result<TextImageHeader, TextParseError> {
     };
     cursor.expect_atom("image")?;
     let image = cursor.string()?;
-    if image.is_empty() {
-        return Err(cursor.error("TVISA image name must be nonempty"));
-    }
     cursor.expect_atom("kind")?;
     let kind = match cursor.atom()?.as_str() {
         "executable" => ImageKind::Executable,

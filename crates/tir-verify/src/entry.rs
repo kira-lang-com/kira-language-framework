@@ -7,7 +7,6 @@ use tir_types::{AddressSpace, Type};
 use crate::gpu_profile::policy::TypePolicies;
 
 mod attributes;
-mod node_attributes;
 
 const V15: Code = Code::new(Dialect::Tir, Area::Verifier, 15);
 

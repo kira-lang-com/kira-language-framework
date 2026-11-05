@@ -59,7 +59,27 @@ pub fn variadics_to_areas(module: &Module) -> Option<Module> {
     }
     let index = ModuleIndex::of(module);
     let mut result = module.clone();
-    for function in &mut result.functions {
+    for shared in &mut result.functions {
+        let function = shared.as_ref();
+        let rewritten = variadic.contains(&function.name)
+            || function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| {
+                    matches!(
+                        instruction.operation,
+                        Operation::CallVariadic { .. }
+                            | Operation::VaStart(_)
+                            | Operation::VaArg { .. }
+                            | Operation::VaCopy { .. }
+                            | Operation::VaEnd(_)
+                    )
+                });
+        if !rewritten {
+            continue;
+        }
+        let function = std::sync::Arc::make_mut(shared);
         let types = if function.blocks.is_empty() {
             crate::ValueTypes::default()
         } else {

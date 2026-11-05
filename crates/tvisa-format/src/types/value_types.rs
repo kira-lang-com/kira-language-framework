@@ -168,11 +168,8 @@ pub(super) fn decode_value_type(
                 0x44 => {
                     let rank_offset = *cursor;
                     let rank = read_index(bytes, cursor, "tensor rank")?;
-                    if !matches!(rank, 1 | 2 | 3 | 4 | 8) {
-                        return Err(malformed(
-                            rank_offset,
-                            "tensor rank is not one of 1, 2, 3, 4, or 8",
-                        ));
+                    if !(1..=8).contains(&rank) {
+                        return Err(malformed(rank_offset, "invalid tensor rank"));
                     }
                     let element_offset = *cursor;
                     let element = read_index(bytes, cursor, "tensor element type")?;

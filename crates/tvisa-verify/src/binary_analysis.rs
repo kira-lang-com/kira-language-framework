@@ -3,8 +3,7 @@ use std::collections::BTreeSet;
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tvisa_format::{
     AnalysisSummary, AssemblyRegionSummary, BinaryFunctionBody, BinaryInstruction, BinaryOperand,
-    DataKind, DataLinkage, DataSection, FunctionRecordSummary, ImportCounts, IndirectCallType,
-    TvisaImage, TypeSection,
+    FunctionRecordSummary, ImportCounts, IndirectCallType, TvisaImage, TypeSection,
 };
 
 const VFY50: Code = Code::new(Dialect::Tvisa, Area::Verifier, 50);
@@ -15,12 +14,6 @@ const FOREIGN_REASON: u8 = 1 << 3;
 const SETJMP_REASON: u8 = 1 << 4;
 const UNCHECKED_ACCESS_REASON: u8 = 1 << 5;
 const DEVICE_IO_REASON: u8 = 1 << 7;
-const SANDBOX_FORBIDDEN_REASONS: u8 = ASM_REASON
-    | INTTOPTR_REASON
-    | FOREIGN_REASON
-    | SETJMP_REASON
-    | UNCHECKED_ACCESS_REASON
-    | DEVICE_IO_REASON;
 const OTHER_UNMANAGED_REASONS: u8 = RAW_MEMORY_REASON
     | FOREIGN_REASON
     | SETJMP_REASON
@@ -35,7 +28,6 @@ pub(super) fn verify(
     imports: &ImportCounts,
     types: &TypeSection,
     analysis: &AnalysisSummary,
-    data: Option<&DataSection>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     verify_function_trust(
@@ -47,52 +39,9 @@ pub(super) fn verify(
         analysis,
         &mut diagnostics,
     );
-    verify_sandbox_regions(analysis, imports, data, &mut diagnostics);
     verify_indirect_call_types(bodies, analysis, &mut diagnostics);
     verify_assembly_regions(bodies, functions, imports, analysis, &mut diagnostics);
     diagnostics
-}
-
-fn verify_sandbox_regions(
-    analysis: &AnalysisSummary,
-    imports: &ImportCounts,
-    data: Option<&DataSection>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for region in &analysis.sandbox_regions {
-        for (kind, index) in [
-            ("base", region.base_data_index),
-            ("current-size", region.size_data_index),
-        ] {
-            let object = index
-                .checked_sub(imports.data)
-                .and_then(|index| usize::try_from(index).ok())
-                .and_then(|index| data.and_then(|data| data.objects.get(index)));
-            let Some(object) = object else {
-                diagnostics.push(Diagnostic::error(
-                    VFY50,
-                    format!(
-                        "ANALYSIS sandbox region {} {kind} DATA index {index} does not name a defined object",
-                        region.memory_index
-                    ),
-                ));
-                continue;
-            };
-            if object.size != 8
-                || !matches!(object.kind, DataKind::Writable | DataKind::Zero)
-                || object.per_cpu
-                || object.linkage != DataLinkage::Local
-            {
-                diagnostics.push(Diagnostic::error(
-                    VFY50,
-                    format!(
-                        "ANALYSIS sandbox region {} {kind} DATA object must be local, mutable, non-thread-local, non-per-CPU, and 8 bytes",
-                        region.memory_index
-                    ),
-                ));
-            }
-        }
-    }
 }
 
 fn verify_function_trust(
@@ -149,33 +98,26 @@ fn verify_function_trust(
         let has_device_io = instructions
             .iter()
             .any(|instruction| (0x270..0x274).contains(&instruction.opcode));
-        let has_unchecked_access = instructions.iter().any(|instruction| {
-            (instruction.opcode == 0x123 && instruction.modifiers & (1 << 33) != 0)
-                || (instruction.opcode == 0x187 && ((instruction.modifiers >> 48) & 0xf) >= 4)
-        });
         let has_foreign_call = instructions.iter().any(|instruction| {
-            is_variadic_call(instruction) || is_platform_c_call(instruction, imports, types)
+            is_variadic_call(instruction)
+                || is_platform_c_call(instruction, imports, types)
+                || is_foreign_indirect_call(instruction, types)
         });
         let has_non_local_jump = instructions
             .iter()
             .any(|instruction| is_non_local_jump(instruction));
-        let has_raw_heap = instructions.iter().any(|instruction| {
-            matches!(instruction.opcode, 0x164..=0x166)
+        let has_raw_memory = instructions.iter().any(|instruction| {
+            instruction.opcode == 0x70a
                 || runtime_entry_id(instruction)
                     .is_some_and(|index| matches!(index, 0x0001 | 0x0004 | 0x0005))
         });
-        let has_managed_heap = instructions.iter().any(|instruction| {
-            runtime_entry_id(instruction).is_some_and(|id| (1..=0xf).contains(&id))
-        });
-        let gpu_only = function.target != 0;
-        let has_raw_memory = has_raw_heap
-            || instructions
-                .iter()
-                .any(|instruction| is_raw_memory_instruction(instruction, gpu_only));
         let has_unmanaged = instructions.iter().any(|instruction| {
-            is_unmanaged_instruction(instruction, gpu_only)
+            is_unmanaged_instruction(instruction)
                 || is_platform_c_call(instruction, imports, types)
+                || is_foreign_indirect_call(instruction, types)
         });
+
+        verify_indirect_call_tags(&instructions, types, &function.name, diagnostics);
 
         require_reason(
             record.reason_mask,
@@ -209,20 +151,12 @@ fn verify_function_trust(
             "setjmp/longjmp",
             diagnostics,
         );
-        require_reason(
+        require_reason_present(
             record.reason_mask,
             RAW_MEMORY_REASON,
             has_raw_memory,
             &function.name,
             "raw memory",
-            diagnostics,
-        );
-        require_reason(
-            record.reason_mask,
-            UNCHECKED_ACCESS_REASON,
-            has_unchecked_access,
-            &function.name,
-            "unchecked access",
             diagnostics,
         );
         require_reason(
@@ -257,24 +191,6 @@ fn verify_function_trust(
             diagnostics.push(Diagnostic::error(
                 VFY50,
                 format!("GPU function @{} cannot be sandboxed", function.name),
-            ));
-        }
-        if function.trust_class == 1
-            && (record.reason_mask & SANDBOX_FORBIDDEN_REASONS != 0
-                || has_assembly
-                || has_inttoptr
-                || has_foreign_call
-                || has_non_local_jump
-                || has_unchecked_access
-                || has_device_io
-                || has_managed_heap)
-        {
-            diagnostics.push(Diagnostic::error(
-                VFY50,
-                format!(
-                    "sandboxed function @{} contains content the Wasm64 converter cannot emit",
-                    function.name
-                ),
             ));
         }
     }
@@ -393,24 +309,27 @@ fn require_reason(
     }
 }
 
-fn is_unmanaged_instruction(instruction: &BinaryInstruction, gpu_only: bool) -> bool {
-    matches!(
-        instruction.opcode,
-        0x0aa | 0x210..=0x215 | 0x1a9 | 0x220 | 0x221 | 0x222 | 0x270..=0x273
-    ) || matches!(instruction.opcode, 0x164..=0x166 | 0x185 | 0x186)
-        || (instruction.opcode == 0x123 && instruction.modifiers & (1 << 33) != 0)
-        || (instruction.opcode == 0x187 && ((instruction.modifiers >> 48) & 0xf) >= 4)
-        || is_raw_memory_instruction(instruction, gpu_only)
-        || is_unmanaged_runtime(instruction)
+fn require_reason_present(
+    actual: u8,
+    bit: u8,
+    expected: bool,
+    function: &str,
+    label: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if expected && actual & bit == 0 {
+        diagnostics.push(Diagnostic::error(
+            VFY50,
+            format!("ANALYSIS omits the {label} reason for @{function}"),
+        ));
+    }
 }
 
-fn is_raw_memory_instruction(instruction: &BinaryInstruction, gpu_only: bool) -> bool {
-    matches!(instruction.opcode, 0x185 | 0x186)
-        || (!gpu_only
-            && matches!(
-                instruction.opcode,
-                0x127 | 0x128 | 0x146..=0x149 | 0x14a..=0x14c
-            ))
+fn is_unmanaged_instruction(instruction: &BinaryInstruction) -> bool {
+    matches!(
+        instruction.opcode,
+        0x0aa | 0x210..=0x215 | 0x1a9 | 0x220 | 0x221 | 0x222 | 0x270..=0x273 | 0x70a
+    ) || is_unmanaged_runtime(instruction)
 }
 
 fn is_unmanaged_runtime(instruction: &BinaryInstruction) -> bool {
@@ -447,26 +366,6 @@ fn is_platform_c_call(
     imports: &ImportCounts,
     types: &TypeSection,
 ) -> bool {
-    if is_indirect_call(instruction) {
-        let foreign_marker = instruction
-            .operands
-            .iter()
-            .find_map(|operand| match operand {
-                BinaryOperand::TypeTag(tag) => Some(*tag == 0),
-                _ => None,
-            })
-            .unwrap_or(false);
-        return foreign_marker
-            && instruction
-                .operands
-                .iter()
-                .find_map(|operand| match operand {
-                    BinaryOperand::Index(index) => usize::try_from(*index).ok(),
-                    _ => None,
-                })
-                .and_then(|index| types.signatures.get(index))
-                .is_some_and(|signature| signature.convention == 1);
-    }
     if !matches!(instruction.opcode, 0x1a0 | 0x1aa | 0x1e7)
         || matches!(instruction.opcode, 0x1aa | 0x1e7) && (instruction.modifiers >> 48) & 0xf != 0
     {
@@ -505,4 +404,82 @@ fn is_platform_c_call(
 fn is_indirect_call(instruction: &BinaryInstruction) -> bool {
     instruction.opcode == 0x1a1
         || matches!(instruction.opcode, 0x1aa | 0x1e7) && (instruction.modifiers >> 48) & 0xf == 1
+}
+
+fn is_foreign_indirect_call(instruction: &BinaryInstruction, types: &TypeSection) -> bool {
+    if !is_indirect_call(instruction) || call_type_tag(instruction) != Some(0) {
+        return false;
+    }
+    call_signature_index(instruction)
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| types.signatures.get(index))
+        .is_some_and(|signature| signature.convention == 1)
+}
+
+fn call_signature_index(instruction: &BinaryInstruction) -> Option<u64> {
+    instruction
+        .operands
+        .iter()
+        .find_map(|operand| match operand {
+            BinaryOperand::Index(index) => Some(*index),
+            _ => None,
+        })
+}
+
+fn call_type_tag(instruction: &BinaryInstruction) -> Option<u32> {
+    instruction
+        .operands
+        .iter()
+        .find_map(|operand| match operand {
+            BinaryOperand::TypeTag(tag) => Some(*tag),
+            _ => None,
+        })
+}
+
+fn verify_indirect_call_tags(
+    instructions: &[&BinaryInstruction],
+    types: &TypeSection,
+    function: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for instruction in instructions
+        .iter()
+        .copied()
+        .filter(|instruction| is_indirect_call(instruction))
+    {
+        let (Some(signature_index), Some(tag)) = (
+            call_signature_index(instruction),
+            call_type_tag(instruction),
+        ) else {
+            continue;
+        };
+        let convention = usize::try_from(signature_index)
+            .ok()
+            .and_then(|index| types.signatures.get(index))
+            .map(|signature| signature.convention);
+        if tag == 0 {
+            if convention != Some(1) {
+                diagnostics.push(Diagnostic::error(
+                    VFY50,
+                    format!("indirect call in @{function} omits its CFI tag without a C signature"),
+                ));
+            }
+        } else if forbidden_type_tag(tag) {
+            diagnostics.push(Diagnostic::error(
+                VFY50,
+                format!("indirect call in @{function} uses forbidden type tag 0x{tag:08X}"),
+            ));
+        }
+    }
+}
+
+fn forbidden_type_tag(tag: u32) -> bool {
+    tag & 0x000f_ffff == 0
+        || tag & 0x0000_0fff == 0x017
+        || tag == 0xfa1e_0ff3
+        || tag.wrapping_neg() == 0xfa1e_0ff3
+        || matches!(
+            tag,
+            0xd503_241f | 0xd503_245f | 0xd503_249f | 0xd503_24df | 0xd503_233f | 0xd503_237f
+        )
 }

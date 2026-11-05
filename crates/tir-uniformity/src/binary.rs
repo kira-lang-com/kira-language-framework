@@ -2,9 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryCodeTable, BinaryGenericTable, BinaryGpuEntry, BinaryGpuInterfaceRole, BinaryGpuTable,
-    BinaryImport, BinaryImportEntityKind, BinaryLinkage, BinaryOperand, BinarySignature,
-    BinarySignatureTable, BinaryTarget, StringTable,
+    BinaryCodeTable, BinaryGpuEntry, BinaryGpuInterfaceRole, BinaryGpuTable, BinaryLinkage,
+    BinaryOperand, BinarySignature, BinarySignatureTable, BinaryTarget, StringTable,
 };
 
 use super::binary_cfg::{
@@ -36,16 +35,8 @@ pub fn verify_binary_gpu_module(
     code: &BinaryCodeTable,
     signatures: &BinarySignatureTable,
     gpu: Option<&BinaryGpuTable>,
-    generics: Option<&BinaryGenericTable>,
     strings: Option<&StringTable>,
-    imports: Option<&[BinaryImport]>,
 ) -> Vec<Diagnostic> {
-    let imported_function_count = imports
-        .unwrap_or_default()
-        .iter()
-        .flat_map(|import| &import.entities)
-        .filter(|entity| entity.kind == BinaryImportEntityKind::Function)
-        .count() as u64;
     let gpu_entries = gpu.map_or(&[][..], |gpu| gpu.entries.as_slice());
     let bodies = code
         .functions
@@ -78,14 +69,7 @@ pub fn verify_binary_gpu_module(
             name: signature.name.clone(),
             control,
             required_on_entry,
-            calls: collect_calls(
-                body,
-                signatures,
-                generics,
-                strings,
-                &body_indexes,
-                imported_function_count,
-            ),
+            calls: collect_calls(body, signatures, &body_indexes),
         });
     }
 
@@ -332,10 +316,7 @@ fn builtin_uniformity(
             "threads_per_threadgroup"
             | "threadgroups_per_grid"
             | "subgroups_per_threadgroup"
-            | "subgroup_size"
-            | "base_vertex"
-            | "base_instance"
-            | "draw_index",
+            | "subgroup_size",
         ) => Uniformity::Dispatch,
         _ => Uniformity::Divergent,
     }
@@ -370,10 +351,7 @@ fn dynamic_uniform_operand(opcode: u64) -> Option<(usize, Uniformity, &'static s
 fn collect_calls(
     body: &tir_format::BinaryFunctionBody,
     signatures: &BinarySignatureTable,
-    generics: Option<&BinaryGenericTable>,
-    strings: Option<&StringTable>,
     gpu_body_indexes: &HashSet<usize>,
-    imported_function_count: u64,
 ) -> Vec<CallSite> {
     body.blocks
         .iter()
@@ -386,17 +364,16 @@ fn collect_calls(
                 .flatten()
                 .filter_map(move |instruction| {
                     let targets = match instruction.opcode {
-                        0x1a0 => direct_target(instruction, imported_function_count)
+                        0x1a0 => direct_target(instruction)
                             .filter(|target| gpu_body_indexes.contains(target))
                             .into_iter()
                             .collect(),
                         0x1e7 if (instruction.modifiers >> 48) & 0xf == 0 => {
-                            direct_target(instruction, imported_function_count)
+                            direct_target(instruction)
                                 .filter(|target| gpu_body_indexes.contains(target))
                                 .into_iter()
                                 .collect()
                         }
-                        0x1a5 => witness_target(instruction, generics, strings, gpu_body_indexes),
                         0x404 => visible_targets(instruction, signatures, gpu_body_indexes),
                         _ => return None,
                     };
@@ -410,74 +387,14 @@ fn collect_calls(
         .collect()
 }
 
-fn witness_target(
-    instruction: &tir_format::BinaryInstruction,
-    generics: Option<&BinaryGenericTable>,
-    strings: Option<&StringTable>,
-    gpu_body_indexes: &HashSet<usize>,
-) -> Vec<usize> {
-    let type_index = instruction
+fn direct_target(instruction: &tir_format::BinaryInstruction) -> Option<usize> {
+    instruction
         .operands
         .iter()
         .find_map(|operand| match operand {
-            BinaryOperand::Type(index) => Some(*index),
+            BinaryOperand::Symbol { kind: 0, index } => usize::try_from(*index).ok(),
             _ => None,
-        });
-    let method_index = instruction
-        .operands
-        .iter()
-        .find_map(|operand| match operand {
-            BinaryOperand::Index(index) => Some(*index),
-            _ => None,
-        });
-    let method_path = method_index
-        .and_then(|index| usize::try_from(index).ok())
-        .and_then(|index| strings.and_then(|strings| strings.get(index)));
-    let resolved = type_index
-        .zip(method_path)
-        .and_then(|(type_index, method_path)| {
-            let (trait_path, method) = method_path.rsplit_once('.')?;
-            let matching = generics?
-                .conformances
-                .iter()
-                .filter(|conformance| {
-                    conformance.type_index == type_index && conformance.trait_path == trait_path
-                })
-                .collect::<Vec<_>>();
-            let [conformance] = matching.as_slice() else {
-                return None;
-            };
-            let targets = conformance
-                .witnesses
-                .iter()
-                .filter(|witness| witness.method == method)
-                .map(|witness| witness.function_index)
-                .collect::<Vec<_>>();
-            let [target] = targets.as_slice() else {
-                return None;
-            };
-            usize::try_from(*target)
-                .ok()
-                .filter(|target| gpu_body_indexes.contains(target))
-        });
-    resolved.map_or_else(
-        || gpu_body_indexes.iter().copied().collect(),
-        |target| vec![target],
-    )
-}
-
-fn direct_target(
-    instruction: &tir_format::BinaryInstruction,
-    imported_function_count: u64,
-) -> Option<usize> {
-    let symbol_index = instruction
-        .operands
-        .iter()
-        .find_map(|operand| match operand {
-            BinaryOperand::Symbol { kind: 0, index } => Some(*index),
-            _ => None,
-        })?;
-    usize::try_from(symbol_index.checked_sub(imported_function_count)?).ok()
+        })
 }
 
 fn visible_targets(

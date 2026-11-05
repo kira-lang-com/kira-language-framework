@@ -50,6 +50,9 @@ impl Count {
 /// called with.
 #[derive(Default)]
 pub(crate) struct NeededFunctions {
+    /// Requests made by the current body for module-level generated items.
+    /// A function that makes none can be cached independently of its peers.
+    pub(crate) generated_dependency_requests: usize,
     pending: Vec<(Name, Count, FeType)>,
     requested: HashSet<Name>,
     counted: HashMap<FeType, bool>,
@@ -65,6 +68,7 @@ pub(crate) struct NeededFunctions {
 impl NeededFunctions {
     /// Asks for `instance`, once however many calls name it.
     pub(crate) fn request_instance(&mut self, instance: crate::lower::Instance) {
+        self.generated_dependency_requests += 1;
         if self.instance_names.insert(instance.name.clone()) {
             self.instances.push(instance);
         }
@@ -372,6 +376,7 @@ impl Lowerer<'_> {
     pub(crate) fn count_function(&mut self, count: Count, ty: &FeType) -> Name {
         let name = Name::new(format!("__count.{}.{}", count.spelling(), type_key(ty)));
         let mut counts = self.counts.borrow_mut();
+        counts.generated_dependency_requests += 1;
         if counts.requested.insert(name.clone()) {
             counts.pending.push((name.clone(), count, ty.clone()));
         }

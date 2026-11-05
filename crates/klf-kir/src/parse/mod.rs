@@ -61,7 +61,9 @@ fn parse_item(
     } else if line.starts_with("func ") {
         module
             .functions
-            .push(function::parse_function(offset, line, lines)?);
+            .push(std::sync::Arc::new(function::parse_function(
+                offset, line, lines,
+            )?));
     } else if line.starts_with("global ") {
         module.globals.push(items::parse_global(offset, line)?);
     } else if line.starts_with("witness ") {

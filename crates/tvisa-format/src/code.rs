@@ -1,6 +1,4 @@
-mod encode;
 mod instructions;
-pub use encode::encode_function_bodies;
 
 use crate::binary::{FormatError, Section, TvisaImage};
 use crate::{FunctionBodyHeader, ImportCounts, TypeSection, VariantIndex};
@@ -30,8 +28,6 @@ pub struct BinaryInstruction {
     pub normal_edge_result_count: u8,
     pub terminator: bool,
     pub operands: Vec<BinaryOperand>,
-    /// Original canonical instruction bytes, including opcode and modifiers.
-    pub wire_bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

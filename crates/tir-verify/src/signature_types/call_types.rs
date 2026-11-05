@@ -20,62 +20,53 @@ pub(super) fn verify_function(
     let mut diagnostics =
         verify_implicit_call_edges(source, body, value_types, call_conventions, source_offset);
     for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
-        if matches!(instruction.opcode.as_str(), "call" | "tail.call")
-            && let Some((symbol, _, _)) =
-                instruction
-                    .tokens
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, token)| {
-                        is_punctuation(token, '@')
-                            .then(|| crate::variant_text::read_symbol(&instruction.tokens, index))
-                            .flatten()
-                    })
-            && let Some(expected) = call_conventions.direct_generic_parameter_count(&symbol)
-        {
-            match call_conventions.explicit_type_argument_count(instruction) {
-                Some(actual) if actual != expected => diagnostics.push(
-                    Diagnostic::error(
-                        V11,
-                        format!(
-                            "{} has {actual} explicit generic type arguments; expected {expected}",
-                            instruction.opcode
-                        ),
-                    )
-                    .with_primary_span(shift_span(instruction.span, source_offset)),
-                ),
-                None if expected > 0 => diagnostics.push(
-                    Diagnostic::error(
-                        V11,
-                        format!(
-                            "{} requires {expected} explicit generic type arguments",
-                            instruction.opcode
-                        ),
-                    )
-                    .with_primary_span(shift_span(instruction.span, source_offset)),
-                ),
-                _ => {}
-            }
-        }
-        if let Some((expected, _)) =
-            call_conventions.call_result_shape(instruction, source, value_types)
-            && instruction.results.len() != expected
+        if instruction.opcode == "call.foreign"
+            && let Err(message) = call_conventions.verify_foreign_call_target(instruction)
         {
             diagnostics.push(
-                Diagnostic::error(
-                    V2,
-                    format!(
-                        "{} defines {} SSA results; expected {expected}",
-                        instruction.opcode,
-                        instruction.results.len()
-                    ),
-                )
-                .with_primary_span(shift_span(instruction.span, source_offset)),
+                Diagnostic::error(V2, message)
+                    .with_primary_span(shift_span(instruction.span, source_offset)),
             );
         }
-        let Some((arguments, parameters, variadic)) =
-            call_shape(instruction, source, value_types, call_conventions)
-        else {
+        let specialized_call = match call_conventions.specialized_direct_call(source, instruction) {
+            Some(Ok(signature)) => Some(signature),
+            Some(Err(message)) => {
+                diagnostics.push(
+                    Diagnostic::error(V2, message)
+                        .with_primary_span(shift_span(instruction.span, source_offset)),
+                );
+                continue;
+            }
+            None => None,
+        };
+        if let Some(expected) = call_result_count(
+            instruction,
+            source,
+            value_types,
+            call_conventions,
+            specialized_call.as_ref(),
+        ) {
+            if instruction.results.len() != expected {
+                diagnostics.push(
+                    Diagnostic::error(
+                        V2,
+                        format!(
+                            "{} defines {} SSA results; its function type requires {expected}",
+                            instruction.opcode,
+                            instruction.results.len()
+                        ),
+                    )
+                    .with_primary_span(shift_span(instruction.span, source_offset)),
+                );
+            }
+        }
+        let Some((arguments, parameters, variadic)) = call_shape(
+            instruction,
+            source,
+            value_types,
+            call_conventions,
+            specialized_call.as_ref(),
+        ) else {
             continue;
         };
         let count_mismatch = if variadic {
@@ -103,9 +94,6 @@ pub(super) fn verify_function(
             let Some(actual) = value_types.get(argument) else {
                 continue;
             };
-            if actual == expected {
-                continue;
-            }
             let (Ok(actual), Ok(expected)) = (
                 actual.canonical_text_in(call_conventions.module_path(), &HashMap::new()),
                 expected.canonical_text_in(call_conventions.module_path(), &HashMap::new()),
@@ -162,33 +150,34 @@ fn verify_implicit_call_edges(
             );
         }
 
-        let shape = if let Some((function, _)) = indirect_call_type(source, instruction) {
-            indirect_call_edge_shape(&function)
-        } else if let Some(symbol) = direct_callee_symbol(instruction) {
-            call_conventions.direct_call_edge_shape(instruction, source, &symbol, value_types)
+        let signature = if let Some((function, _)) = indirect_call_type(source, instruction) {
+            Some(function)
         } else {
-            None
-        };
-        let Some((normal_count, normal_type, failure_type)) = shape else {
-            if let Some(symbol) = direct_callee_symbol(instruction)
-                && call_conventions
-                    .direct_generic_parameter_count(&symbol)
-                    .is_some_and(|count| count > 0)
-            {
-                diagnostics.push(
-                    Diagnostic::error(
-                        V11,
-                        format!(
-                            "cannot resolve generic type arguments for {} from its call",
-                            instruction.opcode
-                        ),
-                    )
-                    .with_primary_span(shift_span(instruction.span, source_offset)),
-                );
+            match call_conventions.specialized_implicit_call(source, instruction, value_types) {
+                Some(Ok(function)) => Some(function),
+                Some(Err(message)) => {
+                    diagnostics.push(
+                        Diagnostic::error(V11, message)
+                            .with_primary_span(shift_span(instruction.span, source_offset)),
+                    );
+                    None
+                }
+                None => None,
             }
+        };
+        let Some(signature) = signature else {
             continue;
         };
 
+        let (normal_count, normal_type) = if signature.asynchronous {
+            (1, direct_callee_symbol(instruction).map(Type::Frame))
+        } else {
+            let result = *signature.result.clone();
+            (
+                usize::from(!matches!(result, Type::Unit | Type::Never)),
+                Some(result),
+            )
+        };
         if let Some(normal_target) = targets.first().and_then(|target| body.blocks.get(*target)) {
             verify_implicit_edge_shape(
                 instruction,
@@ -207,7 +196,7 @@ fn verify_implicit_call_edges(
         if instruction.opcode == "try.call"
             && let (Some(error_target), Some(failure_type)) = (
                 targets.get(1).and_then(|target| body.blocks.get(*target)),
-                failure_type.as_ref(),
+                signature.failure.as_deref(),
             )
         {
             let error_count = usize::from(!matches!(failure_type, Type::Unit | Type::Never));
@@ -226,23 +215,6 @@ fn verify_implicit_call_edges(
         }
     }
     diagnostics
-}
-
-fn indirect_call_edge_shape(
-    function: &FunctionType,
-) -> Option<(usize, Option<Type>, Option<Type>)> {
-    let (result_count, result_type) = if function.asynchronous {
-        (1, None)
-    } else {
-        let result = *function.result.clone();
-        let count = usize::from(!matches!(result, Type::Unit | Type::Never));
-        (count, Some(result))
-    };
-    Some((
-        result_count,
-        result_type,
-        function.failure.as_deref().cloned(),
-    ))
 }
 
 fn direct_callee_symbol(instruction: &TextInstruction) -> Option<String> {
@@ -313,11 +285,80 @@ fn verify_implicit_edge_shape(
     }
 }
 
+fn call_result_count(
+    instruction: &TextInstruction,
+    source: &str,
+    value_types: &HashMap<String, Type>,
+    call_conventions: &CallConventions,
+    specialized_call: Option<&FunctionType>,
+) -> Option<usize> {
+    if let Some(signature) =
+        call_result_signature(instruction, source, value_types, specialized_call)
+    {
+        return signature_result_count(&signature.result, signature.asynchronous);
+    }
+    if matches!(instruction.opcode.as_str(), "call.witness" | "call.vtable") {
+        let result = call_conventions.special_result(instruction, source)?;
+        return signature_result_count(&result.result, result.asynchronous);
+    }
+    if !matches!(
+        instruction.opcode.as_str(),
+        "call" | "call.foreign" | "call.variadic"
+    ) {
+        return None;
+    }
+    let (symbol, _, _) = instruction
+        .tokens
+        .iter()
+        .enumerate()
+        .find_map(|(index, token)| {
+            is_punctuation(token, '@')
+                .then(|| crate::variant_text::read_symbol(&instruction.tokens, index))
+                .flatten()
+        })?;
+    let result = call_conventions.direct_result(&symbol)?;
+    signature_result_count(&result.result, result.asynchronous)
+}
+
+fn signature_result_count(result: &Type, asynchronous: bool) -> Option<usize> {
+    if asynchronous {
+        Some(1)
+    } else if matches!(result, Type::Unit | Type::Never) {
+        Some(0)
+    } else if matches!(result, Type::Generic(_)) {
+        None
+    } else {
+        Some(1)
+    }
+}
+
+fn call_result_signature(
+    instruction: &TextInstruction,
+    source: &str,
+    value_types: &HashMap<String, Type>,
+    specialized_call: Option<&FunctionType>,
+) -> Option<FunctionType> {
+    match instruction.opcode.as_str() {
+        "call" => specialized_call.cloned(),
+        "call.indirect" => indirect_call_type(source, instruction).map(|(signature, _)| signature),
+        "call.closure" => {
+            let text_uses = crate::ssa::text_value_uses(instruction);
+            let (name, _) = text_uses.first()?;
+            match value_types.get(name)? {
+                Type::Closure(closure) => Some(closure.signature.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn call_shape(
     instruction: &TextInstruction,
     source: &str,
     value_types: &HashMap<String, Type>,
     call_conventions: &CallConventions,
+    specialized_call: Option<&FunctionType>,
 ) -> Option<(Vec<String>, Vec<Type>, bool)> {
     if (instruction.opcode == "call.indirect"
         || instruction.opcode == "try.call" && indirect_call_type(source, instruction).is_some())
@@ -351,6 +392,26 @@ fn call_shape(
         instruction.opcode.as_str(),
         "call" | "call.foreign" | "call.variadic" | "try.call" | "invoke" | "tail.call"
     ) {
+        if matches!(instruction.opcode.as_str(), "call" | "tail.call")
+            && let Some(signature) = specialized_call
+        {
+            return Some((
+                argument_names_at(&instruction.tokens, first_call_paren(&instruction.tokens)?),
+                parameter_types(signature),
+                false,
+            ));
+        }
+        if matches!(instruction.opcode.as_str(), "try.call" | "invoke")
+            && let Some(signature) =
+                call_conventions.specialized_implicit_call(source, instruction, value_types)
+        {
+            let signature = signature.ok()?;
+            return Some((
+                argument_names_at(&instruction.tokens, first_call_paren(&instruction.tokens)?),
+                parameter_types(&signature),
+                false,
+            ));
+        }
         let (symbol, _, _) = instruction
             .tokens
             .iter()
@@ -360,12 +421,7 @@ fn call_shape(
                     .then(|| crate::variant_text::read_symbol(&instruction.tokens, index))
                     .flatten()
             })?;
-        let parameters = call_conventions.direct_call_parameter_types(
-            instruction,
-            source,
-            &symbol,
-            value_types,
-        )?;
+        let parameters = call_conventions.direct_parameter_types(&symbol)?;
         let open = first_call_paren(&instruction.tokens)?;
         return Some((
             argument_names_at(&instruction.tokens, open),

@@ -34,8 +34,7 @@ pub(super) fn verify(instruction: &TextInstruction, operands: &[Type]) -> Vec<Di
                 );
             }
         }
-        "rt.trace" => verify_ray_trace(instruction, operands, true, &mut diagnostics),
-        "rt.hitobject.trace" => verify_ray_trace(instruction, operands, false, &mut diagnostics),
+        "rt.trace" => verify_ray_trace(instruction, operands, &mut diagnostics),
         "rt.report_hit" => verify_report_hit(instruction, operands, &mut diagnostics),
         "rt.call_callable" => {
             if operands.first().is_some_and(|ty| !is_integer_type(ty)) {
@@ -167,14 +166,8 @@ fn verify_ray_query_init(
 fn verify_ray_trace(
     instruction: &TextInstruction,
     operands: &[Type],
-    has_payload: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let prefix = if has_payload {
-        "rt.trace"
-    } else {
-        "rt.hitobject.trace"
-    };
     if operands
         .first()
         .is_some_and(|ty| ty != &Type::AccelerationStructure)
@@ -182,7 +175,7 @@ fn verify_ray_trace(
         error(
             diagnostics,
             instruction,
-            format!("{prefix} requires an acceleration structure"),
+            "rt.trace requires an acceleration structure",
         );
     }
     if operands
@@ -194,7 +187,7 @@ fn verify_ray_trace(
         error(
             diagnostics,
             instruction,
-            format!("{prefix} flags, mask, SBT values, and miss index must be integers"),
+            "rt.trace flags, mask, SBT values, and miss index must be integers",
         );
     }
     for index in [6, 8] {
@@ -205,7 +198,7 @@ fn verify_ray_trace(
             error(
                 diagnostics,
                 instruction,
-                format!("{prefix} origin and direction must have type vec<3 x f32>"),
+                "rt.trace origin and direction must have type vec<3 x f32>",
             );
             break;
         }
@@ -215,20 +208,18 @@ fn verify_ray_trace(
             error(
                 diagnostics,
                 instruction,
-                format!("{prefix} tmin and tmax must have type f32"),
+                "rt.trace tmin and tmax must have type f32",
             );
             break;
         }
     }
-    if has_payload {
-        require_pointer_space(
-            instruction,
-            operands,
-            10,
-            AddressSpace::RayPayload,
-            diagnostics,
-        );
-    }
+    require_pointer_space(
+        instruction,
+        operands,
+        10,
+        AddressSpace::RayPayload,
+        diagnostics,
+    );
 }
 
 fn verify_report_hit(

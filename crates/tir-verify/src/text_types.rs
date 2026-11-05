@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::text::{Token, TokenKind};
 use tir_format::{FunctionBody, TextFunctionSignature, parse_type};
 use tir_layout::LayoutEngine;
-use tir_types::{AddressSpace, Type};
+use tir_types::{Abi, AddressSpace, ClosureType, FunctionType, Type};
 
 use crate::gpu_profile::policy::TypePolicies;
 use crate::model::{Instruction, ValueDefinition, ValueUse};
@@ -15,12 +15,15 @@ mod aggregate;
 mod arity;
 mod const_bytes;
 mod heap;
+mod inference;
 mod loadable;
 mod memory;
 mod ownership;
 use address::{
     infer_element_address, infer_enum_payload_address, infer_field_address, type_after_keyword,
 };
+pub(crate) use inference::explicit_type;
+use inference::*;
 
 const V2: Code = Code::new(Dialect::Tir, Area::Verifier, 2);
 
@@ -35,6 +38,7 @@ pub(super) fn verify_function(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut value_types = HashMap::new();
+    let mut null_values = HashSet::new();
     let mut borrowed_values = aggregate::borrowed_parameters(body);
     for block in &body.blocks {
         for parameter in &block.parameters {
@@ -69,9 +73,64 @@ pub(super) fn verify_function(
                     continue;
                 }
             }
+            let symbol_result_type = if matches!(
+                instruction.opcode.as_str(),
+                "kernel.percpu.addr" | "foreign.addr" | "foreign.data" | "foreign.entry"
+            ) {
+                match call_conventions.symbol_address_result_type(instruction) {
+                    Ok(ty) => Some(ty),
+                    Err(message) => {
+                        diagnostics.push(
+                            Diagnostic::error(V2, message).with_primary_span(instruction.span),
+                        );
+                        None
+                    }
+                }
+            } else if instruction.opcode == "func.ref" {
+                match call_conventions.function_reference_result_type(source, instruction) {
+                    Ok(ty) => Some(ty),
+                    Err(message) => {
+                        diagnostics.push(
+                            Diagnostic::error(V2, message).with_primary_span(instruction.span),
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
             let Some(operand_types) = operand_types(instruction, &value_types) else {
                 continue;
             };
+            if instruction.opcode == "closure.new"
+                && operand_types.get(1).is_some_and(|context| {
+                    !matches!(&context.ty, Type::Unique(_)) && !null_values.contains(&context.name)
+                })
+            {
+                diagnostics.push(
+                    Diagnostic::error(
+                        V2,
+                        "closure.new context must be an owned unique value or null",
+                    )
+                    .with_primary_span(instruction.span),
+                );
+            }
+            if instruction.opcode == "closure.callback"
+                && !closure_callback_type(source, instruction).is_some_and(|(index, signature)| {
+                    signature.abi == Abi::C
+                        && signature.parameters.get(index).is_some_and(|parameter| {
+                            parameter.ty == Type::Pointer(AddressSpace::Generic)
+                        })
+                })
+            {
+                diagnostics.push(
+                    Diagnostic::error(
+                        V2,
+                        "closure.callback requires an abi(c) function type whose indexed parameter is ptr",
+                    )
+                    .with_primary_span(instruction.span),
+                );
+            }
             diagnostics.extend(address::verify_instruction(
                 source,
                 instruction,
@@ -87,10 +146,12 @@ pub(super) fn verify_function(
                 instruction,
                 &gpu_operand_types,
             ));
-            let inferred_result_types =
-                infer_result_types(source, instruction, &operand_types, layouts, policies).or_else(
-                    || call_conventions.inferred_result_types(instruction, source, &value_types),
-                );
+            let inferred_result_types = symbol_result_type
+                .or_else(|| direct_call_result_type(source, instruction, call_conventions))
+                .map(|ty| vec![ty])
+                .or_else(|| {
+                    infer_result_types(source, instruction, &operand_types, layouts, policies)
+                });
             diagnostics.extend(memory::verify_instruction(
                 source,
                 instruction,
@@ -154,6 +215,9 @@ pub(super) fn verify_function(
                 policies,
             ));
             for (name, ty) in instruction.results.iter().zip(result_types) {
+                if instruction.opcode == "const.null" && instruction.results.len() == 1 {
+                    null_values.insert(name.clone());
+                }
                 value_types.insert(name.clone(), ty);
             }
         }
@@ -183,6 +247,25 @@ pub(crate) fn inferred_value_types(
     body: &FunctionBody,
     layouts: &LayoutEngine,
     policies: &TypePolicies,
+) -> HashMap<String, Type> {
+    inferred_value_types_impl(source, body, layouts, policies, None)
+}
+
+pub(crate) fn inferred_value_types_with_calls(
+    source: &str,
+    body: &FunctionBody,
+    layouts: &LayoutEngine,
+    policies: &TypePolicies,
+    call_conventions: &crate::signature_types::CallConventions,
+) -> HashMap<String, Type> {
+    inferred_value_types_impl(source, body, layouts, policies, Some(call_conventions))
+}
+
+fn inferred_value_types_impl(
+    source: &str,
+    body: &FunctionBody,
+    layouts: &LayoutEngine,
+    policies: &TypePolicies,
     call_conventions: Option<&crate::signature_types::CallConventions>,
 ) -> HashMap<String, Type> {
     let mut value_types = HashMap::new();
@@ -195,6 +278,22 @@ pub(crate) fn inferred_value_types(
     for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
         let uses = text_value_uses(instruction);
         let result_types = match instruction.opcode.as_str() {
+            "func.ref" => call_conventions
+                .and_then(|call_conventions| {
+                    call_conventions
+                        .function_reference_result_type(source, instruction)
+                        .ok()
+                })
+                .map(|ty| vec![ty]),
+            "kernel.percpu.addr" | "foreign.addr" | "foreign.data" | "foreign.entry" => {
+                call_conventions
+                    .and_then(|call_conventions| {
+                        call_conventions
+                            .symbol_address_result_type(instruction)
+                            .ok()
+                    })
+                    .map(|ty| vec![ty])
+            }
             "stack.alloc" => stack_alloc_result_type(source, instruction).map(|ty| vec![ty]),
             "atomic.load" | "raw.load" | "mmio.load" => {
                 explicit_type(source, instruction).map(|ty| vec![ty])
@@ -217,6 +316,23 @@ pub(crate) fn inferred_value_types(
                     _ => None,
                 })
                 .map(|ty| vec![ty]),
+            "closure.callback" => closure_callback_type(source, instruction)
+                .map(|(_, signature)| vec![Type::Function(signature)]),
+            "call.closure" => uses
+                .first()
+                .and_then(|(name, _)| value_types.get(name))
+                .and_then(closure_call_result_type)
+                .map(|ty| vec![ty]),
+            "call.indirect" => crate::signature_types::indirect_call_type(source, instruction)
+                .and_then(|(signature, _)| synchronous_call_result_type(&signature))
+                .map(|ty| vec![ty]),
+            "call" | "call.foreign" | "call.variadic" | "call.witness" | "call.vtable" => {
+                call_conventions
+                    .and_then(|conventions| {
+                        direct_call_result_type(source, instruction, conventions)
+                    })
+                    .map(|ty| vec![ty])
+            }
             _ => {
                 let operands = uses
                     .iter()
@@ -228,15 +344,9 @@ pub(crate) fn inferred_value_types(
                         })
                     })
                     .collect::<Option<Vec<_>>>();
-                operands
-                    .and_then(|operands| {
-                        infer_result_types(source, instruction, &operands, layouts, policies)
-                    })
-                    .or_else(|| {
-                        call_conventions.and_then(|conventions| {
-                            conventions.inferred_result_types(instruction, source, &value_types)
-                        })
-                    })
+                operands.and_then(|operands| {
+                    infer_result_types(source, instruction, &operands, layouts, policies)
+                })
             }
         };
         if let Some(result_types) = result_types {
@@ -413,285 +523,4 @@ fn verify_exit(
         );
     }
     diagnostics
-}
-
-fn instruction_operand_count(instruction: &tir_format::TextInstruction) -> usize {
-    if is_conversion(instruction.opcode.as_str()) {
-        let start = text_instruction_operands_start(&instruction.tokens);
-        return usize::from(
-            instruction.tokens[start..]
-                .windows(2)
-                .any(|window| matches!(window[0].kind, TokenKind::Punctuation('%'))),
-        );
-    }
-    text_value_uses(instruction).len()
-}
-
-fn operand_types(
-    instruction: &tir_format::TextInstruction,
-    value_types: &HashMap<String, Type>,
-) -> Option<Vec<ValueUse>> {
-    if is_operandless_definition(instruction.opcode.as_str()) {
-        return Some(Vec::new());
-    }
-    if is_conversion(instruction.opcode.as_str()) {
-        let start = text_instruction_operands_start(&instruction.tokens);
-        let (name, span) = instruction.tokens[start..].windows(2).find_map(|window| {
-            match (&window[0].kind, &window[1].kind) {
-                (TokenKind::Punctuation('%'), TokenKind::Atom(name)) => {
-                    Some((name.clone(), window[1].span))
-                }
-                _ => None,
-            }
-        })?;
-        return Some(vec![ValueUse {
-            ty: value_types.get(&name)?.clone(),
-            name,
-            span,
-        }]);
-    }
-    text_value_uses(instruction)
-        .into_iter()
-        .map(|(name, span)| {
-            value_types
-                .get(&name)
-                .cloned()
-                .map(|ty| ValueUse { name, ty, span })
-        })
-        .collect()
-}
-
-fn infer_result_types(
-    source: &str,
-    instruction: &tir_format::TextInstruction,
-    operands: &[ValueUse],
-    layouts: &LayoutEngine,
-    policies: &TypePolicies,
-) -> Option<Vec<Type>> {
-    if aggregate::handles(instruction.opcode.as_str()) {
-        return aggregate::infer_result_types(source, instruction, operands, layouts, policies);
-    }
-    let gpu_operand_types = operands
-        .iter()
-        .map(|operand| operand.ty.clone())
-        .collect::<Vec<_>>();
-    if let Some(result_types) = crate::gpu_profile::instructions::infer_result_types(
-        source,
-        instruction,
-        &gpu_operand_types,
-    ) {
-        return Some(result_types);
-    }
-    let opcode = instruction.opcode.as_str();
-    let first = || operands.first().map(|operand| operand.ty.clone());
-    if opcode.starts_with("vec.") {
-        return crate::vector_text::infer_result_types(source, instruction, operands);
-    }
-    match opcode {
-        "const.int" | "const.float" | "const.zero" | "const.bytes" | "const.aggregate"
-        | "const.vec" | "const.poison" => Some(vec![explicit_type(source, instruction)?]),
-        "trunc" | "zext" | "sext" | "fptrunc" | "fpext" | "sitofp" | "uitofp" | "fptosi"
-        | "fptoui" | "ptrtoint" | "inttoptr" | "bitcast" | "fcvt" => {
-            Some(vec![target_type(source, instruction)?])
-        }
-        "field.addr" => Some(vec![infer_field_address(instruction, &first()?, layouts)?]),
-        "elem.addr" => Some(vec![infer_element_address(&first()?)?]),
-        "enum.payload.addr" => Some(vec![infer_enum_payload_address(
-            instruction,
-            &first()?,
-            layouts,
-        )?]),
-        "addr.cast" => Some(vec![type_after_keyword(source, instruction, "to")?]),
-        "addr.toptr" => {
-            let Type::Address { space, .. } = first()? else {
-                return None;
-            };
-            Some(vec![Type::Pointer(space.unwrap_or(AddressSpace::Generic))])
-        }
-        "ptr.toaddr" => Some(vec![type_after_keyword(source, instruction, "as")?]),
-        "const.bool" => Some(vec![Type::Integer(1)]),
-        "const.null" => Some(vec![Type::Pointer(null_space(instruction))]),
-        "global.addr" | "tls.addr" | "descriptor.ref" | "witness.ref" | "block.addr" => {
-            Some(vec![Type::Pointer(AddressSpace::Generic)])
-        }
-        "const.sampler" => Some(vec![Type::Sampler]),
-        "const.string" => Some(vec![Type::Tuple(vec![
-            Type::Pointer(AddressSpace::Generic),
-            Type::Integer(64),
-        ])]),
-        "add.ovf" | "sub.ovf" | "mul.ovf" => {
-            let ty = first()?;
-            Some(vec![Type::Tuple(vec![ty.clone(), mask_type(&ty)])])
-        }
-        "icmp" | "fcmp" => Some(vec![mask_type(&first()?)]),
-        "select" => operands.get(1).map(|operand| vec![operand.ty.clone()]),
-        "fclass" => Some(vec![class_type(&first()?)]),
-        "frexp" => {
-            let ty = first()?;
-            Some(vec![Type::Tuple(vec![ty.clone(), integer_shape(&ty, 32)])])
-        }
-        "load" | "load.borrow" => first().and_then(|ty| match ty {
-            Type::Address { pointee, .. } => Some(vec![pointee.as_ref().clone()]),
-            _ => None,
-        }),
-        "heap.alloc.counted" | "heap.alloc.unique" | "ref.addr" | "uniq.addr"
-        | "heap.alloc.raw" | "heap.realloc.raw" | "weak.new" | "weak.load" | "ref.unowned"
-        | "ref.isunique" => heap::infer_result_types(source, instruction, &operands, policies),
-        "borrow.begin" => first().map(|ty| vec![ty]),
-        "atomic.load" => Some(vec![explicit_type(source, instruction)?]),
-        "atomic.rmw" => operands.get(1).map(|operand| vec![operand.ty.clone()]),
-        "atomic.cmpxchg" => operands
-            .get(1)
-            .map(|operand| vec![operand.ty.clone(), Type::Integer(1)]),
-        "atomic.wait" | "atomic.notify" => Some(vec![Type::Integer(32)]),
-        "fp.flags.read" => Some(vec![Type::Integer(32)]),
-        "fp.flags.clear" => Some(vec![Type::Unit]),
-        "br" | "cond.br" | "switch.int" | "switch.enum" | "br.indirect" | "return" | "fail"
-        | "tail.call" | "unreachable" | "trap" | "try.call" | "invoke" | "coro.yield"
-        | "coro.resume" | "coro.finish" | "resume" | "throw" | "longjmp" | "asm.goto" | "deopt"
-        | "rt.ignore_hit" | "rt.accept_and_end" => None,
-        "add" | "sub" | "mul" | "sdiv" | "udiv" | "srem" | "urem" | "and" | "or" | "xor"
-        | "shl" | "lshr" | "ashr" | "rotl" | "rotr" | "smin" | "smax" | "umin" | "umax"
-        | "mulh" | "clmul" | "clmulh" | "fshl" | "fshr" | "not" | "neg" | "abs" | "ctlz"
-        | "cttz" | "ctpop" | "bswap" | "bitreverse" | "freeze" | "fneg" | "fabs" | "fsqrt"
-        | "ffloor" | "fceil" | "ftrunc" | "fround" | "froundeven" | "fadd" | "fsub" | "fmul"
-        | "fdiv" | "frem" | "fmin" | "fmax" | "fminnum" | "fmaxnum" | "fcopysign" | "fma"
-        | "fmuladd" | "math.atan2" | "math.pow" | "math.hypot" | "math.sin" | "math.cos"
-        | "math.tan" | "math.asin" | "math.acos" | "math.atan" | "math.sinh" | "math.cosh"
-        | "math.tanh" | "math.asinh" | "math.acosh" | "math.atanh" | "math.exp" | "math.exp2"
-        | "math.exp10" | "math.expm1" | "math.log" | "math.log2" | "math.log10" | "math.log1p"
-        | "math.cbrt" | "math.rsqrt" => first().map(|ty| vec![ty]),
-        "ldexp" => first().map(|ty| vec![ty]),
-        _ => None,
-    }
-}
-
-pub(crate) fn explicit_type(
-    source: &str,
-    instruction: &tir_format::TextInstruction,
-) -> Option<Type> {
-    let mut start_index = text_instruction_operands_start(&instruction.tokens);
-    if instruction.opcode == "atomic.load" {
-        while matches!(
-            instruction.tokens.get(start_index).map(|token| &token.kind),
-            Some(TokenKind::Punctuation('['))
-        ) {
-            start_index = instruction.tokens[start_index..]
-                .iter()
-                .position(|token| matches!(token.kind, TokenKind::Punctuation(']')))?
-                .checked_add(start_index + 1)?;
-        }
-    }
-    let start_token = instruction.tokens.get(start_index)?;
-    let start = start_token.span.start;
-    let mut nesting = 0usize;
-    let mut end = instruction.span.end;
-    for token in &instruction.tokens[start_index..] {
-        match token.kind {
-            TokenKind::Punctuation('<' | '(' | '[' | '{') => nesting += 1,
-            TokenKind::Punctuation('>' | ')' | ']' | '}') => nesting = nesting.saturating_sub(1),
-            TokenKind::Punctuation(',') if nesting == 0 => {
-                end = token.span.start;
-                break;
-            }
-            TokenKind::Punctuation('!') if nesting == 0 => {
-                end = token.span.start;
-                break;
-            }
-            _ => {}
-        }
-    }
-    let text = source.get(start..end)?.trim();
-    parse_type(text).ok()
-}
-
-fn target_type(source: &str, instruction: &tir_format::TextInstruction) -> Option<Type> {
-    type_after_keyword(source, instruction, "to")
-}
-
-fn null_space(instruction: &tir_format::TextInstruction) -> AddressSpace {
-    let mut start = text_instruction_operands_start(&instruction.tokens);
-    if matches!(
-        instruction.tokens.get(start).map(|token| &token.kind),
-        Some(TokenKind::Punctuation('['))
-    ) {
-        start += 1;
-    }
-    let name = instruction
-        .tokens
-        .get(start)
-        .and_then(|token| match &token.kind {
-            TokenKind::Atom(value) => Some(value.as_str()),
-            _ => None,
-        });
-    match name {
-        Some("device") => AddressSpace::Device,
-        Some("constant") => AddressSpace::Constant,
-        Some("threadgroup") => AddressSpace::Threadgroup,
-        Some("thread") => AddressSpace::Thread,
-        Some("object_payload") => AddressSpace::ObjectPayload,
-        Some("ray_payload") => AddressSpace::RayPayload,
-        Some("hit_attribute") => AddressSpace::HitAttribute,
-        Some("tile") => AddressSpace::Tile,
-        Some("node_record") => AddressSpace::NodeRecord,
-        _ => AddressSpace::Generic,
-    }
-}
-
-fn is_operandless_definition(opcode: &str) -> bool {
-    opcode.starts_with("const.")
-        || matches!(
-            opcode,
-            "global.addr"
-                | "tls.addr"
-                | "descriptor.ref"
-                | "witness.ref"
-                | "block.addr"
-                | "const.sampler"
-        )
-}
-
-fn is_conversion(opcode: &str) -> bool {
-    matches!(
-        opcode,
-        "trunc"
-            | "zext"
-            | "sext"
-            | "fptrunc"
-            | "fpext"
-            | "sitofp"
-            | "uitofp"
-            | "fptosi"
-            | "fptoui"
-            | "ptrtoint"
-            | "inttoptr"
-            | "bitcast"
-            | "fcvt"
-    )
-}
-
-fn mask_type(ty: &Type) -> Type {
-    match ty {
-        Type::FixedVector { lanes, .. } => Type::FixedVector {
-            lanes: *lanes,
-            element: Box::new(Type::Integer(1)),
-        },
-        Type::ScalableVector(_) => Type::ScalableVector(Box::new(Type::Integer(1))),
-        _ => Type::Integer(1),
-    }
-}
-
-fn class_type(ty: &Type) -> Type {
-    integer_shape(ty, 32)
-}
-
-fn integer_shape(ty: &Type, width: u16) -> Type {
-    match ty {
-        Type::FixedVector { lanes, .. } => Type::FixedVector {
-            lanes: *lanes,
-            element: Box::new(Type::Integer(width)),
-        },
-        Type::ScalableVector(_) => Type::ScalableVector(Box::new(Type::Integer(width))),
-        _ => Type::Integer(width),
-    }
 }

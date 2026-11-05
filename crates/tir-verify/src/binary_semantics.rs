@@ -1,8 +1,5 @@
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
-use tir_format::{
-    BinaryCodeTable, BinaryInstruction, BinaryMetadata, BinaryMetadataTable, BinarySignatureTable,
-    SemanticsMode,
-};
+use tir_format::{BinaryCodeTable, BinaryInstruction, BinarySignatureTable, SemanticsMode};
 
 const V14: Code = Code::new(Dialect::Tir, Area::Verifier, 14);
 
@@ -10,7 +7,6 @@ pub(super) fn verify(
     module_mode: SemanticsMode,
     signatures: &BinarySignatureTable,
     code: &BinaryCodeTable,
-    metadata: Option<&BinaryMetadataTable>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for body in &code.functions {
@@ -50,41 +46,7 @@ pub(super) fn verify(
             }
         }
     }
-    if let Some(metadata) = metadata {
-        for attachment in &metadata.attachments {
-            let Some(signature) = signatures
-                .records
-                .get(usize::try_from(attachment.function_index).unwrap_or(usize::MAX))
-            else {
-                continue;
-            };
-            if signature.semantics.unwrap_or(module_mode) != SemanticsMode::Defined {
-                continue;
-            }
-            if let Some(name) = permissive_metadata(&attachment.metadata) {
-                diagnostics.push(Diagnostic::error(
-                    V14,
-                    format!(
-                        "{name} metadata on function {} instruction {} is only permitted in a permissive function",
-                        attachment.function_index, attachment.instruction_ordinal
-                    ),
-                ));
-            }
-        }
-    }
     diagnostics
-}
-
-fn permissive_metadata(metadata: &BinaryMetadata) -> Option<&'static str> {
-    match metadata {
-        BinaryMetadata::Range { .. } => Some("!range"),
-        BinaryMetadata::NonNull => Some("!nonnull"),
-        BinaryMetadata::Align(_) => Some("!align"),
-        BinaryMetadata::NoAlias(_) => Some("!noalias"),
-        BinaryMetadata::AliasScope(_) => Some("!alias.scope"),
-        BinaryMetadata::Tbaa(_) => Some("!tbaa"),
-        _ => None,
-    }
 }
 
 fn permissive_form(instruction: &BinaryInstruction) -> Option<&'static str> {

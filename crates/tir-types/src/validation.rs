@@ -61,10 +61,7 @@ impl fmt::Display for TypeError {
                 formatter.write_str("cooperative matrix dimensions must be nonzero")
             }
             Self::InvalidTensorRank(rank) => {
-                write!(
-                    formatter,
-                    "tensor rank {rank} is not one of 1, 2, 3, 4, or 8"
-                )
+                write!(formatter, "tensor rank {rank} is outside 1..=8")
             }
             Self::InvalidTextureComponent => {
                 formatter.write_str("texture component must be f16, f32, i32, or vec<4 x T>")
@@ -197,7 +194,7 @@ fn validate_type_at(
             validate_signature(signature, depth, allow_tvisa_only)
         }
         Type::Tensor { count, element } => {
-            if !matches!(*count, 1 | 2 | 3 | 4 | 8) {
+            if !(1..=8).contains(count) {
                 return Err(TypeError::InvalidTensorRank(*count));
             }
             validate_type_at(element, depth + 1, false, allow_tvisa_only)

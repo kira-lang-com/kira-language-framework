@@ -13,6 +13,8 @@ use klf_kir::Module;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod binary_cache;
+
 pub(crate) use crate::scratch::Scratch;
 
 /// The stack a Windows executable reserves for its main thread, in bytes:
@@ -29,6 +31,16 @@ pub(crate) fn emit_binary(
 ) -> Result<(), String> {
     let target = module.target.triple().to_owned();
     check_target(&target)?;
+    let artifact_cache =
+        binary_cache::linked_binary_cache(&module, language, entry, level, &target)?;
+    if let Some(cache) = &artifact_cache {
+        if cache.is_file() {
+            klf_diag::progress!("build cache hit");
+            binary_cache::publish_cached_binary(cache, output)?;
+            crate::native_link::place_image_libraries(&module, &target, output)?;
+            return crate::native_link::stage_resources(&module);
+        }
+    }
     let toolchain = CToolchain::for_target(&target)?;
     let module = machine_module(module, level, output)?;
     klf_diag::progress!("codegen");
@@ -83,7 +95,15 @@ pub(crate) fn emit_binary(
             .join()
             .map_err(|_| "building the native objects panicked".to_owned())??;
         klf_diag::progress!("link");
-        link_binary(&module, &object, &natives, output, &target, &toolchain)
+        link_binary(&module, &object, &natives, output, &target, &toolchain)?;
+        if let Some(cache) = artifact_cache {
+            if let Err(error) = binary_cache::cache_linked_binary(output, &cache) {
+                klf_diag::err!("warning: the linked binary could not be cached: {error}");
+            } else {
+                binary_cache::publish_cached_binary(&cache, output)?;
+            }
+        }
+        Ok(())
     })
 }
 

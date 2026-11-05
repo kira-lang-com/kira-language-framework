@@ -1,5 +1,30 @@
 use super::*;
 
+#[test]
+fn one_file_units_use_the_inline_representation() {
+    let file = FileId::from_u32(7);
+    let direct = DefinitionUnit::new(file);
+    let from_files = DefinitionUnit::from_files(vec![file]).expect("nonempty unit");
+
+    assert_eq!(direct, from_files);
+    assert_eq!(direct.files(), &[file]);
+    assert!(matches!(direct.files, DefinitionUnitFiles::Single(_)));
+}
+
+#[test]
+fn multi_file_units_compare_shared_and_independent_identities() {
+    let files = vec![FileId::from_u32(7), FileId::from_u32(11)];
+    let original = DefinitionUnit::from_files(files.clone()).expect("nonempty unit");
+    let shared = original.clone();
+    let independent = DefinitionUnit::from_files(files).expect("nonempty unit");
+    let different = DefinitionUnit::from_files(vec![FileId::from_u32(7), FileId::from_u32(12)])
+        .expect("nonempty unit");
+
+    assert_eq!(original, shared);
+    assert_eq!(original, independent);
+    assert_ne!(original, different);
+}
+
 struct TestDefinition {
     name: String,
     extensions: Vec<String>,

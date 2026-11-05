@@ -111,6 +111,7 @@ pub(crate) fn prepare(session: &mut Session, mut file: File) -> File {
         if !is_test(decl) {
             continue;
         }
+        let decl = std::sync::Arc::make_mut(decl);
         let DeclKind::Function(function) = &decl.kind else {
             continue;
         };

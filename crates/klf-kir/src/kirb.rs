@@ -36,7 +36,8 @@ pub fn encode(module: &Module) -> Option<Vec<u8>> {
         witnesses: module.witnesses.clone(),
         functions: Vec::new(),
     };
-    let runs: Vec<&[Function]> = module.functions.chunks(FUNCTIONS_PER_PART).collect();
+    let runs: Vec<&[std::sync::Arc<Function>]> =
+        module.functions.chunks(FUNCTIONS_PER_PART).collect();
     let mut parts = vec![encode_part(&shell)?];
     for part in on_cores(&runs, |run| encode_part(*run))? {
         parts.push(part?);
@@ -66,7 +67,9 @@ pub fn decode(bytes: &[u8]) -> Option<Module> {
     }
     let (shell, runs) = parts.split_first()?;
     let mut module: Module = decode_part(shell)?;
-    for run in on_cores(runs, |run| decode_part::<Vec<Function>>(run))? {
+    for run in on_cores(runs, |run| {
+        decode_part::<Vec<std::sync::Arc<Function>>>(run)
+    })? {
         module.functions.extend(run?);
     }
     Some(module)
@@ -137,9 +140,9 @@ mod tests {
         let template = module.functions.clone();
         for copy in 0..600 {
             for function in &template {
-                let mut function = function.clone();
+                let mut function = function.as_ref().clone();
                 function.name = klf_core::Name::new(format!("{}_{copy}", function.name));
-                module.functions.push(function);
+                module.functions.push(std::sync::Arc::new(function));
             }
         }
         let bytes = super::encode(&module).expect("the module encodes");

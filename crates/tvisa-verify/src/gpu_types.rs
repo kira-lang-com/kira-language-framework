@@ -435,7 +435,6 @@ fn verify_literal_as_type(
         results: Vec::new(),
         opcode: opcode.to_owned(),
         tokens,
-        debug_attachment: None,
         span: original.span,
     };
     crate::constant_types::verify(&text, &synthetic)

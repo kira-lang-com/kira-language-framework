@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::collections::HashMap;
 
 use crate::leb::{LebError, read_uleb, write_uleb};
 
@@ -8,33 +8,20 @@ pub struct StringTable {
 }
 
 impl StringTable {
-    pub fn from_values(values: Vec<String>) -> Result<Self, StringTableError> {
-        if values.is_empty() {
-            return Err(error(0, "invalid string table count"));
-        }
-        if !values[0].is_empty() {
-            return Err(error(0, "string table entry zero is not empty"));
-        }
-        Ok(Self { values })
-    }
-
-    pub fn encode(&self, output: &mut impl Write) -> io::Result<()> {
+    /// Encodes this table with minimal ULEB lengths in its existing index order.
+    pub fn encode(&self) -> Result<Vec<u8>, StringTableError> {
+        let mut bytes = Vec::new();
         let count = u64::try_from(self.values.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "too many strings"))?;
-        if count == 0 || !self.values[0].is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "string table entry zero must be empty",
-            ));
-        }
-        write_uleb(count, output)?;
+            .map_err(|_| error(0, "string table count does not fit in ULEB128"))?;
+        write_uleb(count, &mut bytes).map_err(|_| error(0, "string table encoding failed"))?;
         for value in &self.values {
             let length = u64::try_from(value.len())
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "string is too long"))?;
-            write_uleb(length, output)?;
-            output.write_all(value.as_bytes())?;
+                .map_err(|_| error(bytes.len() as u64, "string length does not fit in ULEB128"))?;
+            write_uleb(length, &mut bytes)
+                .map_err(|_| error(bytes.len() as u64, "string table encoding failed"))?;
+            bytes.extend_from_slice(value.as_bytes());
         }
-        Ok(())
+        Ok(bytes)
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, StringTableError> {
@@ -79,8 +66,11 @@ impl StringTable {
     }
 
     #[must_use]
-    pub fn index_of(&self, value: &str) -> Option<usize> {
-        self.values.iter().position(|candidate| candidate == value)
+    pub fn index_of(&self, value: &str) -> Option<u64> {
+        self.values
+            .iter()
+            .position(|candidate| candidate == value)
+            .and_then(|index| u64::try_from(index).ok())
     }
 
     #[must_use]
@@ -91,6 +81,59 @@ impl StringTable {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
+    }
+}
+
+/// Builds STRINGS in first-reference order while reserving index zero for the
+/// required empty string.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StringTableBuilder {
+    values: Vec<String>,
+    indices: HashMap<String, u64>,
+}
+
+impl StringTableBuilder {
+    #[must_use]
+    pub fn new() -> Self {
+        let mut indices = HashMap::new();
+        indices.insert(String::new(), 0);
+        Self {
+            values: vec![String::new()],
+            indices,
+        }
+    }
+
+    /// Returns the existing index or appends `value` at its first-reference index.
+    pub fn intern(&mut self, value: &str) -> Result<u64, StringTableError> {
+        if let Some(index) = self.indices.get(value) {
+            return Ok(*index);
+        }
+
+        let index = u64::try_from(self.values.len())
+            .map_err(|_| error(0, "string table count does not fit in ULEB128"))?;
+        self.values
+            .try_reserve(1)
+            .map_err(|_| error(0, "string table allocation failed"))?;
+        self.indices
+            .try_reserve(1)
+            .map_err(|_| error(0, "string table allocation failed"))?;
+        let value = value.to_owned();
+        self.indices.insert(value.clone(), index);
+        self.values.push(value);
+        Ok(index)
+    }
+
+    #[must_use]
+    pub fn finish(self) -> StringTable {
+        StringTable {
+            values: self.values,
+        }
+    }
+}
+
+impl Default for StringTableBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

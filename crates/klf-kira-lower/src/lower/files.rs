@@ -37,6 +37,7 @@ impl Lowerer<'_> {
             "pathExists" => self.lower_path_exists(args, span),
             "driverPathExists" => self.lower_driver_path_exists(args, span),
             "readDirectory" => self.lower_read_directory(args, span),
+            "directoryHasEntry" => self.lower_directory_has_entry(args, span),
             _ => return Builtin::Skipped,
         };
         Builtin::from_lowered(result)
@@ -190,6 +191,28 @@ impl Lowerer<'_> {
             .fb
             .call_foreign(Name::new("klfsvc_source_directory"), arguments);
         Some((count, int64()))
+    }
+
+    fn lower_directory_has_entry(&mut self, args: &[Arg], span: Span) -> Option<(Name, FeType)> {
+        let [session, directory, child] = args else {
+            self.session.report(type_error(
+                span,
+                "`directoryHasEntry` takes a session, a directory and a child name",
+            ));
+            return None;
+        };
+        let (session, _) = self.lower_expr(&session.value)?;
+        let mut arguments = vec![session];
+        arguments.extend(self.string_argument(directory, "directoryHasEntry")?);
+        arguments.extend(self.string_argument(child, "directoryHasEntry")?);
+        let found = self
+            .fb
+            .call_foreign(Name::new("klfsvc_source_directory_child"), arguments);
+        let one = self.fb.const_int(Type::Integer(64), 1);
+        Some((
+            self.fb.compare(klf_kir::IntegerPredicate::Eq, found, one),
+            FeType::Bool,
+        ))
     }
 
     /// A service call's arguments with each `String` spread into the

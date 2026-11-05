@@ -123,6 +123,7 @@ pub(crate) fn exported(module: &Module) -> impl Iterator<Item = &Function> {
     module
         .functions
         .iter()
+        .map(std::sync::Arc::as_ref)
         .filter(|function| !function.foreign && function.linkage != Linkage::Private)
 }
 
@@ -212,7 +213,9 @@ pub(crate) fn add_ridl_symbols(
         forwarders.push(forwarder(function, &symbol));
         exports.push((symbol.clone(), symbol));
     }
-    module.functions.extend(forwarders);
+    module
+        .functions
+        .extend(forwarders.into_iter().map(std::sync::Arc::new));
     exports
 }
 

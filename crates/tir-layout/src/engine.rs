@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tir_types::{FloatType, Type};
 
@@ -12,6 +12,7 @@ const MAX_OBJECT_SIZE: u64 = 1 << 62;
 
 pub struct LayoutEngine {
     definitions: HashMap<String, NominalDefinition>,
+    imported_nominals: HashSet<String>,
     cache: HashMap<Type, NominalLayout>,
     active: Vec<String>,
 }
@@ -21,6 +22,7 @@ impl LayoutEngine {
     pub fn new() -> Self {
         Self {
             definitions: HashMap::new(),
+            imported_nominals: HashSet::new(),
             cache: HashMap::new(),
             active: Vec::new(),
         }
@@ -52,6 +54,12 @@ impl LayoutEngine {
                 "enum definitions use variant payloads, not struct fields".to_owned(),
             ));
         }
+        if definition.kind == DefinitionKind::Enum && definition.rule == LayoutRule::Explicit {
+            return Err(LayoutError::InvalidType(
+                "explicit layouts are not supported for enums without per-variant payload offsets"
+                    .to_owned(),
+            ));
+        }
         if definition.kind != DefinitionKind::Enum && !definition.variants.is_empty() {
             return Err(LayoutError::InvalidType(
                 "only enum definitions may declare variants".to_owned(),
@@ -73,6 +81,7 @@ impl LayoutEngine {
                 .validate()
                 .map_err(|error| LayoutError::InvalidType(error.to_string()))?;
         }
+        self.imported_nominals.remove(&definition.path);
         self.definitions.insert(definition.path.clone(), definition);
         self.cache.clear();
         Ok(())
@@ -81,6 +90,18 @@ impl LayoutEngine {
     #[must_use]
     pub fn definition(&self, path: &str) -> Option<&NominalDefinition> {
         self.definitions.get(path)
+    }
+
+    pub fn register_imported_nominal(&mut self, path: impl Into<String>) {
+        let path = path.into();
+        if !self.definitions.contains_key(&path) {
+            self.imported_nominals.insert(path);
+        }
+    }
+
+    #[must_use]
+    pub fn is_imported_nominal(&self, path: &str) -> bool {
+        self.imported_nominals.contains(path)
     }
 
     pub fn layout(&mut self, ty: &Type) -> Result<Layout, LayoutError> {
@@ -437,9 +458,6 @@ impl LayoutEngine {
             return Ok(Layout::new(total_bits.div_ceil(8), 1));
         }
         let element_layout = self.layout_inner(element)?;
-        if matches!(element, Type::Integer(1)) {
-            return Ok(Layout::new(u64::from(lanes), 1));
-        }
         let power = u64::from(lanes).next_power_of_two();
         let alignment = element_layout
             .size

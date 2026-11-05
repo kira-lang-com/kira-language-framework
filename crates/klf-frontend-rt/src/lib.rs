@@ -39,7 +39,9 @@ fn configure_allocator() {
 fn configure_allocator() {}
 
 mod arguments;
+mod build_command;
 mod bundle;
+use build_command::build;
 mod command;
 mod contract_reach;
 mod depfile;
@@ -110,8 +112,9 @@ thread_local! {
 
 /// Runs the definition's phases in this process.
 ///
-/// One of these is made per unit, so the block count it records on entry is
-/// the unit's heap baseline for the section 15.6 check.
+/// One of these is made per compilation. Each unit closes its artifact frame
+/// before the next begins, while the runner and its compiled phase program are
+/// reused across the whole graph.
 pub(crate) struct NativePhases {
     blocks_on_entry: usize,
     artifact_frame: Cell<bool>,
@@ -121,13 +124,29 @@ pub(crate) struct NativePhases {
 impl NativePhases {
     pub(crate) fn new() -> Self {
         let blocks_on_entry = klf_native_rt::live_blocks();
+        Self {
+            blocks_on_entry,
+            artifact_frame: Cell::new(false),
+            artifact_error: Cell::new(false),
+        }
+        .with_artifact_frame()
+    }
+
+    fn with_artifact_frame(self) -> Self {
+        self.begin_artifacts();
+        self
+    }
+
+    fn begin_artifacts(&self) {
+        if self.artifact_frame.get() {
+            return;
+        }
         // SAFETY: selectors 10 and 11 are reserved for Kira frontend frames;
         // older frontend trampolines answer -1 for an unknown selector.
         let began = unsafe { klffe_phase(11, 0, 0, 0) };
-        Self {
-            blocks_on_entry,
-            artifact_frame: Cell::new(began == 0),
-            artifact_error: Cell::new(began != 0 && began != -1),
+        self.artifact_frame.set(began == 0);
+        if began != 0 && began != -1 {
+            self.artifact_error.set(true);
         }
     }
 
@@ -159,6 +178,7 @@ impl PhaseRunner for NativePhases {
         session: &mut Session,
         arguments: &DefinitionPhaseArguments,
     ) -> Result<DefinitionPhaseResult, String> {
+        self.begin_artifacts();
         if interrupt::cancel_requested() {
             return Err(interrupted(phase, Interrupt::Cancelled));
         }
@@ -439,218 +459,20 @@ fn write_contract(
         .map_err(Failure::Driver)
 }
 
-fn build(
-    metadata: &FrontendMetadata,
-    invocation: arguments::Invocation,
-    driver_arguments: &[String],
-) -> Result<i32, Failure> {
-    let triple = invocation
-        .target
-        .clone()
-        .unwrap_or_else(|| metadata.target.clone());
-    let test_compile_only =
-        std::env::var_os("KLF_TEST_COMPILE_ONLY").as_deref() == Some(std::ffi::OsStr::new("1"));
-    if !test_compile_only && matches!(invocation.emit.as_str(), "bin" | "lib" | "shared" | "run") {
-        toolchain::check_target(&triple).map_err(Failure::Driver)?;
+fn binary_output(invocation: &arguments::Invocation) -> Result<std::path::PathBuf, Failure> {
+    if let Some(output) = &invocation.output {
+        return Ok(output.clone());
     }
-    // The same status surface `klf` draws, from the same crate: a driver is a
-    // client CLI too, and its phases are the ones the definition reports.
-    let mut display =
-        klf_diag::status::begin(&format!("Building {}", metadata.driver), invocation.timings);
-    // A run kept under the cache root is reused whole while every path its
-    // compile touched holds what it did.
-    let reuses = invocation.emit == "run" && invocation.output.is_none();
-    if reuses {
-        klf_services::record_accesses();
-    }
-    let mut session = new_session(metadata, &invocation, &triple).map_err(Failure::Driver)?;
-    let files = add_inputs(&mut session, metadata, &invocation).map_err(Failure::Driver)?;
-
-    let mut make_runner = || Ok(NativePhases::new());
-    let mut cache =
-        module_cache::DiskModuleCache::open(metadata, &invocation, &triple, session.std_root());
-    let program_key = cache.as_ref().filter(|_| reuses).map(|cache| {
-        let mut key = cache.build_key();
-        for input in &invocation.inputs {
-            let input = std::path::absolute(input).unwrap_or_else(|_| input.clone());
-            key.push_str(&format!("input {}\n", input.display()));
-        }
-        key
-    });
-    if let Some(key) = &program_key {
-        let (executable, _) = run::executable_path(None, &invocation.inputs, &triple);
-        if let Some(warnings) = program_cache::reusable(&executable, key) {
-            if !warnings.is_empty() {
-                klf_diag::raw_err!("{warnings}");
-            }
-            display.end();
-            klf_diag::out!("Built: Ok {}", executable.display());
-            return run::run(
-                metadata.declares(klf_defsvc::Hook::RunProgram),
-                &executable,
-                &invocation.program_arguments,
-                driver_arguments,
-            )
-            .map_err(Failure::Driver);
-        }
-    }
-    let driven = match &mut cache {
-        Some(cache) => drive_cached(&mut session, &files, &mut make_runner, cache),
-        None => drive(&mut session, &files, &mut make_runner),
-    };
-    let module = driven.map_err(|error| match error {
-        // A phase failure is the definition rejecting the program: the message
-        // is the diagnostic it reported, rendered against the source.
-        DriveError::Phase { message, .. } => Failure::Rejected(message),
-        // Two units disagreeing is the compiler's fault, said as a diagnostic
-        // of its own with what each unit holds.
-        DriveError::Conflict(message) => Failure::Rejected(format!(
-            "{}: error[KLF-KIR-9002]: {message}",
-            metadata.driver
-        )),
-        other => Failure::Driver(other.to_string()),
+    let input = invocation.inputs.first().ok_or_else(|| {
+        Failure::Driver("cannot derive a binary output without an input".to_owned())
     })?;
-    let warnings = cache.as_ref().map_or_else(
-        || render_kept_diagnostics(&session),
-        |cache| cache.kept_diagnostics(&session),
-    );
-    if !warnings.is_empty() {
-        klf_diag::raw_err!("{warnings}");
-    }
-    let level = optimization_level(&session);
-    if invocation.emit == "check" || test_compile_only {
-        display.end();
-        klf_diag::out!("Check: Ok");
-        return Ok(0);
-    }
-    if let Some(device) = &invocation.device {
-        display.end();
-        return push::push(metadata, &module, device).map_err(Failure::Driver);
-    }
-
-    if invocation.emit == "run" {
-        let (executable, temporary) =
-            run::executable_path(invocation.output, &invocation.inputs, &triple);
-        run::prepare(&executable).map_err(Failure::Driver)?;
-        let links = program_key
-            .as_ref()
-            .and_then(|_| output::linked_archives(&module, &metadata.name, &triple));
-        output::emit_binary(module, &executable, &metadata.name, metadata.entry, level)
-            .map_err(Failure::Driver)?;
-        if let (Some(key), Some(links)) = (&program_key, &links) {
-            program_cache::keep(&executable, key, links, &warnings);
-        }
-        display.end();
-        klf_diag::out!("Built: Ok {}", executable.display());
-        let status = run::run(
-            metadata.declares(klf_defsvc::Hook::RunProgram),
-            &executable,
-            &invocation.program_arguments,
-            driver_arguments,
-        );
-        if temporary {
-            run::remove(&executable);
-        }
-        return status.map_err(Failure::Driver);
-    }
-    let output = match invocation.output {
-        Some(output) => output,
-        None if invocation.emit == "bin" => {
-            let input = &invocation.inputs[0];
-            let stem = input.file_stem().ok_or_else(|| {
-                Failure::Driver(format!(
-                    "cannot derive output name from {}",
-                    input.display()
-                ))
-            })?;
-            input.with_file_name(stem)
-        }
-        None => {
-            let mut path = invocation.inputs[0].clone();
-            path.set_extension(match invocation.emit.as_str() {
-                "klbc" => "klbc",
-                "lib" => "a",
-                "ridl" => "ridl",
-                "shared" if toolchain::is_apple(&triple) => "dylib",
-                "shared" => "so",
-                _ => "kir",
-            });
-            path
-        }
-    };
-    if invocation.emit == "bin" {
-        output::emit_binary(module, &output, &metadata.name, metadata.entry, level)
-            .map_err(Failure::Driver)?;
-        display.end();
-        klf_diag::out!("Built: Ok {}", output.display());
-        return Ok(0);
-    }
-    if invocation.emit == "lib" {
-        output::emit_library(
-            &module,
-            &output,
-            &metadata.name,
-            invocation.export.as_deref(),
-        )
-        .map_err(Failure::Driver)?;
-        display.end();
-        klf_diag::out!("Built: Ok {}", output.display());
-        return Ok(0);
-    }
-    if invocation.emit == "ridl" {
-        let written = write_contract(
-            &module,
-            &metadata.name,
-            &session,
-            &output,
-            invocation.ridl_source,
-        );
-        if written.is_ok() {
-            display.end();
-            klf_diag::out!("Built: Ok {}", output.display());
-        }
-        return written.map(|()| 0);
-    }
-    if invocation.emit == "shared" {
-        if let Some(contract) = &invocation.contract {
-            write_contract(
-                &module,
-                &metadata.name,
-                &session,
-                contract,
-                invocation.ridl_source,
-            )?;
-        }
-        output::emit_shared(&module, &output, &metadata.name).map_err(Failure::Driver)?;
-        display.end();
-        klf_diag::out!("Built: Ok {}", output.display());
-        return Ok(0);
-    }
-    let bytes = if invocation.emit == "klbc" {
-        klf_diag::progress::report("lower bytecode");
-        let mut program = klf_vm::lower_module(&module)
-            .map_err(|error| format!("cannot lower KIR to bytecode: {error}"))
-            .map_err(Failure::Driver)?;
-        output::link_std_bytecode(&mut program, &module, &metadata.name)
-            .map_err(Failure::Driver)?;
-        vm_natives::emit_natives(&module, &mut program, &output).map_err(Failure::Driver)?;
-        klf_vm::encode(&program)
-    } else if level == klf_kir_passes::Level::O0 {
-        module.to_string().into_bytes()
-    } else {
-        output::machine_module(module, level, &output)
-            .map_err(Failure::Driver)?
-            .to_string()
-            .into_bytes()
-    };
-    let written = std::fs::write(&output, bytes)
-        .map_err(|error| format!("cannot write {}: {error}", output.display()))
-        .map_err(Failure::Driver);
-    if written.is_ok() {
-        display.end();
-        klf_diag::out!("Built: Ok {}", output.display());
-    }
-    written.map(|()| 0)
+    let stem = input.file_stem().ok_or_else(|| {
+        Failure::Driver(format!(
+            "cannot derive output name from {}",
+            input.display()
+        ))
+    })?;
+    Ok(input.with_file_name(stem))
 }
 
 /// The tier-1 level of section 14.1: a build asking for the KIR optimizer

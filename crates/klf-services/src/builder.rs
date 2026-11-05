@@ -15,6 +15,7 @@ use klf_kir::{
 };
 use klf_source::Span;
 use klf_target::Target;
+use std::sync::Arc;
 
 pub struct ModuleBuilder {
     name: Name,
@@ -23,7 +24,7 @@ pub struct ModuleBuilder {
     types: Vec<klf_kir::TypeDeclaration>,
     globals: Vec<klf_kir::GlobalDeclaration>,
     witnesses: Vec<klf_kir::WitnessDeclaration>,
-    functions: Vec<Function>,
+    functions: Vec<Arc<Function>>,
     attributes: Vec<klf_kir::ModuleAttribute>,
     /// The attributes already added, so a repeated one is found at once: a
     /// module carries one `klf.debug.name` per generated function.
@@ -66,6 +67,11 @@ impl ModuleBuilder {
     }
 
     pub fn add_function(&mut self, function: Function) {
+        self.functions.push(Arc::new(function));
+    }
+
+    /// Adds a function already owned by an incremental compilation cache.
+    pub fn add_shared_function(&mut self, function: Arc<Function>) {
         self.functions.push(function);
     }
 

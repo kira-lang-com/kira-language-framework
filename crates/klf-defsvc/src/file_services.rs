@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const MISSING: u64 = u64::MAX;
+pub(crate) const DIRECTORY_ENTRIES: &str = "@directory-entries";
 
 pub(super) fn register(state: &Arc<Mutex<DefinitionServiceState>>, services: &mut ServiceSink) {
     services.register_state_with_memory("klfsvc_source_read", state, read);
@@ -27,6 +28,7 @@ pub(super) fn register(state: &Arc<Mutex<DefinitionServiceState>>, services: &mu
     services.register_state_with_memory("klfsvc_source_ridl_module", state, ridl_module);
     services.register_state_with_memory("klfsvc_source_directory", state, directory);
     services.register_state("klfsvc_source_directory_file", state, directory_file);
+    services.register_state_with_memory("klfsvc_source_directory_child", state, directory_child);
 }
 
 /// `(session, path, path length) -> file`: the file at `path`, read once per
@@ -356,6 +358,73 @@ fn directory_file(state: &mut DefinitionServiceState, arguments: &[u64]) -> u64 
         .map_or(MISSING, |file| u64::from(file.as_u32()))
 }
 
+/// `(session, directory, length, child, length) -> 1 or 0`: whether `child`
+/// is an immediate entry of `directory`. The first query indexes and records
+/// the directory once for all later queries in this phase.
+fn directory_child(
+    state: &mut DefinitionServiceState,
+    arguments: &[u64],
+    memory: &mut dyn ServiceMemory,
+) -> u64 {
+    let [
+        session,
+        directory_address,
+        directory_length,
+        child_address,
+        child_length,
+    ] = arguments
+    else {
+        return 0;
+    };
+    if *session != state.session.as_u64() {
+        return 0;
+    }
+    let (Some(directory), Some(child)) = (
+        read_text(memory, *directory_address, *directory_length),
+        read_text(memory, *child_address, *child_length),
+    ) else {
+        return 0;
+    };
+    let directory = PathBuf::from(directory);
+    let key = klf_services::overlay_key(&directory);
+    if !state.directory_entries.contains_key(&key) {
+        klf_services::note_access(&directory);
+        let snapshot = klf_services::shared_directory_index()
+            .snapshot(&directory)
+            .ok();
+        let mut entries = std::collections::HashSet::new();
+        let paths = snapshot.as_ref().map(|snapshot| {
+            for name in snapshot.names() {
+                entries.insert(name.clone());
+            }
+            let mut paths = snapshot.paths(&directory);
+            paths.sort();
+            paths
+        });
+        let identity = snapshot.and_then(|snapshot| snapshot.identity().cloned());
+        let overlay_entries = klf_services::directory_overlay_entries(&state.overlay, &directory);
+        for entry in &overlay_entries {
+            if let Some(name) = entry.file_name() {
+                entries.insert(name.to_os_string());
+            }
+        }
+        state.observations.push(Observation::Listing {
+            directory: directory.clone(),
+            extension: DIRECTORY_ENTRIES.to_owned(),
+            paths,
+            identity,
+            overlay_entries,
+        });
+        state.directory_entries.insert(key.clone(), entries);
+    }
+    u64::from(
+        state
+            .directory_entries
+            .get(&key)
+            .is_some_and(|entries| entries.contains(std::ffi::OsStr::new(&child))),
+    )
+}
+
 /// Whether a file or directory is at `path`, or a document stands in for one.
 #[must_use]
 pub fn path_present<S: std::hash::BuildHasher>(
@@ -371,6 +440,14 @@ pub fn path_present<S: std::hash::BuildHasher>(
 #[must_use]
 pub fn listing(directory: &Path, extension: &str) -> Option<Vec<PathBuf>> {
     klf_services::note_access(directory);
+    if extension == DIRECTORY_ENTRIES {
+        let snapshot = klf_services::shared_directory_index()
+            .snapshot(directory)
+            .ok()?;
+        let mut paths = snapshot.paths(directory);
+        paths.sort();
+        return Some(paths);
+    }
     let mut paths = Vec::new();
     collect(directory, extension, &mut paths).ok()?;
     paths.sort();
@@ -378,10 +455,29 @@ pub fn listing(directory: &Path, extension: &str) -> Option<Vec<PathBuf>> {
 }
 
 fn collect(directory: &Path, extension: &str, paths: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(directory)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect(&path, extension, paths)?;
+    collect_with_metadata(directory, None, extension, paths)
+}
+
+fn collect_with_metadata(
+    directory: &Path,
+    metadata: Option<&std::fs::Metadata>,
+    extension: &str,
+    paths: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    klf_services::note_access(directory);
+    let index = klf_services::shared_directory_index();
+    let snapshot = metadata.map_or_else(
+        || index.snapshot(directory),
+        |metadata| index.snapshot_with_metadata(directory, metadata),
+    )?;
+    let entries = snapshot.paths(directory);
+    for path in entries {
+        let child_metadata = std::fs::metadata(&path).ok();
+        if child_metadata
+            .as_ref()
+            .is_some_and(std::fs::Metadata::is_dir)
+        {
+            collect_with_metadata(&path, child_metadata.as_ref(), extension, paths)?;
         } else if path.extension().is_some_and(|found| found == extension) {
             paths.push(path);
         }
@@ -404,10 +500,19 @@ fn read_text(memory: &mut dyn ServiceMemory, address: u64, length: u64) -> Optio
 impl DefinitionServiceState {
     /// The text at `path` through the overlay, noted as observed.
     fn read_observed(&mut self, path: &Path) -> Option<Arc<str>> {
+        let overlaid = self.overlay.contains_key(&klf_services::overlay_key(path));
+        let before = (!overlaid)
+            .then(|| klf_services::file_identity(path))
+            .flatten();
         let text = klf_services::read_through(&self.overlay, path).ok();
+        let after = (!overlaid)
+            .then(|| klf_services::file_identity(path))
+            .flatten();
+        let identity = before.filter(|before| Some(before) == after.as_ref());
         self.observations.push(Observation::Read {
             path: path.to_path_buf(),
             text: text.clone(),
+            identity,
         });
         text
     }
@@ -415,11 +520,16 @@ impl DefinitionServiceState {
     /// The files under `directory` with `extension`, in path order, noted as
     /// observed.
     fn list_observed(&mut self, directory: &Path, extension: &str) -> Option<Vec<PathBuf>> {
+        let before = klf_services::file_identity(directory);
         let paths = listing(directory, extension);
+        let after = klf_services::file_identity(directory);
+        let identity = before.filter(|before| Some(before) == after.as_ref());
         self.observations.push(Observation::Listing {
             directory: directory.to_path_buf(),
             extension: extension.to_owned(),
             paths: paths.clone(),
+            identity,
+            overlay_entries: Vec::new(),
         });
         paths
     }
@@ -431,6 +541,7 @@ impl DefinitionServiceState {
         let name = format!("{name}#generated{}", file.as_u32());
         self.source_hashes.push(klf_source::source_hash(&text));
         self.sources.push((file, name, Arc::from(text)));
+        self.source_identities.push(None);
         self.read_count += 1;
         Some(file)
     }
@@ -444,6 +555,7 @@ impl DefinitionServiceState {
         let file = FileId::from_u32(u32::try_from(self.sources.len()).ok()?);
         self.source_hashes.push(klf_source::source_hash(&text));
         self.sources.push((file, name, Arc::from(text)));
+        self.source_identities.push(None);
         self.read_count += 1;
         Some(file)
     }
@@ -467,22 +579,44 @@ impl DefinitionServiceState {
             .or_else(|| self.source_paths.get(&klf_services::overlay_key(path)))
             .copied();
         if let Some(file) = known {
-            let text = self
-                .sources
-                .iter()
-                .find(|(known, _, _)| *known == file)
+            // Source ids are assigned from `sources.len()` in every path that
+            // inserts a source. Use that stable slot directly; looking it up
+            // by scanning all previously loaded sources turns repeated reads
+            // into quadratic work as a project grows.
+            let text = usize::try_from(file.as_u32())
+                .ok()
+                .and_then(|index| self.sources.get(index))
+                .filter(|(known, _, _)| *known == file)
                 .map(|(_, _, text)| Arc::clone(text));
+            let identity = usize::try_from(file.as_u32())
+                .ok()
+                .and_then(|index| self.source_identities.get(index))
+                .cloned()
+                .flatten();
             self.observations.push(Observation::Read {
                 path: path.to_path_buf(),
                 text,
+                identity,
             });
             return Some(file);
         }
         let text = self.read_observed(path)?;
+        let identity = self
+            .observations
+            .last()
+            .and_then(|observation| match observation {
+                Observation::Read {
+                    path: observed,
+                    identity,
+                    ..
+                } if observed == path => identity.clone(),
+                _ => None,
+            });
         let file = FileId::from_u32(u32::try_from(self.sources.len()).ok()?);
         self.source_hashes.push(klf_source::source_hash(&text));
         self.sources
             .push((file, path.to_string_lossy().into_owned(), text));
+        self.source_identities.push(identity);
         self.read_count += 1;
         Some(file)
     }
@@ -495,8 +629,10 @@ impl DefinitionServiceState {
         }
         session.observe(std::mem::take(&mut self.observations));
         let first = self.sources.len() - self.read_count;
-        for (file, name, text) in &self.sources[first..] {
-            let registered = session.add_file(name.as_str(), text.clone());
+        for index in first..self.sources.len() {
+            let (file, name, text) = &self.sources[index];
+            let identity = self.source_identities.get(index).cloned().flatten();
+            let registered = session.add_file_with_identity(name.as_str(), text.clone(), identity);
             if registered != *file {
                 return Err(format!("the session gave `{name}` a different file id"));
             }

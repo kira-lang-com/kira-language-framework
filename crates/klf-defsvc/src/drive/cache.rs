@@ -93,7 +93,9 @@ pub fn drive_cached<R: PhaseRunner>(
     make_runner: &mut dyn FnMut() -> Result<R, String>,
     cache: &mut dyn ModuleCache,
 ) -> Result<Module, DriveError> {
-    let units = run_units(session, inputs, make_runner)?;
+    let mut runner = make_runner().map_err(DriveError::Runner)?;
+    let units = run_units_with_runner(session, inputs, &mut runner)?;
+    progress!("incremental graph units={} phase_runners=1", units.len());
     let program = program_files(&units);
     let stored: Vec<Option<Stored>> = units
         .iter()
@@ -103,7 +105,7 @@ pub fn drive_cached<R: PhaseRunner>(
     let mut kept = Vec::new();
     let mut run = |session: &mut Session, unit: &DefinitionUnit, cache: &mut dyn ModuleCache| {
         let trace = UnitTrace::start(session);
-        match lower_one(session, unit.clone(), &program, make_runner) {
+        match lower_one(session, unit.clone(), &program, &mut runner) {
             Ok(module) => {
                 let trace = trace.end(session);
                 // What the unit only declares, another unit's module defines

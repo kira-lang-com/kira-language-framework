@@ -3,61 +3,15 @@ use std::collections::HashSet;
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
 use tir_types::{FloatType, Type};
 use tvisa_format::{
-    CAggregateDescriptor, ImportModuleKind, ParameterItem, ResultItem, TextCallingConvention,
-    TextImage, TextImportPayload, TextSignature,
+    CAggregateDescriptor, ParameterItem, ResultItem, TextCallingConvention, TextImage,
+    TextSignature,
 };
 
 const VFY6: Code = Code::new(Dialect::Tvisa, Area::Verifier, 6);
 const VFY3: Code = Code::new(Dialect::Tvisa, Area::Verifier, 3);
 
 pub(super) fn verify_image_signatures(image: &TextImage) -> Vec<Diagnostic> {
-    let mut diagnostics = image
-        .signatures
-        .iter()
-        .flat_map(verify_signature)
-        .collect::<Vec<_>>();
-    for import in &image.imports {
-        let TextImportPayload::Function {
-            signature,
-            signature_span,
-            ..
-        } = &import.payload
-        else {
-            continue;
-        };
-        let Some(signature_record) = image
-            .signatures
-            .iter()
-            .find(|record| record.name == *signature)
-        else {
-            diagnostics.push(
-                Diagnostic::error(
-                    VFY6,
-                    format!(
-                        "function import @{} refers to unknown signature ${signature}",
-                        import.symbol
-                    ),
-                )
-                .with_primary_span(*signature_span),
-            );
-            continue;
-        };
-        if import.module.kind == ImportModuleKind::Platform
-            && signature_record.convention != TextCallingConvention::C
-        {
-            diagnostics.push(
-                Diagnostic::error(
-                    VFY6,
-                    format!(
-                        "platform function import @{} must use a c signature",
-                        import.symbol
-                    ),
-                )
-                .with_primary_span(*signature_span),
-            );
-        }
-    }
-    diagnostics
+    image.signatures.iter().flat_map(verify_signature).collect()
 }
 
 fn verify_signature(signature: &TextSignature) -> Vec<Diagnostic> {

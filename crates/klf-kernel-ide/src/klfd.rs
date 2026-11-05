@@ -40,15 +40,15 @@ pub(crate) fn package(builder: &mut Builder<'_>, root: &Path) {
     let mut sources = Vec::new();
     let mut ids: HashMap<String, FileId> = HashMap::new();
     for source in package.sources() {
-        let path = root.join(&source.name);
+        let path = root.join(source.name.as_ref());
         let text = builder
             .text(&path)
             .unwrap_or_else(|| source.text.to_string());
         let file = builder.file(&path);
-        ids.insert(source.name.clone(), file);
+        ids.insert(source.name.to_string(), file);
         outline(
             builder,
-            &SourceFile::new(file, source.name.as_str(), text.as_str()),
+            &SourceFile::new(file, source.name.as_ref(), text.as_str()),
         );
         sources.push(DefinitionSource::new(source.name.clone(), text));
     }

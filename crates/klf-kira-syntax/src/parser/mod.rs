@@ -162,7 +162,7 @@ impl Parser<'_> {
         self.skip_newlines();
         while self.at(TokenKind::Import) {
             if let Some(import) = self.parse_import() {
-                imports.push(import);
+                imports.push(std::sync::Arc::new(import));
             }
             self.skip_newlines();
         }
@@ -173,7 +173,7 @@ impl Parser<'_> {
             }
             let before = self.pos;
             if let Some(decl) = self.parse_decl() {
-                decls.push(decl);
+                decls.push(std::sync::Arc::new(decl));
             } else {
                 self.recover_to_separator();
             }

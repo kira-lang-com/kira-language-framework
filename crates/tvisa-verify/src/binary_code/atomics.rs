@@ -1,61 +1,9 @@
-use std::collections::HashSet;
-
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tvisa_format::{
     BinaryFunctionBody, BinaryInstruction, BinaryOperand, TvisaValueTypeRecord, TypeSection,
 };
 
 const VFY3: Code = Code::new(Dialect::Tvisa, Area::Verifier, 3);
-
-pub(super) fn gpu_capability_requirements(
-    body: &BinaryFunctionBody,
-    value_types: &[Option<u64>],
-    types: &TypeSection,
-) -> HashSet<(u8, &'static str)> {
-    let mut required = HashSet::new();
-    for instruction in body
-        .blocks
-        .iter()
-        .flat_map(|block| &block.instructions)
-        .filter(|instruction| matches!(instruction.opcode, 0x200..=0x203))
-    {
-        let values = value_operands(instruction);
-        let type_index = match instruction.opcode {
-            0x200 => type_operand(instruction),
-            0x201 => values
-                .first()
-                .and_then(|value| value_type(*value, value_types)),
-            0x202 | 0x203 => values
-                .get(1)
-                .and_then(|value| value_type(*value, value_types)),
-            _ => None,
-        };
-        let Some(type_index) = type_index else {
-            continue;
-        };
-        if contains_float16(types, type_index, &mut HashSet::new()) {
-            required.insert((2, "float16.atomics"));
-        }
-        if super::instruction_types::storage_size(types, type_index) == Some(16) {
-            required.insert((1, "atomic128"));
-        }
-    }
-    required
-}
-
-fn contains_float16(types: &TypeSection, type_index: u64, visited: &mut HashSet<u64>) -> bool {
-    if !visited.insert(type_index) {
-        return false;
-    }
-    match types.value_types.get(type_index as usize) {
-        Some(TvisaValueTypeRecord::Float { tag: 0x02 }) => true,
-        Some(
-            TvisaValueTypeRecord::FixedVector { element_type, .. }
-            | TvisaValueTypeRecord::ScalableVector { element_type },
-        ) => contains_float16(types, *element_type, visited),
-        _ => false,
-    }
-}
 
 pub(super) fn verify_function(
     body: &BinaryFunctionBody,

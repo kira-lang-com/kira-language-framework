@@ -4,16 +4,6 @@ use crate::{BinaryModule, FormatError};
 mod encode;
 mod values;
 
-impl BinaryConstantTable {
-    pub fn encode(
-        &self,
-        strings: &crate::StringTable,
-        types: &BinaryTypeTable,
-    ) -> Result<Vec<u8>, FormatError> {
-        encode::encode_constant_table(self, strings, types)
-    }
-}
-
 impl BinaryModule {
     /// Decodes CONSTANTS using the already decoded type table.
     pub fn constant_table(

@@ -1,5 +1,5 @@
 use crate::leb::{read_uleb, write_uleb};
-use crate::{BinaryModule, FormatError, StringTable};
+use crate::{BinaryModule, FormatError, StringTable, StringTableBuilder};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BinaryImportKind {
@@ -24,8 +24,6 @@ pub struct BinaryImportedEntity {
     pub name: String,
     pub platform_symbol: Option<String>,
     pub type_index: u64,
-    pub required_entitlements: Vec<String>,
-    pub implied_entitlements: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,12 +35,27 @@ pub struct BinaryImport {
     pub entities: Vec<BinaryImportedEntity>,
 }
 
+impl BinaryImport {
+    /// Adds this import's strings in binary field order to the canonical table.
+    pub fn intern_strings(&self, strings: &mut StringTableBuilder) -> Result<(), FormatError> {
+        intern_string(strings, &self.name)?;
+        for entity in &self.entities {
+            intern_string(strings, &entity.name)?;
+            if let Some(symbol) = &entity.platform_symbol {
+                intern_string(strings, symbol)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Encodes IMPORTS records in their declaration order with minimal ULEB indices.
 pub fn encode_imports(
     imports: &[BinaryImport],
     strings: &StringTable,
 ) -> Result<Vec<u8>, FormatError> {
     let mut bytes = Vec::new();
-    write_count(imports.len(), &mut bytes)?;
+    write_count(&mut bytes, imports.len())?;
     for import in imports {
         if import.name.is_empty() {
             return Err(FormatError::malformed(None, "IMPORTS module name is empty"));
@@ -64,84 +77,88 @@ pub fn encode_imports(
         if import.weak && import.kind != BinaryImportKind::Platform {
             return Err(FormatError::malformed(
                 None,
-                "only platform imports may be weak",
+                "weak is valid only for platform imports",
             ));
         }
+
         bytes.push(kind);
-        write_string(&import.name, strings, &mut bytes)?;
+        write_string_index(&mut bytes, strings, &import.name)?;
         bytes.extend_from_slice(&import.abi_uuid);
         bytes.push(u8::from(import.weak));
-        write_count(import.entities.len(), &mut bytes)?;
+        write_count(&mut bytes, import.entities.len())?;
         for entity in &import.entities {
-            let kind = match entity.kind {
-                BinaryImportEntityKind::Function => 0,
-                BinaryImportEntityKind::Global if import.kind != BinaryImportKind::Platform => 1,
-                BinaryImportEntityKind::Type if import.kind != BinaryImportKind::Platform => 2,
-                BinaryImportEntityKind::Witness if import.kind != BinaryImportKind::Platform => 3,
-                BinaryImportEntityKind::Descriptor if import.kind != BinaryImportKind::Platform => {
-                    4
-                }
-                BinaryImportEntityKind::PlatformData
-                    if import.kind == BinaryImportKind::Platform =>
-                {
-                    5
-                }
-                _ => {
-                    return Err(FormatError::malformed(
-                        None,
-                        "invalid IMPORTS entity kind for module kind",
-                    ));
-                }
-            };
             if entity.name.is_empty() {
                 return Err(FormatError::malformed(None, "IMPORTS entity name is empty"));
             }
-            bytes.push(kind);
-            write_string(&entity.name, strings, &mut bytes)?;
+            let entity_kind = match (import.kind, entity.kind) {
+                (_, BinaryImportEntityKind::Function) => 0,
+                (BinaryImportKind::Platform, BinaryImportEntityKind::PlatformData) => 5,
+                (BinaryImportKind::Platform, _) => {
+                    return Err(FormatError::malformed(
+                        None,
+                        "invalid IMPORTS entity kind for platform import",
+                    ));
+                }
+                (_, BinaryImportEntityKind::Global) => 1,
+                (_, BinaryImportEntityKind::Type) => 2,
+                (_, BinaryImportEntityKind::Witness) => 3,
+                (_, BinaryImportEntityKind::Descriptor) => 4,
+                (_, BinaryImportEntityKind::PlatformData) => {
+                    return Err(FormatError::malformed(
+                        None,
+                        "platform data is valid only for platform imports",
+                    ));
+                }
+            };
+            bytes.push(entity_kind);
+            write_string_index(&mut bytes, strings, &entity.name)?;
             match (import.kind, entity.platform_symbol.as_deref()) {
                 (BinaryImportKind::Platform, Some(symbol)) if !symbol.is_empty() => {
-                    write_string(symbol, strings, &mut bytes)?;
+                    write_string_index(&mut bytes, strings, symbol)?;
                 }
                 (BinaryImportKind::Platform, _) => {
                     return Err(FormatError::malformed(
                         None,
-                        "platform import symbol is missing or empty",
+                        "platform import entity is missing its symbol",
                     ));
                 }
                 (_, None) => {}
                 (_, Some(_)) => {
                     return Err(FormatError::malformed(
                         None,
-                        "non-platform import has a platform symbol",
+                        "non-platform import entity cannot have a platform symbol",
                     ));
                 }
             }
-            write_index(entity.type_index, &mut bytes)?;
-            if (import.kind != BinaryImportKind::Ridl
-                || entity.kind != BinaryImportEntityKind::Function)
-                && (!entity.required_entitlements.is_empty()
-                    || !entity.implied_entitlements.is_empty())
-            {
-                return Err(FormatError::malformed(
-                    None,
-                    "only RIDL function imports may declare entitlement metadata",
-                ));
-            }
-            write_names(
-                &entity.required_entitlements,
-                strings,
-                "@Requires",
-                &mut bytes,
-            )?;
-            write_names(
-                &entity.implied_entitlements,
-                strings,
-                "LibTessera",
-                &mut bytes,
-            )?;
+            write_uleb(entity.type_index, &mut bytes)
+                .map_err(|error| FormatError::malformed(None, error.to_string()))?;
         }
     }
     Ok(bytes)
+}
+
+fn intern_string(strings: &mut StringTableBuilder, value: &str) -> Result<(), FormatError> {
+    strings
+        .intern(value)
+        .map(|_| ())
+        .map_err(|error| FormatError::malformed(None, error.message))
+}
+
+fn write_string_index(
+    bytes: &mut Vec<u8>,
+    strings: &StringTable,
+    value: &str,
+) -> Result<(), FormatError> {
+    let index = strings
+        .index_of(value)
+        .ok_or_else(|| FormatError::malformed(None, "IMPORTS string is missing from STRINGS"))?;
+    write_uleb(index, bytes).map_err(|error| FormatError::malformed(None, error.to_string()))
+}
+
+fn write_count(bytes: &mut Vec<u8>, count: usize) -> Result<(), FormatError> {
+    let count = u64::try_from(count)
+        .map_err(|_| FormatError::malformed(None, "IMPORTS count does not fit in ULEB128"))?;
+    write_uleb(count, bytes).map_err(|error| FormatError::malformed(None, error.to_string()))
 }
 
 impl BinaryModule {
@@ -201,9 +218,9 @@ impl BinaryModule {
             }
 
             let minimum_entity_bytes = if kind == BinaryImportKind::Platform {
-                6
+                4
             } else {
-                5
+                3
             };
             let entity_count = read_count(&bytes, &mut cursor, minimum_entity_bytes)?;
             let mut entities = reserve(entity_count, &bytes, cursor)?;
@@ -242,24 +259,11 @@ impl BinaryModule {
                     None
                 };
                 let type_index = read_index(&bytes, &mut cursor)?;
-                let required_entitlements = read_names(&bytes, &mut cursor, &strings, "@Requires")?;
-                let implied_entitlements = read_names(&bytes, &mut cursor, &strings, "LibTessera")?;
-                if (kind != BinaryImportKind::Ridl
-                    || entity_kind != BinaryImportEntityKind::Function)
-                    && (!required_entitlements.is_empty() || !implied_entitlements.is_empty())
-                {
-                    return Err(FormatError::malformed(
-                        Some(cursor),
-                        "entitlement metadata requires a RIDL function import",
-                    ));
-                }
                 entities.push(BinaryImportedEntity {
                     kind: entity_kind,
                     name,
                     platform_symbol,
                     type_index,
-                    required_entitlements,
-                    implied_entitlements,
                 });
             }
             imports.push(BinaryImport {
@@ -293,76 +297,6 @@ fn read_string(
         .get(index)
         .map(str::to_owned)
         .ok_or_else(|| FormatError::malformed(Some(offset), "IMPORTS string index is out of range"))
-}
-
-fn write_string(
-    value: &str,
-    strings: &StringTable,
-    bytes: &mut Vec<u8>,
-) -> Result<(), FormatError> {
-    let index = strings
-        .index_of(value)
-        .ok_or_else(|| FormatError::malformed(None, "IMPORTS string is absent from STRINGS"))?;
-    let index = u64::try_from(index)
-        .map_err(|_| FormatError::malformed(None, "IMPORTS string index overflows"))?;
-    write_index(index, bytes)
-}
-
-fn write_names(
-    values: &[String],
-    strings: &StringTable,
-    label: &str,
-    bytes: &mut Vec<u8>,
-) -> Result<(), FormatError> {
-    write_count(values.len(), bytes)?;
-    let mut previous: Option<&str> = None;
-    for value in values {
-        if value.is_empty() || previous.is_some_and(|prior| prior.as_bytes() >= value.as_bytes()) {
-            return Err(FormatError::malformed(
-                None,
-                format!("IMPORTS {label} entitlements must be nonempty and ordered"),
-            ));
-        }
-        previous = Some(value);
-        write_string(value, strings, bytes)?;
-    }
-    Ok(())
-}
-
-fn read_names(
-    bytes: &[u8],
-    cursor: &mut usize,
-    strings: &StringTable,
-    label: &str,
-) -> Result<Vec<String>, FormatError> {
-    let count = read_count(bytes, cursor, 1)?;
-    let mut values = reserve(count, bytes, *cursor)?;
-    for _ in 0..count {
-        let name = read_string(bytes, cursor, strings)?;
-        if name.is_empty()
-            || values
-                .last()
-                .is_some_and(|previous: &String| previous.as_bytes() >= name.as_bytes())
-        {
-            return Err(FormatError::malformed(
-                Some(*cursor),
-                format!("IMPORTS {label} entitlements are empty or unordered"),
-            ));
-        }
-        values.push(name);
-    }
-    Ok(values)
-}
-
-fn write_count(count: usize, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    let count = u64::try_from(count)
-        .map_err(|_| FormatError::malformed(None, "IMPORTS count overflows"))?;
-    write_index(count, bytes)
-}
-
-fn write_index(index: u64, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(index, bytes)
-        .map_err(|error| FormatError::malformed(None, format!("IMPORTS encoding failed: {error}")))
 }
 
 fn read_index(bytes: &[u8], cursor: &mut usize) -> Result<u64, FormatError> {

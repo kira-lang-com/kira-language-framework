@@ -49,7 +49,7 @@ pub fn verify_module_functions(
     // batches of functions in turn and their diagnostics join in module order.
     const BATCH: usize = 32;
     let index = klf_kir::ModuleIndex::of(module);
-    let verify_batch = |functions: &[Function]| {
+    let verify_batch = |functions: &[std::sync::Arc<Function>]| {
         let mut diagnostics = Vec::new();
         for function in functions {
             if !chosen(function) {
@@ -66,7 +66,7 @@ pub fn verify_module_functions(
         }
         diagnostics
     };
-    let batches: Vec<&[Function]> = module.functions.chunks(BATCH).collect();
+    let batches: Vec<&[std::sync::Arc<Function>]> = module.functions.chunks(BATCH).collect();
     let threads = std::thread::available_parallelism()
         .map_or(1, std::num::NonZeroUsize::get)
         .min(batches.len());

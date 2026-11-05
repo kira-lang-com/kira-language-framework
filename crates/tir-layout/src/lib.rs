@@ -9,3 +9,6 @@ pub use model::{
     DefinitionKind, EnumVariant, FieldLayout, Layout, LayoutError, LayoutField, LayoutRule,
     NominalDefinition, NominalLayout,
 };
+
+#[cfg(test)]
+mod tests;

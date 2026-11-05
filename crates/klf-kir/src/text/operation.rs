@@ -152,11 +152,7 @@ fn write_arithmetic(
             addend,
         } => write!(formatter, "fma %{first}, %{second}, %{addend}"),
         Operation::Convert { kind, value, ty } => {
-            let saturating = if kind.uses_saturating_marker() {
-                " [sat]"
-            } else {
-                ""
-            };
+            let saturating = if kind.is_saturating() { " [sat]" } else { "" };
             write!(
                 formatter,
                 "{}{saturating} %{value} to {ty}",

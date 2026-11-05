@@ -1,11 +1,10 @@
-use std::fmt;
 use std::io::{Cursor, Read, Write};
 
 use tir_core::{ContentHash, ContentHasher};
-use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
 use tir_format::{StringTable, StringTableError, StringTableValidator};
 use tir_target::Profile;
 
+pub use crate::error::FormatError;
 use crate::function_index::FunctionIndexValidator;
 
 pub const TVISA_HEADER_SIZE: usize = 64;
@@ -149,8 +148,7 @@ pub struct TvisaImage {
     pub content_hash: ContentHash,
 }
 
-/// Collects canonical section payloads and assembles a TVISA image container.
-/// Section encoding and cross-section references remain the caller's job.
+/// Builds a TVISA image from an explicit header and its section payloads.
 #[derive(Clone, Debug)]
 pub struct TvisaImageBuilder {
     header: Header,
@@ -159,61 +157,36 @@ pub struct TvisaImageBuilder {
 
 impl TvisaImageBuilder {
     #[must_use]
-    pub fn new(year: u8, month: u8, week: u8, profile: Profile, function_count: u32) -> Self {
+    pub const fn new(header: Header) -> Self {
         Self {
-            header: Header {
-                year,
-                month,
-                week,
-                revision: 0,
-                flags: 0,
-                profile,
-                section_count: 0,
-                function_count,
-                file_size: 0,
-            },
+            header,
             sections: Vec::new(),
         }
     }
 
-    pub fn set_canonical(&mut self, canonical: bool) {
-        if canonical {
-            self.header.flags |= HEADER_CANONICAL;
-        } else {
-            self.header.flags &= !HEADER_CANONICAL;
-        }
-    }
-
-    pub fn add_section(&mut self, section: Section) {
+    pub fn add_section(&mut self, section: Section) -> &mut Self {
         self.sections.push(section);
+        self
     }
 
-    pub fn add_uncompressed_section(&mut self, kind: u32, payload: Vec<u8>) {
-        self.add_section(Section::from_uncompressed(kind, payload));
+    pub fn with_section(mut self, section: Section) -> Self {
+        self.sections.push(section);
+        self
     }
 
-    pub fn finish(self) -> Result<TvisaImage, FormatError> {
-        let mut image = TvisaImage {
+    pub fn encode(self) -> Result<Vec<u8>, FormatError> {
+        let image = TvisaImage {
             header: self.header,
             sections: self.sections,
             content_hash: ContentHash::of(&[]),
         };
-        let (header, content_hash) = image.write_uncompressed_container(&mut std::io::sink())?;
-        image.header = header;
-        image.content_hash = content_hash;
-        Ok(image)
+        let mut bytes = Vec::new();
+        image.write_uncompressed_container(&mut bytes)?;
+        Ok(bytes)
     }
 
-    pub fn write_uncompressed_container(
-        self,
-        output: &mut impl Write,
-    ) -> Result<(Header, ContentHash), FormatError> {
-        TvisaImage {
-            header: self.header,
-            sections: self.sections,
-            content_hash: ContentHash::of(&[]),
-        }
-        .write_uncompressed_container(output)
+    pub fn build(self) -> Result<TvisaImage, FormatError> {
+        TvisaImage::decode(&self.encode()?)
     }
 }
 
@@ -537,47 +510,6 @@ fn encode_header(header: Header, content_hash: ContentHash) -> [u8; TVISA_HEADER
     bytes[56..64].copy_from_slice(&header.file_size.to_le_bytes());
     bytes
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FormatError {
-    pub diagnostic: Diagnostic,
-    pub offset: Option<usize>,
-}
-
-impl FormatError {
-    pub(crate) fn malformed(offset: Option<usize>, message: impl Into<String>) -> Self {
-        Self::coded(offset, 1, message)
-    }
-
-    pub(crate) fn noncanonical(offset: Option<usize>, message: impl Into<String>) -> Self {
-        Self::coded(offset, 2, message)
-    }
-
-    pub(crate) fn unknown_section(offset: Option<usize>, message: impl Into<String>) -> Self {
-        Self::coded(offset, 4, message)
-    }
-
-    pub(crate) fn unsupported_type(offset: Option<usize>, message: impl Into<String>) -> Self {
-        Self::coded(offset, 3, message)
-    }
-
-    fn coded(offset: Option<usize>, number: u16, message: impl Into<String>) -> Self {
-        let mut diagnostic =
-            Diagnostic::error(Code::new(Dialect::Tvisa, Area::Encoding, number), message);
-        if let Some(offset) = offset {
-            diagnostic = diagnostic.with_primary_span(Span::new(offset, offset.saturating_add(1)));
-        }
-        Self { diagnostic, offset }
-    }
-}
-
-impl fmt::Display for FormatError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.diagnostic, formatter)
-    }
-}
-
-impl std::error::Error for FormatError {}
 
 fn validate_strings(section: &Section) -> Result<(), FormatError> {
     let mut validator = StringTableValidator::new(section.uncompressed_size);

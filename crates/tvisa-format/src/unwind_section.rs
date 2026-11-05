@@ -1,4 +1,4 @@
-use tir_format::leb::{read_uleb, write_uleb};
+use tir_format::leb::read_uleb;
 
 use crate::binary::{FormatError, TvisaImage};
 
@@ -13,51 +13,6 @@ pub struct UnwindFunctionRecord {
     pub terminate_kind: u8,
     pub type_ids: Vec<u64>,
     pub filters: Vec<u64>,
-}
-
-impl UnwindSection {
-    /// Encode UNWIND records in their required function-index order.
-    pub fn encode(&self) -> Result<Vec<u8>, FormatError> {
-        if self.functions.is_empty() {
-            return Err(malformed(0, "UNWIND must be absent when it has no records"));
-        }
-
-        let mut bytes = Vec::new();
-        write_index(
-            u64::try_from(self.functions.len())
-                .map_err(|_| malformed(0, "UNWIND function count overflows"))?,
-            &mut bytes,
-        )?;
-        for function in &self.functions {
-            write_index(function.function_index, &mut bytes)?;
-            bytes.push(function.terminate_kind);
-            write_index(
-                u64::try_from(function.type_ids.len())
-                    .map_err(|_| malformed(bytes.len(), "UNWIND type-id count overflows"))?,
-                &mut bytes,
-            )?;
-            for type_id in &function.type_ids {
-                bytes.extend_from_slice(&type_id.to_le_bytes());
-            }
-            write_index(
-                u64::try_from(function.filters.len())
-                    .map_err(|_| malformed(bytes.len(), "UNWIND filter count overflows"))?,
-                &mut bytes,
-            )?;
-            for filter in &function.filters {
-                write_index(*filter, &mut bytes)?;
-            }
-        }
-
-        let decoded = decode(&bytes)?;
-        if decoded != *self {
-            return Err(malformed(
-                bytes.len(),
-                "UNWIND records are inconsistent with their binary encoding",
-            ));
-        }
-        Ok(bytes)
-    }
 }
 
 impl TvisaImage {
@@ -162,10 +117,6 @@ fn read_index(bytes: &[u8], cursor: &mut usize, field: &str) -> Result<u64, Form
     let offset = *cursor;
     read_uleb(bytes, cursor)
         .map_err(|error| malformed(offset, format!("invalid {field} ULEB128: {error:?}")))
-}
-
-fn write_index(value: u64, bytes: &mut Vec<u8>) -> Result<(), FormatError> {
-    write_uleb(value, bytes).map_err(|error| malformed(bytes.len(), error.to_string()))
 }
 
 fn read_byte(bytes: &[u8], cursor: &mut usize, field: &str) -> Result<u8, FormatError> {

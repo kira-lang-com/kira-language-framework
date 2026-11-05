@@ -1,24 +1,8 @@
 use std::collections::HashSet;
 
-use tir_format::{
-    BinaryFunctionType, BinaryInstruction, BinaryOperand, BinaryType, BinaryTypeTable,
-};
+use tir_format::{BinaryFunctionType, BinaryType, BinaryTypeTable};
 
 use super::helpers::{contains_generic, frame_type, result_edge_types, type_at};
-
-pub(super) fn call_type_arguments(
-    instruction: &BinaryInstruction,
-    generic_count: usize,
-) -> Option<&[u64]> {
-    let arguments = instruction
-        .operands
-        .iter()
-        .find_map(|operand| match operand {
-            BinaryOperand::Types(arguments) => Some(arguments.as_slice()),
-            _ => None,
-        })?;
-    (arguments.len() == generic_count).then_some(arguments)
-}
 
 pub(super) fn specialized_result_edge_types(
     types: &BinaryTypeTable,

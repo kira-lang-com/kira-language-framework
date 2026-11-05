@@ -16,9 +16,7 @@ mod call_types;
 pub(crate) use call_conventions::{CallConventions, callable_conventions};
 
 const V1: Code = Code::new(Dialect::Tir, Area::Verifier, 1);
-const V2: Code = Code::new(Dialect::Tir, Area::Verifier, 2);
 const V10: Code = Code::new(Dialect::Tir, Area::Verifier, 10);
-const V12: Code = Code::new(Dialect::Tir, Area::Verifier, 12);
 const V19: Code = Code::new(Dialect::Tir, Area::Verifier, 19);
 
 pub(super) fn verify_module_calls(
@@ -28,7 +26,7 @@ pub(super) fn verify_module_calls(
     call_conventions: &CallConventions,
 ) -> Vec<Diagnostic> {
     let callables = callable_failures(module);
-    let mut diagnostics = call_conventions.validation_diagnostics().to_vec();
+    let mut diagnostics = Vec::new();
     for item in module
         .items
         .iter()
@@ -38,12 +36,12 @@ pub(super) fn verify_module_calls(
         let Ok(Some(body)) = parse_function_body(source) else {
             continue;
         };
-        let value_types = crate::text_types::inferred_value_types(
+        let value_types = crate::text_types::inferred_value_types_with_calls(
             source,
             &body,
             layouts,
             policies,
-            Some(call_conventions),
+            call_conventions,
         );
         let Ok(tokens) = lex(source) else {
             continue;
@@ -52,15 +50,6 @@ pub(super) fn verify_module_calls(
             .iter()
             .position(|token| is_punctuation(token, '{'))
             .unwrap_or(tokens.len());
-        let header = &tokens[..header_end];
-        if header.iter().any(|token| atom(token) == Some("exported"))
-            && matches!(tir_format::function_uses_c_abi(source), Ok(Some(true)))
-        {
-            diagnostics.push(
-                Diagnostic::error(V12, "exported functions must use the RIDL ABI")
-                    .with_primary_span(item.span),
-            );
-        }
         let nounwind = tokens[..header_end]
             .iter()
             .any(|token| atom(token) == Some("nounwind"));
@@ -72,25 +61,19 @@ pub(super) fn verify_module_calls(
             item.span.start,
         ));
         for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
-            if (instruction.opcode == "call.indirect"
-                || instruction.opcode == "try.call"
-                    && indirect_call_type(source, instruction).is_some())
-                && let Some((function, _)) = indirect_call_type(source, instruction)
+            if instruction.opcode == "call.indirect"
+                && let Some((declared, _)) = indirect_call_type(source, instruction)
                 && let Some((callee, _)) = crate::ssa::text_value_uses(instruction).first()
                 && let Some(actual) = value_types.get(callee)
+                && actual != &Type::Function(declared)
             {
-                let expected = Type::Function(function);
-                if actual != &expected {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            V19,
-                            format!(
-                                "indirect call declares function type {expected}, but %{callee} has type {actual}"
-                            ),
-                        )
-                        .with_primary_span(shift_span(instruction.span, item.span.start)),
-                    );
-                }
+                diagnostics.push(
+                    Diagnostic::error(
+                        V19,
+                        "indirect call site's function type does not match the callee value type",
+                    )
+                    .with_primary_span(shift_span(instruction.span, item.span.start)),
+                );
             }
             if instruction.opcode == "invoke" && nounwind {
                 diagnostics.push(

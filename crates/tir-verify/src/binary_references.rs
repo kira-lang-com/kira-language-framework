@@ -63,6 +63,17 @@ pub(super) fn verify_binary_references(
                     ),
                 ));
             }
+            if entity.kind == BinaryImportEntityKind::Type
+                && !matches!(ty, BinaryType::Nominal { .. })
+            {
+                diagnostics.push(Diagnostic::error(
+                    V2,
+                    format!(
+                        "type import {}.{} does not have a nominal type",
+                        import.name, entity.name
+                    ),
+                ));
+            }
         }
     }
 

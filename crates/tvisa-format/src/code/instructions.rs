@@ -639,11 +639,6 @@ pub(super) fn decode_instruction(
             }
         }
     };
-    let mut wire_bytes = Vec::new();
-    wire_bytes
-        .try_reserve_exact(cursor.saturating_sub(start))
-        .map_err(|_| malformed(base + start, "instruction byte allocation failed"))?;
-    wire_bytes.extend_from_slice(&bytes[start..*cursor]);
     Ok(BinaryInstruction {
         opcode,
         modifiers,
@@ -652,6 +647,5 @@ pub(super) fn decode_instruction(
         normal_edge_result_count,
         terminator,
         operands,
-        wire_bytes,
     })
 }

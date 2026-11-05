@@ -3,32 +3,11 @@ use std::collections::{HashMap, HashSet};
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::StringTable;
 use tvisa_format::{
-    BinaryFunctionBody, BinaryInstruction, BinaryOperand, FunctionRecordSummary, GpuEntryKind,
-    GpuEntryRecord, GpuNodeOutputKind, ImportCounts, TvisaImage, TypeSection, VariantIndex,
+    BinaryFunctionBody, BinaryInstruction, BinaryOperand, GpuEntryKind, GpuEntryRecord, TvisaImage,
+    VariantIndex,
 };
 
 const VFY22: Code = Code::new(Dialect::Tvisa, Area::Verifier, 22);
-const OPTIONAL_CAPABILITIES: [&str; 19] = [
-    "float64",
-    "atomic128",
-    "float16.atomics",
-    "tile",
-    "framebuffer_fetch",
-    "raster_order",
-    "work_graphs",
-    "work_graphs.mesh",
-    "coop.fp8",
-    "coop.blockscaled",
-    "coop.reduce",
-    "compute_derivatives",
-    "float32.denorm_preserve",
-    "sparse_residency",
-    "sampler_feedback",
-    "subgroup_size_control",
-    "triangle_vertex_positions",
-    "shading_rate",
-    "printf",
-];
 
 pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
     if !image.sections.iter().any(|section| section.kind == 11) {
@@ -48,10 +27,6 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
     };
     let functions = match image.function_records(memory_limit) {
         Ok(functions) => functions,
-        Err(error) => return vec![error.diagnostic],
-    };
-    let types = match image.type_section(memory_limit) {
-        Ok(types) => types,
         Err(error) => return vec![error.diagnostic],
     };
     let variants = match image.variant_index(memory_limit) {
@@ -80,9 +55,7 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
         verify_entry(
             entry,
             &bodies,
-            &functions,
-            &imports,
-            &types,
+            imports.functions,
             &visible_targets,
             &variants,
             &strings,
@@ -95,9 +68,7 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
 fn verify_entry(
     entry: &GpuEntryRecord,
     bodies: &HashMap<u64, &BinaryFunctionBody>,
-    functions: &[FunctionRecordSummary],
-    imports: &ImportCounts,
-    types: &TypeSection,
+    import_count: u64,
     visible_targets: &HashMap<u64, Vec<u64>>,
     variants: &VariantIndex,
     strings: &StringTable,
@@ -109,50 +80,6 @@ fn verify_entry(
     let mut pending = vec![entry.function_index];
     let mut visited = HashSet::new();
     let mut required = HashSet::new();
-    match entry.kind {
-        GpuEntryKind::Tile => {
-            required.insert((3, "tile"));
-        }
-        GpuEntryKind::Node => {
-            required.insert((6, "work_graphs"));
-            if entry.node.as_ref().is_some_and(|node| {
-                node.outputs
-                    .iter()
-                    .any(|output| output.kind == GpuNodeOutputKind::Mesh)
-            }) {
-                required.insert((7, "work_graphs.mesh"));
-            }
-        }
-        _ => {}
-    }
-    if entry.subgroup_size_log2 != 0 {
-        required.insert((15, "subgroup_size_control"));
-    }
-    if entry.floating_point_flags & 2 != 0 {
-        required.insert((12, "float32.denorm_preserve"));
-    }
-    if entry
-        .fragment_flags
-        .is_some_and(|flags| flags & (1 << 5) != 0)
-    {
-        required.insert((4, "framebuffer_fetch"));
-    }
-    if entry.stage_output.iter().any(|field| field.semantic == 17) {
-        required.insert((17, "shading_rate"));
-    }
-    let mut type_roots = entry
-        .stage_input
-        .iter()
-        .chain(&entry.stage_output)
-        .map(|field| field.type_index)
-        .chain(
-            entry
-                .specialization_constants
-                .iter()
-                .map(|specialization| specialization.type_index),
-        )
-        .collect::<Vec<_>>();
-    let mut signature_roots = Vec::new();
     let mut specializations = HashMap::new();
     let mut conflicting_specializations = HashSet::new();
     while let Some(function) = pending.pop() {
@@ -162,40 +89,6 @@ fn verify_entry(
         let Some(body) = bodies.get(&function) else {
             continue;
         };
-        if let Some(record) = function
-            .checked_sub(imports.functions)
-            .and_then(|index| usize::try_from(index).ok())
-            .and_then(|index| functions.get(index))
-        {
-            signature_roots.push(record.signature_index);
-            let value_types = crate::binary_code::gpu_value_types(
-                body, record, types, functions, imports, variants,
-            );
-            type_roots.extend(value_types.iter().flatten().copied());
-            required.extend(crate::binary_code::gpu_atomic_capabilities(
-                body,
-                &value_types,
-                types,
-            ));
-            required.extend(
-                crate::binary_gpu_type_capabilities::cooperative_instruction_requirements(
-                    body,
-                    &value_types,
-                    types,
-                ),
-            );
-        }
-        for block in &body.blocks {
-            type_roots.extend(block.parameter_types.iter().copied());
-            for instruction in &block.instructions {
-                type_roots.extend(instruction.operands.iter().filter_map(
-                    |operand| match operand {
-                        BinaryOperand::Type(index) => Some(*index),
-                        _ => None,
-                    },
-                ));
-            }
-        }
         for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
             if instruction.opcode == 0x401 {
                 collect_specialization(
@@ -210,28 +103,15 @@ fn verify_entry(
             pending.extend(
                 callees
                     .into_iter()
-                    .filter(|callee| *callee >= imports.functions && bodies.contains_key(callee)),
+                    .filter(|callee| *callee >= import_count && bodies.contains_key(callee)),
             );
         }
     }
-    required.extend(crate::binary_gpu_type_capabilities::collect(
-        &type_roots,
-        &signature_roots,
-        types,
-    ));
-    for &(bit, name) in &required {
+    for (bit, name) in required {
         if entry.capabilities & (1 << bit) == 0 {
             diagnostics.push(Diagnostic::error(
                 VFY22,
                 format!("GPU {stage} entry lacks the '{name}' capability used by its code"),
-            ));
-        }
-    }
-    for (bit, name) in OPTIONAL_CAPABILITIES.iter().enumerate() {
-        if entry.capabilities & (1 << bit) != 0 && !required.contains(&(bit as u8, *name)) {
-            diagnostics.push(Diagnostic::error(
-                VFY22,
-                format!("GPU {stage} entry declares unused capability '{name}'"),
             ));
         }
     }
@@ -403,14 +283,6 @@ fn verify_stage_instruction(
     };
     if let Some(capability) = capability {
         required.insert(capability);
-    }
-    if matches!(instruction.opcode, 0x402 | 0x403)
-        && instruction
-            .operands
-            .iter()
-            .any(|operand| matches!(operand, BinaryOperand::Index(mask) if mask & (1 << 3) != 0))
-    {
-        required.insert((3, "tile"));
     }
     if instruction.opcode == 0x48d {
         required.insert((14, "sampler_feedback"));

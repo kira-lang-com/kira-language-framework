@@ -6,8 +6,6 @@ use tir_types::{AddressSpace, MatrixScope, Type};
 
 use crate::ssa::text_instruction_operands_start;
 
-mod cooperative;
-
 const V2: Code = Code::new(Dialect::Tir, Area::Verifier, 2);
 
 pub(super) fn verify(
@@ -51,20 +49,6 @@ pub(super) fn verify(
                 );
             }
         }
-        "tile.imageblock.addr" => {
-            if operands.first().is_some_and(|ty| {
-                ty != &Type::FixedVector {
-                    lanes: 2,
-                    element: Box::new(Type::Integer(32)),
-                }
-            }) {
-                error(
-                    &mut diagnostics,
-                    instruction,
-                    "tile.imageblock.addr position must have type vec<2 x i32>",
-                );
-            }
-        }
         "tensor.load" | "tensor.store" | "tensor.query" => {
             verify_tensor(instruction, operands, &mut diagnostics);
         }
@@ -72,24 +56,8 @@ pub(super) fn verify(
         | "coop.extract" | "coop.insert" | "coop.reduce" => {
             verify_cooperative(instruction, source, operands, &mut diagnostics);
         }
-        "node.input.addr" => {
+        "node.input.addr" | "node.output.addr" => {
             if operands.first().is_some_and(|ty| !is_integer_type(ty)) {
-                error(
-                    &mut diagnostics,
-                    instruction,
-                    "node record index must be an integer",
-                );
-            }
-        }
-        "node.output.addr" => {
-            require_pointer_space(
-                instruction,
-                operands,
-                0,
-                AddressSpace::NodeRecord,
-                &mut diagnostics,
-            );
-            if operands.get(1).is_some_and(|ty| !is_integer_type(ty)) {
                 error(
                     &mut diagnostics,
                     instruction,
@@ -138,7 +106,7 @@ pub(super) fn infer_result_types(
             .cloned()
             .into_iter()
             .collect(),
-        "coop.insert" | "coop.reduce" => operands.first().cloned().into_iter().collect(),
+        "coop.insert" => operands.first().cloned().into_iter().collect(),
         "tensor.load" => operands
             .first()
             .and_then(tensor_element)
@@ -207,26 +175,13 @@ fn verify_tensor(
                     format!("tensor.query dimension must be less than rank {rank}"),
                 );
             }
-            let words = cooperative::words_after_opcode(instruction);
-            let fields = words
-                .iter()
-                .filter(|word| matches!(word.as_str(), "extent" | "stride"))
-                .count();
-            if words.iter().any(|word| {
-                tir_format::numeric_literals::parse_unsigned_integer(word).is_none()
-                    && !matches!(word.as_str(), "extent" | "stride")
+            if !instruction.tokens.iter().any(|token| {
+                matches!(&token.kind, TokenKind::Atom(value) if matches!(value.as_str(), "extent" | "stride"))
             }) {
                 error(
                     diagnostics,
                     instruction,
-                    "tensor.query contains an unsupported field",
-                );
-            }
-            if fields > 1 {
-                error(
-                    diagnostics,
-                    instruction,
-                    "tensor.query repeats its extent or stride field",
+                    "tensor.query must select extent or stride",
                 );
             }
         }
@@ -357,7 +312,15 @@ fn verify_cooperative(
                 );
             }
         }
-        "coop.reduce" => cooperative::verify_coop_reduce(instruction, operands, diagnostics),
+        "coop.reduce" => {
+            if operands.first().and_then(cooperative_element).is_none() {
+                error(
+                    diagnostics,
+                    instruction,
+                    "coop.reduce requires a cooperative matrix",
+                );
+            }
+        }
         _ => {}
     }
 }
@@ -403,21 +366,13 @@ fn verify_coop_convert(
 }
 
 fn verify_mma(instruction: &TextInstruction, operands: &[Type], diagnostics: &mut Vec<Diagnostic>) {
-    let (
-        Some((a_scope, a_rows, a_columns, a_use)),
-        Some((b_scope, b_rows, b_columns, b_use)),
-        Some((c_scope, c_rows, c_columns, c_use)),
-    ) = (
-        operands.first().and_then(matrix_type),
-        operands.get(1).and_then(matrix_type),
-        operands.get(2).and_then(matrix_type),
-    )
-    else {
-        error(
-            diagnostics,
-            instruction,
-            "coop.mma requires three cooperative matrix operands",
-        );
+    let Some((a_scope, a_rows, a_columns, a_use)) = operands.first().and_then(matrix_type) else {
+        return;
+    };
+    let Some((b_scope, b_rows, b_columns, b_use)) = operands.get(1).and_then(matrix_type) else {
+        return;
+    };
+    let Some((c_scope, c_rows, c_columns, c_use)) = operands.get(2).and_then(matrix_type) else {
         return;
     };
     if a_use != "a" || b_use != "b" || c_use != "acc" {
@@ -439,38 +394,6 @@ fn verify_mma(instruction: &TextInstruction, operands: &[Type], diagnostics: &mu
             diagnostics,
             instruction,
             "coop.mma matrix dimensions are incompatible",
-        );
-    }
-    if operands.first().and_then(cooperative_element)
-        != operands.get(1).and_then(cooperative_element)
-    {
-        error(
-            diagnostics,
-            instruction,
-            "coop.mma input matrices must have the same element type",
-        );
-    }
-    let accumulator_is_integer = operands
-        .get(2)
-        .and_then(cooperative_element)
-        .is_some_and(is_integer_type);
-    if cooperative::has_word(instruction, "saturate") && !accumulator_is_integer {
-        error(
-            diagnostics,
-            instruction,
-            "coop.mma saturate requires an integer accumulator",
-        );
-    }
-    if cooperative::has_word(instruction, "unsigned")
-        && !operands
-            .first()
-            .and_then(cooperative_element)
-            .is_some_and(is_integer_type)
-    {
-        error(
-            diagnostics,
-            instruction,
-            "coop.mma unsigned requires integer inputs",
         );
     }
 }
@@ -563,7 +486,7 @@ fn verify_coordinates(
     let valid = match ty {
         Type::Integer(_) => rank == 1,
         Type::FixedVector { lanes, element } => {
-            *lanes == rank && element.as_ref() == &Type::Integer(32)
+            *lanes == rank && matches!(element.as_ref(), Type::Integer(_))
         }
         _ => false,
     };

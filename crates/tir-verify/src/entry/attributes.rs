@@ -4,7 +4,6 @@ use tir_format::text::{Token, TokenKind};
 use tir_layout::LayoutEngine;
 use tir_types::Type;
 
-use super::node_attributes;
 use crate::gpu_profile::policy::TypePolicies;
 
 const V15: Code = Code::new(Dialect::Tir, Area::Verifier, 15);
@@ -245,7 +244,7 @@ fn verify_attribute_syntax(source: &str, attributes: &[Token], diagnostics: &mut
         let valid = match name {
             "mesh" => valid_mesh_syntax(arguments),
             "caps" => valid_capability_syntax(arguments),
-            "node" => node_attributes::valid_syntax(source, arguments),
+            "node" => valid_node_syntax(source, arguments),
             _ => true,
         };
         if !valid {
@@ -297,6 +296,107 @@ fn valid_capability_syntax(arguments: &[Token]) -> bool {
         index += 1;
     }
     count > 0
+}
+
+fn valid_node_syntax(source: &str, arguments: &[Token]) -> bool {
+    if arguments
+        .last()
+        .is_some_and(|token| punctuation(token, ','))
+    {
+        return false;
+    }
+    let fields = split_arguments(arguments);
+    if !fields.first().is_some_and(|field| {
+        field.len() == 3
+            && atom_at(field, 0) == Some("launch")
+            && punctuation(&field[1], ':')
+            && atom_at(field, 2)
+                .is_some_and(|value| matches!(value, "broadcast" | "coalescing" | "thread"))
+    }) {
+        return false;
+    }
+    fields.iter().skip(1).all(|field| {
+        field.len() >= 3
+            && atom_at(field, 0).is_some()
+            && punctuation(&field[1], ':')
+            && valid_literal(source, &field[2..])
+    })
+}
+
+fn split_arguments(tokens: &[Token]) -> Vec<&[Token]> {
+    let mut fields = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    for (index, token) in tokens.iter().enumerate() {
+        match token.kind {
+            TokenKind::Punctuation('(') => depth += 1,
+            TokenKind::Punctuation(')') => depth -= 1,
+            TokenKind::Punctuation(',') if depth == 0 => {
+                fields.push(&tokens[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < tokens.len() {
+        fields.push(&tokens[start..]);
+    }
+    fields
+}
+
+fn valid_literal(source: &str, tokens: &[Token]) -> bool {
+    if tokens.len() == 1 {
+        if matches!(tokens[0].kind, TokenKind::String(_)) {
+            return true;
+        }
+        if let Some(value) = atom(&tokens[0]) {
+            return matches!(value, "true" | "false" | "null" | "inf")
+                || numeric_literal(source, tokens);
+        }
+    }
+    if tokens.len() == 2
+        && atom_at(tokens, 0) == Some("b")
+        && matches!(tokens[1].kind, TokenKind::String(_))
+    {
+        return true;
+    }
+    if tokens.len() >= 4
+        && atom_at(tokens, 0) == Some("nan")
+        && punctuation(&tokens[1], '(')
+        && tokens.last().is_some_and(|token| punctuation(token, ')'))
+        && integer_literal(source, &tokens[2..tokens.len() - 1])
+    {
+        return true;
+    }
+    numeric_literal(source, tokens)
+}
+
+fn numeric_literal(source: &str, tokens: &[Token]) -> bool {
+    let Some(text) = literal_text(source, tokens) else {
+        return false;
+    };
+    let cleaned = text.replace('_', "");
+    parse_integer_text(text).is_some() || cleaned.parse::<f64>().is_ok()
+}
+
+fn integer_literal(source: &str, tokens: &[Token]) -> bool {
+    literal_text(source, tokens)
+        .and_then(parse_integer_text)
+        .is_some()
+}
+
+fn literal_text<'a>(source: &'a str, tokens: &[Token]) -> Option<&'a str> {
+    let Some(first) = tokens.first() else {
+        return None;
+    };
+    let Some(last) = tokens.last() else {
+        return None;
+    };
+    source.get(first.span.start..last.span.end)
+}
+
+fn parse_integer_text(text: &str) -> Option<i128> {
+    tir_format::numeric_literals::parse_signed_integer(text)
 }
 
 fn verify_subgroup_size(header: &[Token], diagnostics: &mut Vec<Diagnostic>) {
@@ -381,7 +481,25 @@ fn named_count(tokens: &[Token], name: &str) -> usize {
 }
 
 fn verify_node_attribute(stage: &str, header: &[Token], diagnostics: &mut Vec<Diagnostic>) {
-    node_attributes::verify(stage, header, diagnostics);
+    let nodes = calls(header, "node");
+    if stage == "node" && nodes.len() != 1 {
+        diagnostics.push(error("node entry requires exactly one node attribute"));
+    }
+    if stage != "node" && !nodes.is_empty() {
+        diagnostics.push(error(format!("node is not valid for {stage} entries")));
+    }
+    for (start, end) in nodes {
+        let args = &header[start + 2..end];
+        let launch = named_value(args, "launch");
+        if named_count(args, "launch") != 1
+            || !launch.is_some_and(|value| matches!(value, "broadcast" | "coalescing" | "thread"))
+        {
+            diagnostics.push(
+                error("node launch must be broadcast, coalescing, or thread")
+                    .with_primary_span(header[start].span),
+            );
+        }
+    }
 }
 
 fn verify_fp_attribute(header: &[Token], diagnostics: &mut Vec<Diagnostic>) {

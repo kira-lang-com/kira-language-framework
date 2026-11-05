@@ -284,13 +284,8 @@ fn consumed_values(
         "closure.new" => uses.into_iter().skip(1).take(1).collect(),
         "guard" => uses.into_iter().skip(1).collect(),
         "deopt" => uses,
-        "call" | "call.foreign" | "try.call" | "invoke" | "tail.call" | "coro.start" => {
-            direct_call_arguments(instruction, call_conventions)
-        }
-        "call.variadic" => direct_call_arguments(instruction, call_conventions)
-            .into_iter()
-            .chain(super::variadic_argument_names(instruction))
-            .collect(),
+        "call" | "call.foreign" | "call.variadic" | "try.call" | "invoke" | "tail.call"
+        | "coro.start" => direct_call_arguments(instruction, call_conventions),
         "call.witness" | "call.vtable" => call_conventions
             .special_call(instruction, source)
             .map(|(arguments, conventions)| owned_arguments(arguments, &conventions))

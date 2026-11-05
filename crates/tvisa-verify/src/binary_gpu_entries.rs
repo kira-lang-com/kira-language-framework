@@ -153,47 +153,6 @@ fn verify_entry_signature(
         ));
     }
 
-    let mut input_item = 0;
-    if let Some(root) = &entry.root {
-        let root_matches = matches!(
-            signature.parameters.first(),
-            Some(ParameterItemSummary::Leaf { type_index })
-                if matches!(
-                    usize::try_from(*type_index)
-                        .ok()
-                        .and_then(|index| types.value_types.get(index)),
-                    Some(TvisaValueTypeRecord::Pointer { address_space })
-                        if *address_space == root.address_space
-                )
-        );
-        if !root_matches {
-            diagnostics.push(Diagnostic::error(
-                VFY22,
-                format!(
-                    "GPU entry function @{} root must be its first leaf pointer parameter in the recorded address space",
-                    function.name
-                ),
-            ));
-        }
-        input_item += 1;
-    }
-    if entry.immediate_size != 0 {
-        match signature.parameters.get(input_item) {
-            Some(
-                ParameterItemSummary::Leaf { .. }
-                | ParameterItemSummary::Group(_)
-                | ParameterItemSummary::ByRef { .. },
-            ) => {}
-            _ => diagnostics.push(Diagnostic::error(
-                VFY22,
-                format!(
-                    "GPU entry function @{} has immediate data but no valid immediate parameter item",
-                    function.name
-                ),
-            )),
-        }
-    }
-
     for specialization in &entry.specialization_constants {
         if !valid_specialization_type(specialization.type_index, entry.capabilities, types) {
             diagnostics.push(Diagnostic::error(
@@ -231,9 +190,7 @@ fn verify_entry_signature(
     let parameter_types = flatten_parameter_types(&signature.parameters);
     if !entry.stage_input.is_empty()
         && !contains_type_sequence(
-            parameter_types
-                .get(entry_input_value_count(entry, signature)..)
-                .unwrap_or(&[]),
+            &parameter_types,
             &entry
                 .stage_input
                 .iter()
@@ -290,28 +247,6 @@ fn verify_entry_signature(
             ),
         ));
     }
-}
-
-fn entry_input_value_count(
-    entry: &tvisa_format::GpuEntryRecord,
-    signature: &tvisa_format::SignatureSummary,
-) -> usize {
-    let mut item_index = 0;
-    let mut value_count = 0;
-    if entry.root.is_some() {
-        item_index += 1;
-        value_count += 1;
-    }
-    if entry.immediate_size != 0 {
-        if let Some(item) = signature.parameters.get(item_index) {
-            value_count += match item {
-                ParameterItemSummary::Group(group) => group.members.len(),
-                ParameterItemSummary::Leaf { .. } | ParameterItemSummary::ByRef { .. } => 1,
-                _ => 0,
-            };
-        }
-    }
-    value_count
 }
 
 fn valid_specialization_type(type_index: u64, capabilities: u64, types: &TypeSection) -> bool {

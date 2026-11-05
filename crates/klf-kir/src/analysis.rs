@@ -42,7 +42,9 @@ impl<'m> ModuleIndex<'m> {
     pub fn of(module: &'m Module) -> Self {
         let mut functions = HashMap::default();
         for function in &module.functions {
-            functions.entry(function.name.as_str()).or_insert(function);
+            functions
+                .entry(function.name.as_str())
+                .or_insert(function.as_ref());
         }
         let mut types = HashMap::default();
         for declaration in &module.types {

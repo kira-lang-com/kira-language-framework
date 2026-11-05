@@ -9,9 +9,6 @@ const ADDRESS_TAKEN: u64 = 1;
 const ATTRIBUTE_MASK: u64 = (1 << 14) - 1;
 const MAX_FRAME_SLOTS_PER_FUNCTION: u64 = 1 << 20;
 
-mod encode;
-pub use encode::encode_function_records;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FunctionRecordSummary {
     pub name: String,
@@ -45,7 +42,6 @@ pub struct FrameSlotSummary {
     /// 0 CPU stack, 3 GPU threadgroup, 4 GPU thread.
     pub address_space: u8,
     pub flags: u8,
-    pub debug_variable: u64,
 }
 
 impl FunctionRecordSummary {
@@ -270,13 +266,12 @@ fn decode_slots(bytes: &[u8], cursor: &mut usize) -> Result<Vec<FrameSlotSummary
         if flags & !0x1f != 0 {
             return Err(malformed(flags_offset, "reserved frame slot flags are set"));
         }
-        let debug_variable = read_index(bytes, cursor)?;
+        let _debug_variable = read_index(bytes, cursor)?;
         slots.push(FrameSlotSummary {
             size,
             alignment_log2,
             address_space: space,
             flags,
-            debug_variable,
         });
     }
     Ok(slots)
@@ -291,10 +286,6 @@ pub(crate) fn forbidden_type_tag(tag: u32) -> bool {
             tag,
             0xd503_241f | 0xd503_245f | 0xd503_249f | 0xd503_24df | 0xd503_233f | 0xd503_237f
         )
-}
-
-pub fn is_valid_type_tag(tag: u32) -> bool {
-    !forbidden_type_tag(tag)
 }
 
 fn string<'a>(strings: &'a StringTable, index: u64, offset: usize) -> Result<&'a str, FormatError> {

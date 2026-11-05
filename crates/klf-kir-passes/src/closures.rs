@@ -23,7 +23,21 @@ pub(crate) fn lower_closures(module: &mut Module) {
     let mut thunks: HashMap<(u32, FunctionType), Name> = HashMap::default();
     let mut generated = Vec::new();
     let mut counter = 0usize;
-    for function in &mut module.functions {
+    for shared in &mut module.functions {
+        if !shared
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                matches!(
+                    instruction.operation,
+                    Operation::CallClosure(_) | Operation::ClosureCallback { .. }
+                )
+            })
+        {
+            continue;
+        }
+        let function = std::sync::Arc::make_mut(shared);
         let mut fresh = Fresh::new(function);
         for block in &mut function.blocks {
             let mut rewritten = Vec::with_capacity(block.instructions.len());
@@ -68,7 +82,9 @@ pub(crate) fn lower_closures(module: &mut Module) {
             block.instructions = rewritten;
         }
     }
-    module.functions.extend(generated);
+    module
+        .functions
+        .extend(generated.into_iter().map(std::sync::Arc::new));
 }
 
 /// Names that cannot collide with a function's existing values.

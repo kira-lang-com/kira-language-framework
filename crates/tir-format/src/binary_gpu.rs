@@ -11,18 +11,6 @@ mod encode;
 const MAX_RECORDS: u64 = 1 << 32;
 const CAPABILITY_MASK: u64 = (1 << 19) - 1;
 
-impl BinaryGpuTable {
-    pub fn encode(
-        &self,
-        strings: &crate::StringTable,
-        signatures: &BinarySignatureTable,
-        types: &BinaryTypeTable,
-        constants: &BinaryConstantTable,
-    ) -> Result<Vec<u8>, FormatError> {
-        encode::encode_gpu_table(self, strings, signatures, types, constants)
-    }
-}
-
 impl BinaryModule {
     /// Decodes GPU entry metadata and cross-checks its references against the
     /// function types, constants, and entry attributes already decoded.
@@ -69,13 +57,6 @@ impl BinaryModule {
         };
 
         let bytes = section.read_uncompressed(memory_limit)?;
-        let strings = if entry_indexes.iter().any(|index| {
-            signatures.records[*index as usize].entry_kind == Some(BinaryEntryKind::Node)
-        }) {
-            Some(self.string_table(memory_limit)?)
-        } else {
-            None
-        };
         let mut cursor = 0;
         let count_offset = cursor;
         let count = read_count(&bytes, &mut cursor, 1, "GPU entry")?;
@@ -162,14 +143,6 @@ impl BinaryModule {
             }
             let specialization_constants =
                 read_specialization_constants(&bytes, &mut cursor, types, constants)?;
-            let node = if kind == BinaryEntryKind::Node {
-                let strings = strings
-                    .as_ref()
-                    .ok_or_else(|| malformed(cursor, "GPU node metadata requires STRINGS"))?;
-                Some(crate::binary_gpu_node::read(&bytes, &mut cursor, strings)?)
-            } else {
-                None
-            };
             entries.push(BinaryGpuEntry {
                 function_index,
                 kind,
@@ -184,7 +157,6 @@ impl BinaryModule {
                 subgroup_size,
                 floating_point_mode,
                 specialization_constants,
-                node,
             });
         }
         if cursor != bytes.len() {

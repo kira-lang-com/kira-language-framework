@@ -152,6 +152,10 @@ impl DefinitionServiceBridge {
             .map(|file| session.file(file).text().to_owned())
             .unwrap_or_default();
         let sources = phase_sources(session);
+        let source_identities = sources
+            .iter()
+            .map(|(file, _, _)| session.file_identity(*file).cloned())
+            .collect();
         let source_hashes = session
             .files()
             .iter()
@@ -171,6 +175,7 @@ impl DefinitionServiceBridge {
                 file,
                 source,
                 sources,
+                source_identities,
                 source_hashes,
                 sources_by_hash: std::cell::RefCell::default(),
                 source_digests: std::collections::HashMap::new(),
@@ -179,6 +184,7 @@ impl DefinitionServiceBridge {
                 read_count: 0,
                 expansions: Vec::new(),
                 listing: Vec::new(),
+                directory_entries: std::collections::HashMap::new(),
                 target: session.target().clone(),
                 inputs,
                 unit_list: Vec::new(),

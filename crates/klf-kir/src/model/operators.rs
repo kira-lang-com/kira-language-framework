@@ -179,14 +179,6 @@ pub enum ConvertKind {
     PointerToInt,
     IntToPointer,
     Bitcast,
-    /// Clamp an integer conversion, interpreting both ends as signed.
-    SignedToSignedSaturating,
-    /// Clamp a signed integer into an unsigned destination.
-    SignedToUnsignedSaturating,
-    /// Clamp an unsigned integer into a signed destination.
-    UnsignedToSignedSaturating,
-    /// Clamp an unsigned integer conversion.
-    UnsignedToUnsignedSaturating,
 }
 
 impl ConvertKind {
@@ -196,10 +188,6 @@ impl ConvertKind {
             Self::Truncate => "trunc",
             Self::ZeroExtend => "zext",
             Self::SignExtend => "sext",
-            Self::SignedToSignedSaturating => "s2s_sat",
-            Self::SignedToUnsignedSaturating => "s2u_sat",
-            Self::UnsignedToSignedSaturating => "u2s_sat",
-            Self::UnsignedToUnsignedSaturating => "u2u_sat",
             Self::FloatTruncate => "fptrunc",
             Self::FloatExtend => "fpext",
             Self::SignedToFloat => "sitofp",
@@ -214,20 +202,6 @@ impl ConvertKind {
 
     #[must_use]
     pub fn is_saturating(self) -> bool {
-        matches!(
-            self,
-            Self::SignedToSignedSaturating
-                | Self::SignedToUnsignedSaturating
-                | Self::UnsignedToSignedSaturating
-                | Self::UnsignedToUnsignedSaturating
-                | Self::FloatToSignedSaturating
-                | Self::FloatToUnsignedSaturating
-        )
-    }
-
-    /// Whether the KIR text format spells saturation with a trailing marker.
-    #[must_use]
-    pub fn uses_saturating_marker(self) -> bool {
         matches!(
             self,
             Self::FloatToSignedSaturating | Self::FloatToUnsignedSaturating

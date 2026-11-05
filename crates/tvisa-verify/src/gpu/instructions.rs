@@ -13,48 +13,45 @@ pub(super) fn verify_instruction(instruction: &TextInstruction, diagnostics: &mu
             .into_iter()
             .map(|diagnostic| crate::map_tir_diagnostic(diagnostic, 0)),
     );
-    let forbidden_tail_call = opcode == "tail.call" && has_indirect_or_runtime_callee(instruction);
-    let forbidden = forbidden_tail_call
-        || matches!(
-            opcode,
-            "asm"
-                | "asm.goto"
-                | "block.addr"
-                | "call.foreign"
-                | "call.indirect"
-                | "call.runtime"
-                | "call.variadic"
-                | "code.addr"
-                | "code.fromaddr"
-                | "code.load"
-                | "code.store"
-                | "frame.address"
-                | "func.ref"
-                | "gpu.entry.ref"
-                | "landingpad"
-                | "longjmp"
-                | "resume"
-                | "return.address"
-                | "stack.alloc.dyn"
-                | "stack.restore"
-                | "stack.save"
-                | "target.has"
-                | "target.intrinsic"
-                | "target.pagesize"
-                | "thread.pointer"
-                | "tls.addr"
-                | "va.arg"
-                | "va.copy"
-                | "va.end"
-                | "va.start"
-                | "atomic.wait"
-                | "atomic.notify"
-                | "invoke"
-                | "setjmp"
-                | "throw"
-                | "vscale.fixed"
-        )
-        || opcode.starts_with("fp.flags.")
+    let forbidden = matches!(
+        opcode,
+        "asm"
+            | "asm.goto"
+            | "block.addr"
+            | "call.foreign"
+            | "call.indirect"
+            | "call.runtime"
+            | "call.variadic"
+            | "code.addr"
+            | "code.fromaddr"
+            | "code.load"
+            | "code.store"
+            | "frame.address"
+            | "func.ref"
+            | "gpu.entry.ref"
+            | "landingpad"
+            | "longjmp"
+            | "resume"
+            | "return.address"
+            | "stack.alloc.dyn"
+            | "stack.restore"
+            | "stack.save"
+            | "target.has"
+            | "target.intrinsic"
+            | "target.pagesize"
+            | "thread.pointer"
+            | "tls.addr"
+            | "va.arg"
+            | "va.copy"
+            | "va.end"
+            | "va.start"
+            | "atomic.wait"
+            | "atomic.notify"
+            | "invoke"
+            | "setjmp"
+            | "throw"
+            | "vscale.fixed"
+    ) || opcode.starts_with("fp.flags.")
         || (opcode == "intrinsic" && !matches!(intrinsic_id(instruction), Some(15 | 16)));
     if forbidden {
         diagnostics.push(
@@ -127,18 +124,6 @@ pub(super) fn verify_instruction(instruction: &TextInstruction, diagnostics: &mu
             );
         }
     }
-}
-
-fn has_indirect_or_runtime_callee(instruction: &TextInstruction) -> bool {
-    let operands = &instruction.tokens[super::opcode_end(instruction)..];
-    let end = operands
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::Punctuation('(')))
-        .unwrap_or(operands.len());
-    operands[..end].iter().any(|token| {
-        matches!(token.kind, TokenKind::Punctuation('%'))
-            || matches!(&token.kind, TokenKind::Atom(name) if name == "rt")
-    })
 }
 
 fn is_gpu_pointer_type(tokens: &[tir_format::text::Token], index: usize) -> bool {

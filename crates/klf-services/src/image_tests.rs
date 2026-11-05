@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::definition::FileMode;
+use std::sync::Arc;
 
 fn complete_image() -> DefinitionImage {
     let module = klf_kir::parse_module(
@@ -81,13 +82,12 @@ bb0():
     );
 
     let mut declaration_only = image.module().clone();
-    declaration_only
+    let parse_phase = declaration_only
         .functions
         .iter_mut()
         .find(|function| function.name.as_str() == "parse")
-        .expect("parse phase")
-        .blocks
-        .clear();
+        .expect("parse phase");
+    Arc::make_mut(parse_phase).blocks.clear();
     assert_eq!(
         DefinitionImage::new(
             LanguageDescriptor::minimal("calc", &["calc"]),

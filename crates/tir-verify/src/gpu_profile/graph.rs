@@ -18,7 +18,6 @@ pub(super) struct GpuFunction {
     pub(super) symbol_span: Span,
     pub(super) body: FunctionBody,
     pub(super) entry: bool,
-    pub(super) subgroup_size: Option<u64>,
     pub(super) exported: bool,
     pub(super) function_type: Option<FunctionType>,
     pub(super) float64_capability: bool,
@@ -70,9 +69,6 @@ pub(super) fn verify_call_graph(
         .map(|(index, function)| (function.symbol.as_str(), index))
         .collect::<HashMap<_, _>>();
     let mut successors = vec![Vec::new(); functions.len()];
-    let mut geometry_call_targets = (0..functions.len())
-        .map(|_| HashMap::new())
-        .collect::<Vec<HashMap<(usize, usize), Vec<usize>>>>();
     let mut diagnostics = Vec::new();
     for (index, function) in functions.iter().enumerate() {
         let value_types = crate::text_types::inferred_value_types(
@@ -80,74 +76,69 @@ pub(super) fn verify_call_graph(
             &function.body,
             layouts,
             policies,
-            None,
         );
-        for (block_index, block) in function.body.blocks.iter().enumerate() {
-            for (instruction_index, instruction) in block.instructions.iter().enumerate() {
-                if instruction.opcode == "gpu.call.vft" {
-                    let vft_type = crate::ssa::text_value_uses(instruction)
-                        .first()
-                        .and_then(|(name, _)| value_types.get(name))
-                        .and_then(|ty| match ty {
-                            Type::VisibleFunctionTable(function) => Some(function.as_ref()),
-                            _ => None,
-                        });
-                    let mut targets = Vec::new();
-                    for (target_index, target) in functions.iter().enumerate() {
-                        if !target.entry
-                            && target.exported
-                            && compatible_vft_type(
-                                vft_type,
-                                target.function_type.as_ref(),
-                                &module.header.path,
-                            )
-                        {
-                            successors[index].push(target_index);
-                            targets.push(target_index);
-                        }
+        for instruction in function
+            .body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+        {
+            if instruction.opcode == "gpu.call.vft" {
+                let vft_type = crate::ssa::text_value_uses(instruction)
+                    .first()
+                    .and_then(|(name, _)| value_types.get(name))
+                    .and_then(|ty| match ty {
+                        Type::VisibleFunctionTable(function) => Some(function.as_ref()),
+                        _ => None,
+                    });
+                for (target_index, target) in functions.iter().enumerate() {
+                    if !target.entry
+                        && target.exported
+                        && compatible_vft_type(
+                            vft_type,
+                            target.function_type.as_ref(),
+                            &module.header.path,
+                        )
+                    {
+                        successors[index].push(target_index);
                     }
-                    geometry_call_targets[index].insert((block_index, instruction_index), targets);
-                    continue;
                 }
-                let symbol = match instruction.opcode.as_str() {
-                    "call" | "tail.call" => referenced_symbol(&instruction.tokens),
-                    "call.witness" => match super::witness::resolve_target(
-                        instruction,
-                        module.item_text(function.item),
-                        &module.header.path,
-                        &witness_conformances,
-                    ) {
-                        Ok(symbol) => Some(symbol),
-                        Err(message) => {
-                            let mut diagnostic =
-                                Diagnostic::error(V15, message).with_primary_span(instruction.span);
-                            shift(&mut diagnostic, function.item.span.start);
-                            diagnostics.push(diagnostic);
-                            None
-                        }
-                    },
-                    _ => None,
-                };
-                let Some(symbol) = symbol else { continue };
-                if local_callability.get(&symbol) == Some(&false) {
-                    let mut diagnostic = Diagnostic::error(
-                        V15,
-                        format!("GPU code cannot call non-GPU function @{symbol}"),
-                    )
-                    .with_primary_span(instruction.span);
-                    shift(&mut diagnostic, function.item.span.start);
-                    diagnostics.push(diagnostic);
-                }
-                if let Some(target) = symbols.get(symbol.as_str()).copied() {
-                    successors[index].push(target);
-                    geometry_call_targets[index]
-                        .insert((block_index, instruction_index), vec![target]);
-                }
+                continue;
+            }
+            let symbol = match instruction.opcode.as_str() {
+                "call" | "tail.call" => referenced_symbol(&instruction.tokens),
+                "call.witness" => match super::witness::resolve_target(
+                    instruction,
+                    module.item_text(function.item),
+                    &module.header.path,
+                    &witness_conformances,
+                ) {
+                    Ok(symbol) => Some(symbol),
+                    Err(message) => {
+                        let mut diagnostic =
+                            Diagnostic::error(V15, message).with_primary_span(instruction.span);
+                        shift(&mut diagnostic, function.item.span.start);
+                        diagnostics.push(diagnostic);
+                        None
+                    }
+                },
+                _ => None,
+            };
+            let Some(symbol) = symbol else { continue };
+            if local_callability.get(&symbol) == Some(&false) {
+                let mut diagnostic = Diagnostic::error(
+                    V15,
+                    format!("GPU code cannot call non-GPU function @{symbol}"),
+                )
+                .with_primary_span(instruction.span);
+                shift(&mut diagnostic, function.item.span.start);
+                diagnostics.push(diagnostic);
+            }
+            if let Some(target) = symbols.get(symbol.as_str()).copied() {
+                successors[index].push(target);
             }
         }
     }
-
-    diagnostics.extend(verify_subgroup_clusters(functions, &successors));
 
     for (entry_index, entry) in functions.iter().enumerate().filter(|(_, f)| f.entry) {
         if entry.float64_capability {
@@ -184,11 +175,6 @@ pub(super) fn verify_call_graph(
     }
     diagnostics.extend(verify_vft_stages(functions, &successors, module));
     diagnostics.extend(verify_builtin_stages(functions, &successors, module));
-    diagnostics.extend(verify_specialization_constants(
-        functions,
-        &successors,
-        module,
-    ));
     diagnostics.extend(super::capabilities::verify(
         functions,
         &successors,
@@ -196,132 +182,7 @@ pub(super) fn verify_call_graph(
         policies,
         layouts,
     ));
-    diagnostics.extend(super::geometry_flow::verify_entries(
-        functions,
-        module,
-        &geometry_call_targets,
-        policies,
-        layouts,
-    ));
     diagnostics
-}
-
-fn verify_specialization_constants(
-    functions: &[GpuFunction],
-    successors: &[Vec<usize>],
-    module: &TextModule,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    for (entry_index, entry) in functions
-        .iter()
-        .enumerate()
-        .filter(|(_, function)| function.entry)
-    {
-        let mut uses: HashMap<u32, (Type, Vec<String>)> = HashMap::new();
-        let mut visited = vec![false; functions.len()];
-        let mut pending = vec![entry_index];
-        while let Some(function_index) = pending.pop() {
-            if std::mem::replace(&mut visited[function_index], true) {
-                continue;
-            }
-            let function = &functions[function_index];
-            let source = module.item_text(function.item);
-            for instruction in function
-                .body
-                .blocks
-                .iter()
-                .flat_map(|block| &block.instructions)
-                .filter(|instruction| instruction.opcode == "gpu.spec_const")
-            {
-                let Some((id, ty, default)) =
-                    super::instructions::specialization_constant_key(source, instruction)
-                else {
-                    continue;
-                };
-                if let Some((previous_type, previous_default)) = uses.get(&id)
-                    && (previous_type != &ty || previous_default != &default)
-                {
-                    let mut diagnostic = Diagnostic::error(
-                        V2,
-                        format!(
-                            "GPU entry @{} reaches specialization constant {id} with conflicting type or default in @{}",
-                            entry.symbol, function.symbol
-                        ),
-                    )
-                    .with_primary_span(instruction.span);
-                    shift(&mut diagnostic, function.item.span.start);
-                    diagnostics.push(diagnostic);
-                } else {
-                    uses.insert(id, (ty, default));
-                }
-            }
-            pending.extend(successors[function_index].iter().copied());
-        }
-    }
-    diagnostics
-}
-
-fn verify_subgroup_clusters(
-    functions: &[GpuFunction],
-    successors: &[Vec<usize>],
-) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    for (entry_index, entry) in functions
-        .iter()
-        .enumerate()
-        .filter(|(_, function)| function.entry)
-    {
-        let Some(subgroup_size) = entry.subgroup_size else {
-            continue;
-        };
-        let mut visited = vec![false; functions.len()];
-        let mut pending = vec![entry_index];
-        while let Some(function_index) = pending.pop() {
-            if std::mem::replace(&mut visited[function_index], true) {
-                continue;
-            }
-            let function = &functions[function_index];
-            for instruction in function
-                .body
-                .blocks
-                .iter()
-                .flat_map(|block| &block.instructions)
-                .filter(|instruction| {
-                    matches!(
-                        instruction.opcode.as_str(),
-                        "subgroup.reduce" | "subgroup.scan_inclusive" | "subgroup.scan_exclusive"
-                    )
-                })
-            {
-                for cluster in super::instructions::subgroup::explicit_cluster_sizes(instruction) {
-                    if cluster > subgroup_size {
-                        let mut diagnostic = Diagnostic::error(
-                            V2,
-                            format!(
-                                "GPU entry @{} selects subgroup_size {subgroup_size}, smaller than subgroup cluster {cluster} in @{}",
-                                entry.symbol, function.symbol
-                            ),
-                        )
-                        .with_primary_span(instruction.span);
-                        shift(&mut diagnostic, function.item.span.start);
-                        diagnostics.push(diagnostic);
-                    }
-                }
-            }
-            pending.extend(successors[function_index].iter().copied());
-        }
-    }
-    diagnostics
-}
-
-pub(super) fn entry_subgroup_size(header: &[Token]) -> Option<u64> {
-    header.windows(4).find_map(|tokens| {
-        (atom(&tokens[0]) == Some("subgroup_size")
-            && matches!(tokens[1].kind, TokenKind::Punctuation('('))
-            && matches!(tokens[3].kind, TokenKind::Punctuation(')')))
-        .then(|| atom(&tokens[2])?.parse().ok())
-        .flatten()
-    })
 }
 
 fn compatible_vft_type(

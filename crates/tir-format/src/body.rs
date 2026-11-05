@@ -6,8 +6,6 @@ use tir_types::{Convention, Type};
 use crate::text::{Token, TokenKind, lex};
 use crate::{TypeParseError, parse_tvisa_type, parse_type};
 
-mod metadata;
-
 pub(super) type TypeParser = fn(&str) -> Result<Type, TypeParseError>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,22 +22,7 @@ pub struct TextInstruction {
     pub results: Vec<String>,
     pub opcode: String,
     pub tokens: Vec<Token>,
-    pub debug_attachment: Option<TextDebugAttachment>,
     pub span: Span,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TextDebugAttachment {
-    Variable {
-        value: String,
-        name: String,
-        ty: Type,
-        scope: String,
-    },
-    Label {
-        name: String,
-        scope: String,
-    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,18 +79,17 @@ struct Line {
 /// Parses the block and instruction structure from one function or entry item.
 /// Operand tokens remain available for instruction-specific verification.
 pub fn parse_function_body(source: &str) -> Result<Option<FunctionBody>, BodyParseError> {
-    parse_function_body_with(source, parse_type, false)
+    parse_function_body_with(source, parse_type)
 }
 
 /// Parses a TVISA function body, accepting its TVISA-only value types.
 pub fn parse_tvisa_function_body(source: &str) -> Result<Option<FunctionBody>, BodyParseError> {
-    parse_function_body_with(source, parse_tvisa_type, true)
+    parse_function_body_with(source, parse_tvisa_type)
 }
 
 fn parse_function_body_with(
     source: &str,
     type_parser: TypeParser,
-    tvisa: bool,
 ) -> Result<Option<FunctionBody>, BodyParseError> {
     let tokens = lex(source).map_err(|error| BodyParseError {
         span: error.span,
@@ -146,9 +128,7 @@ fn parse_function_body_with(
             ));
         };
         block.span.end = line.span.end;
-        block
-            .instructions
-            .push(parse_instruction(source, line, tvisa)?);
+        block.instructions.push(parse_instruction(line)?);
     }
     if let Some(block) = current {
         blocks.push(block);
@@ -521,11 +501,7 @@ fn parse_type_slice(
     })
 }
 
-fn parse_instruction(
-    source: &str,
-    line: Line,
-    tvisa: bool,
-) -> Result<TextInstruction, BodyParseError> {
+fn parse_instruction(line: Line) -> Result<TextInstruction, BodyParseError> {
     let tokens = line.tokens;
     let mut cursor = 0;
     let mut results = Vec::new();
@@ -589,12 +565,10 @@ fn parse_instruction(
     if cursor == opcode_start {
         return Err(parse_error(line.span, "instruction has no opcode"));
     }
-    let debug_attachment = metadata::validate(source, &tokens, &opcode, cursor, tvisa)?;
     Ok(TextInstruction {
         results,
         opcode,
         tokens,
-        debug_attachment,
         span: line.span,
     })
 }

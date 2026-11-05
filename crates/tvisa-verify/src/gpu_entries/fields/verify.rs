@@ -7,8 +7,8 @@ use super::common::{
     array, diagnostic, number, object_map, scalar, valid_semantic, verify_hex, verify_number,
     verify_object,
 };
+use super::parser::{Field, Value};
 use super::special::{fragment, node, ray_tracing, specialization_constants};
-use super::{Field, Value};
 
 const FIELDS: &[&str] = &[
     "threads",
@@ -26,6 +26,27 @@ const FIELDS: &[&str] = &[
     "node",
     "ray_tracing",
     "fragment",
+];
+const CAPABILITIES: &[&str] = &[
+    "float64",
+    "atomic128",
+    "float16.atomics",
+    "tile",
+    "framebuffer_fetch",
+    "raster_order",
+    "work_graphs",
+    "work_graphs.mesh",
+    "coop.fp8",
+    "coop.blockscaled",
+    "coop.reduce",
+    "compute_derivatives",
+    "float32.denorm_preserve",
+    "sparse_residency",
+    "sampler_feedback",
+    "subgroup_size_control",
+    "triangle_vertex_positions",
+    "shading_rate",
+    "printf",
 ];
 
 pub(super) fn fields(fields: &[Field], stage: &str, base: usize) -> Vec<Diagnostic> {
@@ -179,15 +200,7 @@ pub(super) fn fields(fields: &[Field], stage: &str, base: usize) -> Vec<Diagnost
         floating_point(value, base, &mut diagnostics);
     }
     if let Some(value) = values.get("specialization_constants") {
-        let has_float64 = values
-            .get("capabilities")
-            .and_then(|capabilities| array(capabilities))
-            .is_some_and(|capabilities| {
-                capabilities
-                    .iter()
-                    .any(|capability| scalar(capability) == Some("float64"))
-            });
-        specialization_constants(value, has_float64, base, &mut diagnostics);
+        specialization_constants(value, base, &mut diagnostics);
     }
     if let Some(value) = values.get("node") {
         node(value, stage, base, &mut diagnostics);
@@ -508,7 +521,6 @@ fn capabilities(value: &Value, base: usize, diagnostics: &mut Vec<Diagnostic>) {
         return;
     };
     let mut seen = HashSet::new();
-    let mut previous_bit = None;
     for item in values {
         let Some(name) = scalar(item) else {
             diagnostics.push(diagnostic(
@@ -518,33 +530,19 @@ fn capabilities(value: &Value, base: usize, diagnostics: &mut Vec<Diagnostic>) {
             ));
             continue;
         };
-        if !tvisa_format::GPU_CAPABILITY_NAMES.contains(&name) {
+        if !CAPABILITIES.contains(&name) {
             diagnostics.push(diagnostic(
                 base,
                 item.span,
                 format!("unknown optional GPU capability '{name}'"),
             ));
         }
-        let is_new = seen.insert(name);
-        if !is_new {
+        if !seen.insert(name) {
             diagnostics.push(diagnostic(
                 base,
                 item.span,
                 format!("duplicate GPU capability '{name}'"),
             ));
-        }
-        if let Some(bit) = tvisa_format::GPU_CAPABILITY_NAMES
-            .iter()
-            .position(|capability| *capability == name)
-        {
-            if is_new && previous_bit.is_some_and(|previous| bit < previous) {
-                diagnostics.push(diagnostic(
-                    base,
-                    item.span,
-                    "GPU capabilities must follow TIR section 17.18 bit order",
-                ));
-            }
-            previous_bit = Some(bit);
         }
     }
 }

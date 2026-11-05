@@ -203,22 +203,6 @@ fn validate_signature(signature: &TextSignature, span: Span) -> Result<(), TextP
             "c signatures permit only leaf, byref, sret, and cagg parameter items",
         ));
     }
-    for item in &signature.parameters {
-        match item {
-            ParameterItem::ByRef { flags, .. } => {
-                validate_flag_names(flags, &["owned", "readonly"], "byref", span)?;
-            }
-            ParameterItem::CAggregate(aggregate) => {
-                validate_flag_names(
-                    &aggregate.flags,
-                    &["union", "unaligned", "nontrivial", "flexible", "empty"],
-                    "C aggregate",
-                    span,
-                )?;
-            }
-            _ => {}
-        }
-    }
     if signature
         .results
         .iter()
@@ -227,29 +211,6 @@ fn validate_signature(signature: &TextSignature, span: Span) -> Result<(), TextP
         > 1
     {
         return Err(error(span, "a signature may have at most one result group"));
-    }
-    Ok(())
-}
-
-fn validate_flag_names(
-    flags: &[String],
-    allowed: &[&str],
-    label: &str,
-    span: Span,
-) -> Result<(), TextParseError> {
-    for (index, flag) in flags.iter().enumerate() {
-        if !allowed.contains(&flag.as_str()) {
-            return Err(TextParseError {
-                span,
-                message: format!("unknown {label} flag `{flag}`"),
-            });
-        }
-        if flags[..index].contains(flag) {
-            return Err(TextParseError {
-                span,
-                message: format!("duplicate {label} flag `{flag}`"),
-            });
-        }
     }
     Ok(())
 }

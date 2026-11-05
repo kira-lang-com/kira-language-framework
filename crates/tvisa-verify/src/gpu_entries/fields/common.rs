@@ -4,7 +4,7 @@ use tir_diag::{Diagnostic, Span};
 use tir_format::text::{KiraStringEscapeError, decode_kira_string_literal_contents, lex};
 
 use super::VFY22;
-use super::{Field, Value, ValueKind};
+use super::parser::{Field, Value, ValueKind};
 
 pub(super) fn diagnostic(base: usize, span: Span, message: impl Into<String>) -> Diagnostic {
     Diagnostic::error(VFY22, message).with_primary_span(Span::new(
@@ -176,7 +176,7 @@ pub(super) fn valid_semantic(value: &str) -> bool {
     match name {
         "color" | "color_index1" | "clip_distance" | "cull_distance" => {
             tir_format::numeric_literals::parse_unsigned_integer(argument)
-                .and_then(|value| u64::try_from(value).ok())
+                .and_then(|value| u32::try_from(value).ok())
                 .is_some()
         }
         "depth" => matches!(argument, "any" | "greater" | "less"),

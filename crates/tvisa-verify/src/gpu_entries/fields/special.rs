@@ -1,16 +1,14 @@
 use std::collections::HashSet;
 
 use tir_format::parse_tvisa_type;
-use tir_types::{FloatType, Type};
 
-use super::Value;
 use super::common::{
     array, diagnostic, number, object_map, scalar, string_value, verify_number, verify_object,
 };
+use super::parser::Value;
 
 pub(super) fn specialization_constants(
     value: &Value,
-    has_float64: bool,
     base: usize,
     diagnostics: &mut Vec<tir_diag::Diagnostic>,
 ) {
@@ -54,24 +52,15 @@ pub(super) fn specialization_constants(
                 verify_number(id, "specialization constant id", base, diagnostics);
             }
         }
-        let specialization_type = object
-            .get("type")
-            .and_then(|ty| scalar(ty).and_then(|text| parse_tvisa_type(text).ok()));
-        if let Some(ty) = specialization_type {
-            if !valid_specialization_type(&ty, has_float64) {
-                let type_value = object["type"];
-                diagnostics.push(diagnostic(
-                    base,
-                    type_value.span,
-                    "specialization constant has an unsupported type or lacks the float64 capability",
-                ));
-            } else if let Some(default) = object.get("default") {
-                verify_specialization_default(default, &ty, base, diagnostics);
-            }
-        } else if let Some(type_value) = object.get("type") {
+        if object.get("type").is_some_and(|ty| {
+            scalar(ty)
+                .and_then(|text| parse_tvisa_type(text).ok())
+                .is_none()
+        }) {
+            let ty = object["type"];
             diagnostics.push(diagnostic(
                 base,
-                type_value.span,
+                ty.span,
                 "specialization constant requires a valid TVISA type",
             ));
         }
@@ -86,110 +75,6 @@ pub(super) fn specialization_constants(
                 "specialization constant default must be a scalar or array literal",
             ));
         }
-    }
-}
-
-fn valid_specialization_type(ty: &Type, has_float64: bool) -> bool {
-    match ty {
-        Type::Integer(bits) => (1..=64).contains(bits),
-        Type::Float(float) => match float {
-            FloatType::F16 | FloatType::Bf16 | FloatType::F32 => true,
-            FloatType::F64 => has_float64,
-            _ => false,
-        },
-        Type::FixedVector { lanes, element } if matches!(lanes, 2..=4) => {
-            valid_vector_element(element, has_float64)
-        }
-        _ => false,
-    }
-}
-
-fn valid_vector_element(ty: &Type, has_float64: bool) -> bool {
-    match ty {
-        Type::Integer(bits) => (1..=64).contains(bits),
-        Type::Float(float) => match float {
-            FloatType::F16 | FloatType::Bf16 | FloatType::F32 => true,
-            FloatType::F64 => has_float64,
-            FloatType::F8E4M3
-            | FloatType::F8E5M2
-            | FloatType::F6E2M3
-            | FloatType::F6E3M2
-            | FloatType::F4E2M1
-            | FloatType::E8M0 => true,
-            FloatType::F128 => false,
-        },
-        _ => false,
-    }
-}
-
-fn verify_specialization_default(
-    default: &Value,
-    ty: &Type,
-    base: usize,
-    diagnostics: &mut Vec<tir_diag::Diagnostic>,
-) {
-    if let Type::FixedVector { lanes, element } = ty {
-        let Some(values) = array(default) else {
-            diagnostics.push(diagnostic(
-                base,
-                default.span,
-                "fixed-vector specialization default must be a bracketed list",
-            ));
-            return;
-        };
-        if values.len() != *lanes as usize {
-            diagnostics.push(diagnostic(
-                base,
-                default.span,
-                format!("fixed-vector specialization default must have {lanes} lanes"),
-            ));
-            return;
-        }
-        for value in values {
-            verify_specialization_scalar(value, element, base, diagnostics);
-        }
-        return;
-    }
-
-    let Some(_) = scalar(default) else {
-        diagnostics.push(diagnostic(
-            base,
-            default.span,
-            "scalar specialization default must be a scalar literal",
-        ));
-        return;
-    };
-    verify_specialization_scalar(default, ty, base, diagnostics);
-}
-
-fn verify_specialization_scalar(
-    value: &Value,
-    ty: &Type,
-    base: usize,
-    diagnostics: &mut Vec<tir_diag::Diagnostic>,
-) {
-    let Some(literal) = scalar(value) else {
-        diagnostics.push(diagnostic(
-            base,
-            value.span,
-            "specialization vector lanes must be scalar literals",
-        ));
-        return;
-    };
-    let valid = match ty {
-        Type::Integer(1) => matches!(literal, "true" | "false"),
-        Type::Integer(bits) => tir_format::numeric_literals::integer_literal_fits(literal, *bits),
-        Type::Float(float) => {
-            tir_format::numeric_literals::float_literal_is_exactly_representable(literal, *float)
-        }
-        _ => false,
-    };
-    if !valid {
-        diagnostics.push(diagnostic(
-            base,
-            value.span,
-            "specialization default is out of range or not exactly representable by its type",
-        ));
     }
 }
 
@@ -251,13 +136,6 @@ pub(super) fn node(
             }
             for dimension in dimensions {
                 verify_number(dimension, "node dispatch-grid dimension", base, diagnostics);
-                if number(dimension) == Some(0) {
-                    diagnostics.push(diagnostic(
-                        base,
-                        dimension.span,
-                        "node dispatch-grid dimensions must be positive",
-                    ));
-                }
             }
         } else {
             diagnostics.push(diagnostic(
@@ -284,7 +162,7 @@ pub(super) fn node(
             verify_object(
                 output,
                 "node output",
-                &["name", "kind", "record_size", "max_records"],
+                &["name", "record_size", "max_records"],
                 base,
                 diagnostics,
             );
@@ -311,13 +189,6 @@ pub(super) fn node(
                         continue;
                     }
                 };
-                if text.is_empty() {
-                    diagnostics.push(diagnostic(
-                        base,
-                        name.span,
-                        "node output name must be nonempty",
-                    ));
-                }
                 if !names.insert(text.clone()) {
                     diagnostics.push(diagnostic(
                         base,
@@ -326,25 +197,9 @@ pub(super) fn node(
                     ));
                 }
             }
-            if let Some(kind) = members.get("kind")
-                && !matches!(scalar(kind), Some("node" | "mesh"))
-            {
-                diagnostics.push(diagnostic(
-                    base,
-                    kind.span,
-                    "node output kind must be node or mesh",
-                ));
-            }
             for field in ["record_size", "max_records"] {
                 if let Some(size) = members.get(field) {
                     verify_number(size, &format!("node output {field}"), base, diagnostics);
-                    if number(size) == Some(0) {
-                        diagnostics.push(diagnostic(
-                            base,
-                            size.span,
-                            format!("node output {field} must be positive"),
-                        ));
-                    }
                 }
             }
         }

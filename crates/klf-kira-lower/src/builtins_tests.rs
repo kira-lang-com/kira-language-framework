@@ -72,6 +72,8 @@ fn every_manifest_service_gets_a_prelude_wrapper() {
     assert_eq!(
         missing,
         [
+            "klf.trap.operands",
+            "klf.trap.text",
             "klf.editor.project_field",
             "klf.driver.argument_len",
             "klf.driver.argument_copy",

@@ -50,7 +50,6 @@ pub(super) fn verify_instruction(
     if opcode == "intrinsic" {
         diagnostics.extend(crate::intrinsic_types::verify_arity(instruction));
     }
-    crate::debug_types::verify_attachment(instruction, value_types, &mut diagnostics);
     diagnostics.extend(crate::constant_types::verify(source, instruction));
     let Some(operands) = operand_types(instruction, value_types) else {
         return diagnostics;
@@ -299,13 +298,6 @@ pub(super) fn verify_instruction(
                 format!("{opcode} operand has an incompatible type"),
             );
         }
-        if matches!(opcode, "code.load" | "code.fromaddr") {
-            diagnostics.extend(crate::type_tags::verify_text_type_tag(
-                instruction,
-                0,
-                false,
-            ));
-        }
     } else if opcode == "code.store" {
         if operands.first().is_some_and(|ty| ty != &Type::Code) {
             push_error(
@@ -315,11 +307,6 @@ pub(super) fn verify_instruction(
             );
         }
         require_pointer(instruction, &operands, 1, &mut diagnostics);
-        diagnostics.extend(crate::type_tags::verify_text_type_tag(
-            instruction,
-            1,
-            false,
-        ));
     } else if opcode == "trap.if" {
         if operands.first().is_some_and(|ty| ty != &Type::Integer(1)) {
             push_error(
@@ -329,19 +316,7 @@ pub(super) fn verify_instruction(
             );
         }
     } else if opcode == "stack.alloc.dyn" {
-        if operands
-            .first()
-            .is_some_and(|ty| !matches!(ty, Type::Integer(_)))
-        {
-            push_error(
-                &mut diagnostics,
-                instruction,
-                "stack.alloc.dyn size must be a scalar integer",
-            );
-        }
-        verify_stack_allocation_alignment(instruction, &mut diagnostics);
-    } else if opcode == "stack.restore" {
-        require_pointer(instruction, &operands, 0, &mut diagnostics);
+        require_integer_operand(instruction, &operands, 0, &mut diagnostics);
     } else if matches!(
         opcode,
         "trunc"
@@ -366,28 +341,6 @@ pub(super) fn verify_instruction(
     }
 
     diagnostics
-}
-
-fn verify_stack_allocation_alignment(
-    instruction: &TextInstruction,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let operands = &instruction.tokens[crate::calls::opcode_end(instruction)..];
-    let alignment = operands
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::Punctuation(',')))
-        .and_then(|comma| operands.get(comma + 1))
-        .and_then(|token| match &token.kind {
-            TokenKind::Atom(value) => tir_format::numeric_literals::parse_unsigned_integer(value),
-            _ => None,
-        });
-    if !alignment.is_some_and(|value| (1..=4096).contains(&value) && value.is_power_of_two()) {
-        push_error(
-            diagnostics,
-            instruction,
-            "stack.alloc.dyn alignment must be a power of two from 1 through 4096 bytes",
-        );
-    }
 }
 
 fn verify_explicit_type(
@@ -594,7 +547,7 @@ fn require_pointer(
     }
 }
 
-pub(super) fn push_error(
+fn push_error(
     diagnostics: &mut Vec<Diagnostic>,
     instruction: &TextInstruction,
     message: impl Into<String>,

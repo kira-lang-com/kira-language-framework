@@ -1,0 +1,14 @@
+[package]
+name = "tir-own"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tir-diag = { path = "../tir-diag" }
+tir-format = { path = "../tir-format" }
+tir-types = { path = "../tir-types" }
+tir-verify = { path = "../tir-verify" }
+
+[lints]
+workspace = true

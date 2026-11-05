@@ -1,8 +1,7 @@
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryFunctionBody, BinaryFunctionType, BinaryImport, BinaryImportEntityKind,
-    BinaryInstruction, BinaryOperand, BinarySignature, BinarySignatureTable, BinaryType,
-    BinaryTypeTable,
+    BinaryFunctionBody, BinaryFunctionType, BinaryInstruction, BinaryOperand, BinarySignature,
+    BinarySignatureTable, BinaryType, BinaryTypeTable,
 };
 
 #[path = "coroutines/v17.rs"]
@@ -16,7 +15,6 @@ pub(super) fn verify_body(
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
     value_types: &[Option<u64>],
-    imports: Option<&[BinaryImport]>,
 ) -> Vec<Diagnostic> {
     let Some(caller_function) = function_type(types, caller.function_type) else {
         return Vec::new();
@@ -33,11 +31,10 @@ pub(super) fn verify_body(
                     signatures,
                     types,
                     value_types,
-                    imports,
                     &mut diagnostics,
                 ),
                 0x1a0 | 0x1a7 | 0x1a8 | 0x1a9 | 0x1aa | 0x1e7 => {
-                    verify_coroutine_call(instruction, signatures, imports, &mut diagnostics)
+                    verify_coroutine_call(instruction, signatures, &mut diagnostics)
                 }
                 0x1c1 => verify_yield(
                     instruction,
@@ -64,7 +61,7 @@ pub(super) fn verify_body(
                     &mut diagnostics,
                 ),
                 0x1c6 | 0x1c7 => {
-                    verify_frame_query(instruction, signatures, types, imports, &mut diagnostics)
+                    verify_frame_query(instruction, signatures, types, &mut diagnostics)
                 }
                 0x1c8 => verify_await(
                     instruction,
@@ -92,10 +89,9 @@ pub(super) fn verify_body(
 fn verify_coroutine_call(
     instruction: &BinaryInstruction,
     signatures: &BinarySignatureTable,
-    imports: Option<&[BinaryImport]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Some((_, callee)) = direct_callee(instruction, signatures, imports)
+    if let Some((_, callee)) = direct_callee(instruction, signatures)
         && callee.coroutine.is_some()
     {
         report(
@@ -112,10 +108,9 @@ fn verify_start(
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
     value_types: &[Option<u64>],
-    imports: Option<&[BinaryImport]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some((function_index, callee)) = direct_callee(instruction, signatures, imports) else {
+    let Some((function_index, callee)) = direct_callee(instruction, signatures) else {
         return;
     };
     let Some(function) = function_type(types, callee.function_type) else {
@@ -321,10 +316,9 @@ fn verify_frame_query(
     instruction: &BinaryInstruction,
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
-    imports: Option<&[BinaryImport]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some((_, signature)) = direct_callee(instruction, signatures, imports) else {
+    let Some((_, signature)) = direct_callee(instruction, signatures) else {
         return;
     };
     let is_async =
@@ -434,7 +428,6 @@ fn value_edge_types(types: &BinaryTypeTable, ty: u64) -> Vec<u64> {
 fn direct_callee<'a>(
     instruction: &BinaryInstruction,
     signatures: &'a BinarySignatureTable,
-    imports: Option<&[BinaryImport]>,
 ) -> Option<(u64, &'a BinarySignature)> {
     let index = instruction
         .operands
@@ -443,15 +436,8 @@ fn direct_callee<'a>(
             BinaryOperand::Symbol { kind: 0, index } => Some(*index),
             _ => None,
         })?;
-    let imported_count = imports
-        .unwrap_or_default()
-        .iter()
-        .flat_map(|import| &import.entities)
-        .filter(|entity| entity.kind == BinaryImportEntityKind::Function)
-        .count() as u64;
-    let local_index = index.checked_sub(imported_count)?;
-    let signature = signatures.records.get(usize::try_from(local_index).ok()?)?;
-    Some((local_index, signature))
+    let signature = signatures.records.get(usize::try_from(index).ok()?)?;
+    Some((index, signature))
 }
 
 fn function_type(types: &BinaryTypeTable, index: u64) -> Option<&BinaryFunctionType> {

@@ -2,14 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryCodeTable, BinaryConstantTable, BinaryEngine, BinaryFunctionBody, BinaryGenericTable,
-    BinaryGlobalTable, BinaryGpuEntry, BinaryGpuTable, BinaryImport, BinaryOperand,
-    BinarySignature, BinarySignatureTable, BinaryTarget, BinaryType, BinaryTypeTable, StringTable,
+    BinaryCodeTable, BinaryEngine, BinaryFunctionBody, BinaryGenericTable, BinaryGlobalTable,
+    BinaryGpuEntry, BinaryGpuTable, BinaryImport, BinaryOperand, BinarySignature,
+    BinarySignatureTable, BinaryTarget, BinaryType, BinaryTypeTable, StringTable,
 };
 use tir_target::Profile;
 
-mod call_targets;
-mod geometry_flow;
 mod gpu_capabilities;
 mod gpu_memory;
 mod register_only;
@@ -36,7 +34,6 @@ pub(super) fn verify(
     imports: Option<&[BinaryImport]>,
     globals: Option<&BinaryGlobalTable>,
     gpu: Option<&BinaryGpuTable>,
-    constants: Option<&BinaryConstantTable>,
     module_profile: Profile,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -124,7 +121,6 @@ pub(super) fn verify(
             caller,
             signatures,
             types,
-            imports,
             module_profile,
             &mut diagnostics,
         );
@@ -150,7 +146,7 @@ pub(super) fn verify(
         if !is_gpu_target(caller.target) {
             continue;
         }
-        let value_types = super::infer_value_types(body, signatures, types, imports);
+        let value_types = super::infer_value_types(body, signatures, types);
         for instruction in body
             .blocks
             .iter()
@@ -186,7 +182,7 @@ pub(super) fn verify(
                     Err(diagnostic) => diagnostics.push(diagnostic),
                 }
             }
-            let Some(target) = call_targets::direct_target(instruction, imports) else {
+            let Some(target) = direct_target(instruction) else {
                 continue;
             };
             let Some(callee_index) = usize::try_from(target).ok() else {
@@ -213,16 +209,7 @@ pub(super) fn verify(
     }
 
     verify_acyclic(&graph, signatures, &mut diagnostics);
-    geometry_flow::verify_entries(
-        &bodies,
-        signatures,
-        &graph,
-        gpu,
-        types,
-        imports,
-        &mut diagnostics,
-    );
-    register_only::verify(&bodies, signatures, types, imports, &mut diagnostics);
+    register_only::verify(&bodies, signatures, types, &mut diagnostics);
     gpu_memory::verify(
         code,
         signatures,
@@ -241,8 +228,6 @@ pub(super) fn verify(
             signatures,
             types,
             strings,
-            constants,
-            imports,
             &mut diagnostics,
         );
     }
@@ -254,13 +239,11 @@ fn verify_profile_body(
     signature: &BinarySignature,
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
-    imports: Option<&[BinaryImport]>,
     profile: Profile,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let fully_decoded = body.blocks.iter().all(|block| block.instructions.is_some());
-    let value_types =
-        fully_decoded.then(|| super::infer_value_types(body, signatures, types, imports));
+    let value_types = fully_decoded.then(|| super::infer_value_types(body, signatures, types));
     let static_integers = if profile == Profile::Kernel && fully_decoded {
         kernel_static_integers(body)
     } else {
@@ -653,6 +636,19 @@ fn vft_allowed(entry: &BinaryGpuEntry) -> bool {
             | tir_format::BinaryEntryKind::Miss
             | tir_format::BinaryEntryKind::Callable
     )
+}
+
+fn direct_target(instruction: &tir_format::BinaryInstruction) -> Option<u64> {
+    if !matches!(instruction.opcode, 0x1a0 | 0x1a7 | 0x1aa | 0x1e7) {
+        return None;
+    }
+    instruction
+        .operands
+        .iter()
+        .find_map(|operand| match operand {
+            BinaryOperand::Symbol { kind: 0, index } => Some(*index),
+            _ => None,
+        })
 }
 
 fn forbidden_instruction(instruction: &tir_format::BinaryInstruction) -> Option<&'static str> {

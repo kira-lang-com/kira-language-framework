@@ -339,7 +339,7 @@ fn consumed_values(
             let arguments = all_values(instruction);
             owned_call_arguments(
                 &arguments,
-                direct_function_type(instruction, signatures, types, imports),
+                direct_function_type(instruction, signatures),
                 types,
             )
         }
@@ -364,10 +364,8 @@ fn consumed_values(
             owned_call_arguments(&arguments, closure_type, types)
         }
         0x1a9 => {
-            let arguments = all_values(instruction);
-            let mut consumed = owned_call_arguments(&arguments, type_operand(instruction), types);
-            consumed.extend(variadic_argument_values(instruction));
-            consumed
+            let fixed_arguments = all_values(instruction);
+            owned_call_arguments(&fixed_arguments, type_operand(instruction), types)
         }
         0x1a5 | 0x1a6 => owned_call_arguments(
             &all_values(instruction),
@@ -383,21 +381,6 @@ fn consumed_values(
         ),
         _ => Vec::new(),
     }
-}
-
-fn variadic_argument_values(instruction: &BinaryInstruction) -> Vec<u64> {
-    let fixed_count = instruction
-        .operands
-        .iter()
-        .find_map(|operand| match operand {
-            BinaryOperand::Index(count) => usize::try_from(*count).ok(),
-            _ => None,
-        })
-        .unwrap_or(0);
-    all_values(instruction)
-        .into_iter()
-        .skip(fixed_count)
-        .collect()
 }
 
 pub(super) fn witness_or_vtable_function_type(
@@ -529,8 +512,6 @@ fn vtable_function_type(
 fn direct_function_type(
     instruction: &BinaryInstruction,
     signatures: &BinarySignatureTable,
-    types: &BinaryTypeTable,
-    imports: Option<&[BinaryImport]>,
 ) -> Option<u64> {
     let index = instruction
         .operands
@@ -539,13 +520,10 @@ fn direct_function_type(
             BinaryOperand::Symbol { kind: 0, index } => Some(*index),
             _ => None,
         })?;
-    crate::binary_symbols::resolve_function_symbol(
-        index,
-        signatures,
-        types,
-        imports.unwrap_or_default(),
-    )
-    .map(|symbol| symbol.function_type_index)
+    signatures
+        .records
+        .get(usize::try_from(index).ok()?)
+        .map(|signature| signature.function_type)
 }
 
 fn type_operand(instruction: &BinaryInstruction) -> Option<u64> {

@@ -101,7 +101,6 @@ fn write_stage_fields(
     write_index(fields.len() as u64, output)?;
     for field in fields {
         output.push(field.semantic);
-        write_index(field.semantic_index, output)?;
         write_index(field.location, output)?;
         write_index(field.type_index, output)?;
         output.push(field.interpolation);
@@ -126,7 +125,6 @@ fn write_node(
             .find(|index| strings.get(*index) == Some(node_output.name.as_str()))
             .ok_or_else(|| malformed("GPU node output name is absent from STRINGS"))?;
         write_index(name_index as u64, output)?;
-        output.push(node_output.kind as u8);
         write_index(node_output.record_size, output)?;
         write_index(node_output.maximum_records, output)?;
     }

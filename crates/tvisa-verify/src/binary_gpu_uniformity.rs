@@ -3,8 +3,7 @@ use std::collections::{HashMap, HashSet};
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::StringTable;
 use tvisa_format::{
-    BinaryFunctionBody, BinaryOperand, GpuEntryKind, GpuEntryRecord, ParameterItemSummary,
-    SignatureSummary, TvisaImage, VariantIndex,
+    BinaryFunctionBody, BinaryOperand, GpuEntryKind, GpuEntryRecord, TvisaImage, VariantIndex,
 };
 
 use crate::binary_gpu_uniformity_cfg::{
@@ -70,10 +69,6 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
         Ok(functions) => functions,
         Err(error) => return vec![error.diagnostic],
     };
-    let types = match image.type_section(memory_limit) {
-        Ok(types) => types,
-        Err(error) => return vec![error.diagnostic],
-    };
     let variants = match image.variant_index(memory_limit) {
         Ok(variants) => variants,
         Err(error) => return vec![error.diagnostic],
@@ -108,20 +103,8 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
         else {
             continue;
         };
-        let entry_parameters = entries
-            .iter()
-            .find(|entry| {
-                entry.function_index == body.header.function_index
-                    && entry.kind != GpuEntryKind::Visible
-            })
-            .and_then(|entry| {
-                let signature = usize::try_from(function.signature_index)
-                    .ok()
-                    .and_then(|index| types.signatures.get(index))?;
-                Some(entry_parameter_uniformity(entry, signature, body))
-            });
         let (control, required_on_entry, local_diagnostics) =
-            analyze_function(body, &function.name, entry_parameters.as_deref(), &strings);
+            analyze_function(body, &function.name, &strings);
         diagnostics.extend(local_diagnostics);
         analyzed.push(FunctionInfo {
             function_index: body.header.function_index,
@@ -139,68 +122,6 @@ pub(super) fn verify(image: &TvisaImage, memory_limit: u64) -> Vec<Diagnostic> {
     let summaries = call_summaries(&analyzed, &function_by_index);
     diagnostics.extend(verify_call_sites(&analyzed, &function_by_index, &summaries));
     diagnostics
-}
-
-fn entry_parameter_uniformity(
-    entry: &GpuEntryRecord,
-    signature: &SignatureSummary,
-    body: &BinaryFunctionBody,
-) -> Vec<Uniformity> {
-    let parameter_count = body
-        .blocks
-        .first()
-        .map_or(0, |block| block.parameter_types.len());
-    let mut parameters = vec![Uniformity::Divergent; parameter_count];
-    let mut item_index = 0;
-    let mut value_index = 0;
-    if entry.root.is_some()
-        && !mark_entry_parameter(
-            signature,
-            &mut item_index,
-            &mut value_index,
-            &mut parameters,
-            true,
-        )
-    {
-        return parameters;
-    }
-    if entry.immediate_size != 0 {
-        mark_entry_parameter(
-            signature,
-            &mut item_index,
-            &mut value_index,
-            &mut parameters,
-            false,
-        );
-    }
-    parameters
-}
-
-fn mark_entry_parameter(
-    signature: &SignatureSummary,
-    item_index: &mut usize,
-    value_index: &mut usize,
-    parameters: &mut [Uniformity],
-    root: bool,
-) -> bool {
-    let Some(item) = signature.parameters.get(*item_index) else {
-        return false;
-    };
-    let value_count = match (root, item) {
-        (true, ParameterItemSummary::Leaf { .. })
-        | (false, ParameterItemSummary::Leaf { .. } | ParameterItemSummary::ByRef { .. }) => 1,
-        (false, ParameterItemSummary::Group(group)) => group.members.len(),
-        _ => return false,
-    };
-    let end = value_index
-        .saturating_add(value_count)
-        .min(parameters.len());
-    for parameter in parameters.get_mut(*value_index..end).into_iter().flatten() {
-        *parameter = Uniformity::Dispatch;
-    }
-    *item_index += 1;
-    *value_index = value_index.saturating_add(value_count);
-    true
 }
 
 fn visible_targets(
@@ -233,7 +154,6 @@ fn visible_targets(
 fn analyze_function(
     body: &BinaryFunctionBody,
     name: &str,
-    entry_parameters: Option<&[Uniformity]>,
     strings: &StringTable,
 ) -> (Vec<Uniformity>, Option<Uniformity>, Vec<Diagnostic>) {
     let mut block_starts = Vec::with_capacity(body.blocks.len());
@@ -251,14 +171,8 @@ fn analyze_function(
     }
     let mut values = vec![Uniformity::Dispatch; value_count];
     if let Some(first) = body.blocks.first() {
-        if let Some(parameters) = entry_parameters {
-            for (value, uniformity) in values.iter_mut().zip(parameters) {
-                *value = *uniformity;
-            }
-        } else {
-            for value in values.iter_mut().take(first.parameter_types.len()) {
-                *value = Uniformity::Divergent;
-            }
+        for value in values.iter_mut().take(first.parameter_types.len()) {
+            *value = Uniformity::Divergent;
         }
     }
     let edges = control_flow_edges(body);
@@ -414,10 +328,7 @@ fn builtin_uniformity(
             "threads_per_threadgroup"
             | "threadgroups_per_grid"
             | "subgroups_per_threadgroup"
-            | "subgroup_size"
-            | "base_vertex"
-            | "base_instance"
-            | "draw_index",
+            | "subgroup_size",
         ) => Uniformity::Dispatch,
         _ => Uniformity::Divergent,
     }

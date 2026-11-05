@@ -122,15 +122,11 @@ pub(crate) fn integer_unary_operators() -> [IntegerUnaryOperator; 7] {
     ]
 }
 
-pub(crate) fn convert_kinds() -> [ConvertKind; 16] {
+pub(crate) fn convert_kinds() -> [ConvertKind; 12] {
     [
         ConvertKind::Truncate,
         ConvertKind::ZeroExtend,
         ConvertKind::SignExtend,
-        ConvertKind::SignedToSignedSaturating,
-        ConvertKind::SignedToUnsignedSaturating,
-        ConvertKind::UnsignedToSignedSaturating,
-        ConvertKind::UnsignedToUnsignedSaturating,
         ConvertKind::FloatTruncate,
         ConvertKind::FloatExtend,
         ConvertKind::SignedToFloat,

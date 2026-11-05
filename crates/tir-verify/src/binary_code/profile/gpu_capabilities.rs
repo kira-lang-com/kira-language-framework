@@ -2,9 +2,8 @@ use std::collections::HashSet;
 
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::{
-    BinaryConstantTable, BinaryEntryKind, BinaryFpMode, BinaryGpuEntry, BinaryGpuNodeOutputKind,
-    BinaryGpuTable, BinaryImport, BinaryOperand, BinarySignatureTable, BinaryType, BinaryTypeTable,
-    StringTable,
+    BinaryEntryKind, BinaryFpMode, BinaryGpuEntry, BinaryGpuTable, BinaryOperand,
+    BinarySignatureTable, BinaryType, BinaryTypeTable, StringTable,
 };
 use tir_types::FloatType;
 
@@ -12,11 +11,9 @@ use super::CallEdge;
 
 mod atomic_width;
 mod builtin_rules;
-mod specialization;
 mod type_rules;
 
 const V15: Code = Code::new(Dialect::Tir, Area::Verifier, 15);
-const V2: Code = Code::new(Dialect::Tir, Area::Verifier, 2);
 const CAPABILITY_NAMES: [&str; 19] = [
     "float64",
     "atomic128",
@@ -46,8 +43,6 @@ pub(super) fn verify(
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
     strings: Option<&StringTable>,
-    constants: Option<&BinaryConstantTable>,
-    imports: Option<&[BinaryImport]>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for entry in &gpu.entries {
@@ -106,22 +101,12 @@ pub(super) fn verify(
                 required |= 1 << 12;
             }
             if let Some(body) = bodies.get(function_index).copied().flatten() {
-                if entry.subgroup_size != 0 {
-                    verify_subgroup_clusters(
-                        body,
-                        function,
-                        signature,
-                        entry.subgroup_size,
-                        diagnostics,
-                    );
-                }
                 add_body_requirements(
                     entry.kind,
                     body,
                     signatures,
                     types,
                     strings,
-                    imports,
                     &signature.name,
                     &mut checked_types,
                     diagnostics,
@@ -150,15 +135,6 @@ pub(super) fn verify(
                 diagnostics,
             );
         }
-        specialization::verify_entry(
-            entry,
-            &visited,
-            bodies,
-            signatures,
-            types,
-            constants,
-            diagnostics,
-        );
         let missing = required & !entry.capabilities;
         for (bit, name) in CAPABILITY_NAMES.iter().enumerate() {
             if missing & (1 << bit) != 0 {
@@ -170,50 +146,6 @@ pub(super) fn verify(
                     ),
                 ));
             }
-            if entry.capabilities & (1 << bit) != 0 && required & (1 << bit) == 0 {
-                diagnostics.push(Diagnostic::error(
-                    V15,
-                    format!(
-                        "GPU entry @{} declares unused capability '{name}'",
-                        signature.name
-                    ),
-                ));
-            }
-        }
-    }
-}
-
-fn verify_subgroup_clusters(
-    body: &tir_format::BinaryFunctionBody,
-    function: &tir_format::BinarySignature,
-    entry: &tir_format::BinarySignature,
-    subgroup_size: u64,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    for instruction in body
-        .blocks
-        .iter()
-        .flat_map(|block| block.instructions.iter().flatten())
-        .filter(|instruction| matches!(instruction.opcode, 0x450..=0x452))
-    {
-        let indices = instruction
-            .operands
-            .iter()
-            .filter_map(|operand| match operand {
-                BinaryOperand::Index(index) => Some(*index),
-                _ => None,
-            });
-        let Some(cluster) = indices.skip(1).next() else {
-            continue;
-        };
-        if cluster != 0 && cluster > subgroup_size {
-            diagnostics.push(Diagnostic::error(
-                V2,
-                format!(
-                    "GPU entry @{} selects subgroup_size {subgroup_size}, smaller than subgroup cluster {cluster} in @{} at CODE+0x{:x}",
-                    entry.name, function.name, instruction.offset
-                ),
-            ));
         }
     }
 }
@@ -225,13 +157,6 @@ fn entry_requirements(entry: &BinaryGpuEntry) -> u64 {
     }
     if entry.kind == BinaryEntryKind::Node {
         required |= 1 << 6;
-        if entry.node.as_ref().is_some_and(|node| {
-            node.outputs
-                .iter()
-                .any(|output| output.kind == BinaryGpuNodeOutputKind::Mesh)
-        }) {
-            required |= 1 << 7;
-        }
     }
     if entry.subgroup_size != 0 {
         required |= 1 << 15;
@@ -248,13 +173,12 @@ fn add_body_requirements(
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
     strings: Option<&StringTable>,
-    imports: Option<&[BinaryImport]>,
     entry_name: &str,
     checked_types: &mut HashSet<u64>,
     diagnostics: &mut Vec<Diagnostic>,
     required: &mut u64,
 ) {
-    let value_types = super::super::infer_value_types(body, signatures, types, imports);
+    let value_types = super::super::infer_value_types(body, signatures, types);
     let function_name = usize::try_from(body.function_index)
         .ok()
         .and_then(|index| signatures.records.get(index))
@@ -317,13 +241,6 @@ fn add_instruction_requirements(
         0x406 => *required |= 1 << 4,
         0x407 | 0x408 => *required |= 1 << 5,
         0x409 => *required |= 1 << 3,
-        0x402 | 0x403
-            if instruction.operands.iter().any(
-                |operand| matches!(operand, BinaryOperand::Index(mask) if mask & (1 << 3) != 0),
-            ) =>
-        {
-            *required |= 1 << 3;
-        }
         0x40a => *required |= 1 << 18,
         0x48d => *required |= 1 << 14,
         0x568 => *required |= 1 << 10,

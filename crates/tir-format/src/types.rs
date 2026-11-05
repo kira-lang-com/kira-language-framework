@@ -36,7 +36,6 @@ pub struct BinaryFunctionBody {
     pub body_byte_size: u64,
     pub block_count: u64,
     pub blocks: Vec<BinaryBlock>,
-    pub canonical_bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,7 +45,6 @@ pub struct BinaryBlock {
     pub loop_continue: Option<u64>,
     pub parameters: Vec<BinaryBlockParameter>,
     pub instruction_count: u64,
-    /// Encoded instruction payload retained for lossless reassembly.
     pub instruction_bytes: Vec<u8>,
     /// `None` means this reader does not yet support an opcode in the block.
     pub instructions: Option<Vec<BinaryInstruction>>,
@@ -146,30 +144,6 @@ pub struct BinaryGpuEntry {
     pub subgroup_size: u64,
     pub floating_point_mode: Option<BinaryFpMode>,
     pub specialization_constants: Vec<BinaryGpuSpecializationConstant>,
-    pub node: Option<BinaryGpuNodeRecord>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BinaryGpuNodeRecord {
-    pub launch_mode: u8,
-    pub maximum_dispatch_grid: [u64; 3],
-    pub input_record_size: u64,
-    pub outputs: Vec<BinaryGpuNodeOutput>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BinaryGpuNodeOutput {
-    pub name: String,
-    pub kind: BinaryGpuNodeOutputKind,
-    pub record_size: u64,
-    pub maximum_records: u64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum BinaryGpuNodeOutputKind {
-    Node = 0,
-    Mesh = 1,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -330,7 +304,7 @@ pub struct BinaryGenericParameter {
     pub bounds: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum BinaryType {
     Integer(u64),
     Float(FloatType),
@@ -413,7 +387,7 @@ pub enum BinaryType {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BinaryFunctionType {
     pub parameters: Vec<BinaryFunctionParameter>,
     pub result: u64,
@@ -423,7 +397,7 @@ pub struct BinaryFunctionType {
     pub foreign: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct BinaryFunctionParameter {
     pub convention: u8,
     pub context: bool,

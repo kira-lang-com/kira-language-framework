@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tir_diag::{Area, Code, Diagnostic, Dialect};
 use tir_format::text::{Token, TokenKind};
 use tir_format::{FunctionBody, TextInstruction};
+use tir_types::Type;
 
 const V1: Code = Code::new(Dialect::Tir, Area::Verifier, 1);
 
@@ -29,19 +30,16 @@ pub fn text_successors(body: &FunctionBody) -> Vec<Vec<usize>> {
         .collect()
 }
 
-pub(crate) fn conditional_successor_count(instruction: &TextInstruction) -> Option<usize> {
-    matches!(instruction.opcode.as_str(), "cond.br" | "switch.int")
-        .then(|| successors_of(instruction).len())
-}
-
 pub(crate) fn instruction_targets(
     body: &FunctionBody,
     instruction: &TextInstruction,
 ) -> Vec<usize> {
-    let mut labels = HashMap::with_capacity(body.blocks.len());
-    for (index, block) in body.blocks.iter().enumerate() {
-        labels.entry(block.label.as_str()).or_insert(index);
-    }
+    let labels = body
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| (block.label.as_str(), index))
+        .collect::<HashMap<_, _>>();
     successors_of(instruction)
         .into_iter()
         .filter_map(|successor| labels.get(successor.label.as_str()).copied())
@@ -73,6 +71,43 @@ pub(crate) fn text_edges(body: &FunctionBody) -> Vec<Vec<TextEdge>> {
                 .collect()
         })
         .collect()
+}
+
+/// V1: every outgoing SSA argument has the type of the destination block
+/// parameter. Names without inferred types are diagnosed separately by SSA/V2.
+pub(crate) fn verify_edge_types(
+    body: &FunctionBody,
+    inferred_types: &HashMap<String, Type>,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (source, edges) in text_edges(body).into_iter().enumerate() {
+        let span = body.blocks[source]
+            .instructions
+            .last()
+            .map_or(body.blocks[source].span, |instruction| instruction.span);
+        for edge in edges {
+            let target = &body.blocks[edge.target];
+            for (argument, parameter) in edge.arguments.iter().zip(&target.parameters) {
+                if let Some(actual) = inferred_types.get(argument)
+                    && actual != &parameter.ty
+                {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            V1,
+                            format!(
+                                "edge argument %{argument} has type {actual}, but block {} parameter %{} requires {}",
+                                target.label,
+                                parameter.name,
+                                parameter.ty,
+                            ),
+                        )
+                        .with_primary_span(span),
+                    );
+                }
+            }
+        }
+    }
+    diagnostics
 }
 
 pub(crate) fn verify_text_cfg(body: &FunctionBody, enforce_structure: bool) -> Vec<Diagnostic> {
@@ -142,18 +177,6 @@ fn verify_rpo(
     labels: &HashMap<&str, usize>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let ordered_successors = successors
-        .iter()
-        .map(|edges| {
-            let mut targets = edges
-                .iter()
-                .filter_map(|successor| labels.get(successor.label.as_str()).copied())
-                .collect::<Vec<_>>();
-            targets.sort_unstable();
-            targets.dedup();
-            targets
-        })
-        .collect::<Vec<_>>();
     let mut visited = vec![false; body.blocks.len()];
     let mut order = Vec::with_capacity(body.blocks.len());
     for root in 0..body.blocks.len() {
@@ -161,7 +184,7 @@ fn verify_rpo(
             continue;
         }
         let mut postorder = Vec::new();
-        visit_postorder(root, &ordered_successors, &mut visited, &mut postorder);
+        visit_postorder(root, successors, labels, &mut visited, &mut postorder);
         order.extend(postorder.into_iter().rev());
     }
     if let Some((actual, expected)) = order
@@ -185,7 +208,8 @@ fn verify_rpo(
 
 fn visit_postorder(
     block: usize,
-    successors: &[Vec<usize>],
+    successors: &[Vec<Successor>],
+    labels: &HashMap<&str, usize>,
     visited: &mut [bool],
     postorder: &mut Vec<usize>,
 ) {
@@ -193,13 +217,17 @@ fn visit_postorder(
     let mut stack = Vec::with_capacity(successors.len().min(1024));
     stack.push((block, 0usize));
     while let Some((current, next_successor)) = stack.last().copied() {
-        let next = successors[current].get(next_successor).copied();
+        let next = successors[current]
+            .get(next_successor)
+            .and_then(|successor| labels.get(successor.label.as_str()).copied());
         if let Some(target) = next {
             stack.last_mut().expect("DFS stack is nonempty").1 += 1;
             if !visited[target] {
                 visited[target] = true;
                 stack.push((target, 0));
             }
+        } else if next_successor < successors[current].len() {
+            stack.last_mut().expect("DFS stack is nonempty").1 += 1;
         } else {
             postorder.push(current);
             stack.pop();
@@ -210,11 +238,6 @@ fn visit_postorder(
 fn successors_of(instruction: &TextInstruction) -> Vec<Successor> {
     let tokens = &instruction.tokens;
     let operands = &tokens[instruction_operands_start(tokens)..];
-    let operand_end = operands
-        .iter()
-        .position(|token| matches!(token.kind, TokenKind::Punctuation('!')))
-        .unwrap_or(operands.len());
-    let operands = &operands[..operand_end];
     match instruction.opcode.as_str() {
         "br" | "br.indirect" => {
             let mut targets = if instruction.opcode == "br" {
@@ -494,7 +517,7 @@ fn matching_delimiters(tokens: &[Token], left: char, right: char) -> Option<usiz
     None
 }
 
-pub(crate) fn is_control_terminator(opcode: &str) -> bool {
+fn is_control_terminator(opcode: &str) -> bool {
     matches!(
         opcode,
         "br" | "cond.br"

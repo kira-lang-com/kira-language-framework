@@ -4,7 +4,7 @@ use tir_format::text::{Token, TokenKind, decode_kira_string_literal_contents};
 use tir_format::{StringTable, TextInstruction};
 use tvisa_format::{AssemblyRecord, BinaryInstruction, BinaryOperand};
 
-use tvisa_format::TextVariantArchitecture as VariantArchitecture;
+use crate::variant_text::VariantArchitecture;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum AssemblyArchitecture {

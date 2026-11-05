@@ -323,7 +323,7 @@ fn declare_shims<'a>(
                 .as_ref()
                 .is_some_and(klf_kir::CPrototype::needs_shim)
     };
-    if !module.functions.iter().any(shimmed) {
+    if !module.functions.iter().any(|function| shimmed(function)) {
         return Ok(shims);
     }
     let referenced = module

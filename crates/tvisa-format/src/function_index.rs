@@ -1,47 +1,5 @@
 use crate::binary::FormatError;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FunctionIndexRecord {
-    pub offset: u64,
-    pub size: u32,
-}
-
-/// Encode FUNCINDEX ranges after checking that they partition CODE.
-pub fn encode_function_index(
-    records: &[FunctionIndexRecord],
-    code_size: u64,
-    canonical: bool,
-) -> Result<Vec<u8>, FormatError> {
-    if records.is_empty() {
-        if code_size != 0 {
-            return Err(FormatError::malformed(
-                None,
-                "CODE must be empty when FUNCINDEX has no records",
-            ));
-        }
-        return Ok(Vec::new());
-    }
-    let expected_count = u32::try_from(records.len())
-        .map_err(|_| FormatError::malformed(None, "function count overflows"))?;
-    let byte_len = records
-        .len()
-        .checked_mul(16)
-        .ok_or_else(|| FormatError::malformed(None, "FUNCINDEX size overflows"))?;
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(byte_len)
-        .map_err(|_| FormatError::malformed(None, "FUNCINDEX allocation failed"))?;
-    for record in records {
-        bytes.extend_from_slice(&record.offset.to_le_bytes());
-        bytes.extend_from_slice(&record.size.to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-    }
-    let mut validator = FunctionIndexValidator::new(expected_count, code_size, canonical)?;
-    validator.push(&bytes)?;
-    validator.finish()?;
-    Ok(bytes)
-}
-
 pub(crate) struct FunctionIndexValidator {
     expected_count: u32,
     code_size: u64,

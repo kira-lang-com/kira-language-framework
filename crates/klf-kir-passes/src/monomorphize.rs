@@ -6,6 +6,7 @@
 use klf_core::Name;
 use klf_kir::{Block, Function, Instruction, Module, Operation, Parameter, Type};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+use std::sync::Arc;
 
 /// Monomorphize `module`: replace generic calls with calls to specialized copies
 /// and drop the generic templates.
@@ -17,19 +18,22 @@ pub fn monomorphize(module: &Module) -> Module {
 /// [`monomorphize`], taking the module rather than copying it.
 #[must_use]
 pub fn monomorphize_owned(mut module: Module) -> Module {
-    let (templates, plain): (Vec<Function>, Vec<Function>) = std::mem::take(&mut module.functions)
-        .into_iter()
-        .partition(|function| !function.generics.is_empty());
+    let (templates, plain): (Vec<Arc<Function>>, Vec<Arc<Function>>) =
+        std::mem::take(&mut module.functions)
+            .into_iter()
+            .partition(|function| !function.generics.is_empty());
     let templates: HashMap<&str, &Function> = templates
         .iter()
-        .map(|function| (function.name.as_str(), function))
+        .map(|function| (function.name.as_str(), function.as_ref()))
         .collect();
     let generics: HashSet<&str> = templates.keys().copied().collect();
 
     let mut worklist: Vec<(String, Vec<Type>)> = Vec::new();
     let mut output = Vec::with_capacity(plain.len());
     for mut function in plain {
-        rewrite_calls(&mut function, &generics, &mut worklist);
+        if has_generic_calls(&function, &generics) {
+            rewrite_calls(Arc::make_mut(&mut function), &generics, &mut worklist);
+        }
         output.push(function);
     }
 
@@ -50,7 +54,7 @@ pub fn monomorphize_owned(mut module: Module) -> Module {
             .collect();
         let mut specialized = specialize(template, &substitution, &mangled);
         rewrite_calls(&mut specialized, &generics, &mut worklist);
-        output.push(specialized);
+        output.push(Arc::new(specialized));
     }
 
     module.functions = output;
@@ -214,4 +218,21 @@ fn rewrite_calls(
             }
         }
     }
+}
+
+fn has_generic_calls(function: &Function, generics: &HashSet<&str>) -> bool {
+    function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| {
+            matches!(
+                &instruction.operation,
+                Operation::Call {
+                    callee,
+                    generic_args,
+                    ..
+                } if !generic_args.is_empty() && generics.contains(callee.as_str())
+            )
+        })
 }

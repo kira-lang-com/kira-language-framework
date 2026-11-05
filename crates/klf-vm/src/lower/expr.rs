@@ -375,31 +375,6 @@ impl Lowerer<'_> {
                 let flags = source_width.code() | (dest_width.code() << 3);
                 self.emit(Instr::abc(opcode, dest, source, 0).with_flags(flags));
             }
-            ConvertKind::SignedToSignedSaturating
-            | ConvertKind::SignedToUnsignedSaturating
-            | ConvertKind::UnsignedToSignedSaturating
-            | ConvertKind::UnsignedToUnsignedSaturating => {
-                let source_width = self.width_of(value)?;
-                let dest_width = width_of_type(ty)?;
-                let source_signed = matches!(
-                    kind,
-                    ConvertKind::SignedToSignedSaturating | ConvertKind::SignedToUnsignedSaturating
-                );
-                let dest_signed = matches!(
-                    kind,
-                    ConvertKind::SignedToSignedSaturating | ConvertKind::UnsignedToSignedSaturating
-                );
-                let opcode = if source_signed {
-                    Opcode::SExt
-                } else {
-                    Opcode::ZExt
-                };
-                let flags = source_width.code()
-                    | (dest_width.code() << 3)
-                    | (1 << 6)
-                    | (u8::from(dest_signed) << 7);
-                self.emit(Instr::abc(opcode, dest, source, 0).with_flags(flags));
-            }
             ConvertKind::SignedToFloat | ConvertKind::UnsignedToFloat => {
                 let source_width = self.width_of(value)?;
                 let opcode = if matches!(kind, ConvertKind::SignedToFloat) {

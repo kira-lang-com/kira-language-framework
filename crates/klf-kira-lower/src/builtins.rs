@@ -29,15 +29,6 @@ pub(crate) fn wrapper_name(service_name: &str) -> Option<String> {
     };
     Some(name)
 }
-/// Returns a manifest entry for a KLF Kira service wrapper.
-#[must_use]
-pub fn service<'a>(session: &'a Session, name: &str) -> Option<&'a KernelService> {
-    session
-        .kernel_services()
-        .services()
-        .iter()
-        .find(|service| wrapper_name(&service.name).as_deref() == Some(name))
-}
 /// The built-in signatures, seeded into name resolution so a service call type-
 /// checks like any other call.
 #[must_use]
@@ -49,7 +40,9 @@ pub fn signatures(session: &Session) -> Vec<(Name, Signature)> {
         .filter_map(|service| {
             let wrapper = wrapper_name(&service.name)?;
             let (params, result) = wrapper_types(service)?;
-            Some((Name::new(wrapper), Signature::free(params, result)))
+            let mut signature = Signature::free(params, result);
+            signature.service = Some(service.clone());
+            Some((Name::new(wrapper), signature))
         })
         .collect();
     signatures.push((

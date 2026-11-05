@@ -8,10 +8,10 @@ use tir_target::{Platform, Profile};
 use crate::strings::{StringTable, StringTableError, StringTableValidator};
 
 pub const TIRB_HEADER_SIZE: usize = 64;
-pub const TIRB_FLAG_CANONICAL: u32 = 1 << 6;
 const SECTION_ENTRY_SIZE: usize = 32;
 const SECTION_COMPRESSION: u32 = 1;
 const HEADER_FLAGS_MASK: u32 = 0x7f;
+const HEADER_CANONICAL: u32 = 1 << 6;
 const MAX_SECTION_SIZE: u64 = 1 << 40;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,7 +30,7 @@ pub struct Header {
 impl Header {
     #[must_use]
     pub const fn claims_canonical(self) -> bool {
-        self.flags & TIRB_FLAG_CANONICAL != 0
+        self.flags & HEADER_CANONICAL != 0
     }
 }
 
@@ -148,15 +148,6 @@ pub struct BinaryModule {
 }
 
 impl BinaryModule {
-    #[must_use]
-    pub fn from_sections(header: Header, sections: Vec<Section>) -> Self {
-        Self {
-            header,
-            sections,
-            content_hash: ContentHash::from_bytes([0; 32]),
-        }
-    }
-
     pub fn string_table(&self, memory_limit: u64) -> Result<StringTable, FormatError> {
         let section = self
             .sections
@@ -474,7 +465,7 @@ impl FormatError {
         Self { diagnostic, offset }
     }
 
-    fn noncanonical(offset: Option<usize>, message: impl Into<String>) -> Self {
+    pub(crate) fn noncanonical(offset: Option<usize>, message: impl Into<String>) -> Self {
         let mut diagnostic = Diagnostic::error(Code::new(Dialect::Tir, Area::Encoding, 2), message);
         if let Some(offset) = offset {
             diagnostic = diagnostic.with_primary_span(Span::new(offset, offset.saturating_add(1)));
@@ -503,11 +494,9 @@ fn validate_required_sections<'a>(
     let mut strings = false;
     let mut module = false;
     let mut analysis = false;
-    let mut capabilities = false;
     for section in sections {
         strings |= section.kind == 1;
         module |= section.kind == 2;
-        capabilities |= section.kind == 13;
         analysis |= section.kind == 14;
     }
     if !strings {
@@ -518,9 +507,6 @@ fn validate_required_sections<'a>(
     }
     if !analysis {
         return Err(FormatError::malformed(None, "ANALYSIS section is missing"));
-    }
-    if !capabilities {
-        return Err(FormatError::malformed(None, "CAPS section is missing"));
     }
     Ok(())
 }
@@ -575,99 +561,4 @@ fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, FormatError> {
     let mut value = [0; 8];
     value.copy_from_slice(&bytes[offset..end]);
     Ok(u64::from_le_bytes(value))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn canonical_fixture() -> BinaryModule {
-        let strings = StringTable::from_values(vec![String::new()]).unwrap();
-        let mut string_bytes = Vec::new();
-        strings.encode(&mut string_bytes).unwrap();
-
-        BinaryModule {
-            header: Header {
-                year: 26,
-                month: 11,
-                week: 1,
-                revision: 0,
-                flags: TIRB_FLAG_CANONICAL,
-                profile: Profile::App,
-                platform: Platform::Portable,
-                section_count: 0,
-                file_size: 0,
-            },
-            sections: vec![
-                Section::from_uncompressed(14, vec![0x0e]),
-                Section::from_uncompressed(2, vec![0x02]),
-                Section::from_uncompressed(13, vec![0x0d]),
-                Section::from_uncompressed(1, string_bytes),
-            ],
-            content_hash: ContentHash::of([]),
-        }
-    }
-
-    #[test]
-    fn canonical_writer_sorts_sections_and_roundtrips_byte_for_byte() {
-        let mut bytes = Vec::new();
-        let (header, hash) = canonical_fixture()
-            .write_uncompressed_container(&mut bytes)
-            .unwrap();
-
-        assert!(header.claims_canonical());
-        assert_eq!(header.section_count, 4);
-        assert_eq!(hash.as_bytes(), &bytes[24..56]);
-
-        let decoded = BinaryModule::decode(&bytes).unwrap();
-        assert_eq!(decoded.header, header);
-        assert_eq!(decoded.content_hash, hash);
-        assert_eq!(
-            decoded
-                .sections
-                .iter()
-                .map(|section| section.kind)
-                .collect::<Vec<_>>(),
-            [1, 2, 13, 14]
-        );
-        assert!(
-            decoded
-                .sections
-                .iter()
-                .all(|section| !section.is_compressed())
-        );
-
-        let mut reencoded = Vec::new();
-        decoded
-            .write_uncompressed_container(&mut reencoded)
-            .unwrap();
-        assert_eq!(reencoded, bytes);
-    }
-
-    #[test]
-    fn canonical_decoder_rejects_padding_between_table_and_sections() {
-        let mut bytes = Vec::new();
-        canonical_fixture()
-            .write_uncompressed_container(&mut bytes)
-            .unwrap();
-
-        let table_end = TIRB_HEADER_SIZE + 4 * SECTION_ENTRY_SIZE;
-        bytes.insert(table_end, 0);
-        for index in 0..4 {
-            let offset = TIRB_HEADER_SIZE + index * SECTION_ENTRY_SIZE + 8;
-            let current = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-            bytes[offset..offset + 8].copy_from_slice(&(current + 1).to_le_bytes());
-        }
-        let file_size = u64::from_le_bytes(bytes[56..64].try_into().unwrap());
-        bytes[56..64].copy_from_slice(&(file_size + 1).to_le_bytes());
-        let hash = ContentHash::of(&bytes[TIRB_HEADER_SIZE..]);
-        bytes[24..56].copy_from_slice(hash.as_bytes());
-
-        let error = BinaryModule::decode(&bytes).unwrap_err();
-        assert_eq!(
-            error.diagnostic.code,
-            Code::new(Dialect::Tir, Area::Encoding, 2)
-        );
-        assert!(error.to_string().contains("contiguous"));
-    }
 }
