@@ -97,12 +97,11 @@ fn verify_instruction(
         5 => {
             values.len() == 1
                 && instruction.result_count == 0
-                && super::address::infer_enum_payload_address(
+                && super::address::has_enum_variant(
                     instruction,
                     value_type(value_types, values[0]),
                     types,
                 )
-                .is_some()
         }
         6 => verify_address_cast(instruction, &values, value_types, result, types),
         7 => verify_addr_to_pointer(

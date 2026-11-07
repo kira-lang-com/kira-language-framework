@@ -4,14 +4,18 @@ use crate::types::{
     BinaryTypeTable,
 };
 use crate::{FunctionBody, TextItem, TextParseError};
+use std::collections::HashMap;
 use tir_diag::Span;
-use tir_types::Convention;
+use tir_types::{Convention, Type};
 
 pub(crate) fn encode_control_flow_body(
     body: &FunctionBody,
     function_index: u64,
     function: &BinaryFunctionType,
     types: &BinaryTypeTable,
+    float_constants: &std::collections::HashMap<usize, (u64, u64)>,
+    string_constants: &std::collections::HashMap<usize, u64>,
+    callees: &crate::text_direct_call::Callees,
     block_parameter_indices: &[Vec<u64>],
     source: &str,
     item: TextItem,
@@ -38,6 +42,25 @@ pub(crate) fn encode_control_flow_body(
         .iter()
         .map(|block| block.label.as_str())
         .collect::<Vec<_>>();
+    let mut inferred = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.parameters)
+        .map(|parameter| (parameter.name.clone(), parameter.ty.clone()))
+        .collect::<HashMap<String, Type>>();
+    for block in &body.blocks {
+        let (_, operations) = block
+            .instructions
+            .split_last()
+            .ok_or_else(|| item_error(item, block.span, "CODE control block has no terminator"))?;
+        crate::text_straight_line_validation::validate_operations(
+            operations,
+            &mut inferred,
+            source,
+            item,
+            Some(callees),
+        )?;
+    }
     let mut blocks = Vec::with_capacity(body.blocks.len());
 
     for block in &body.blocks {
@@ -62,12 +85,16 @@ pub(crate) fn encode_control_flow_body(
             .instructions
             .split_last()
             .ok_or_else(|| item_error(item, block.span, "block has no terminator"))?;
-        let terminator = parse_terminator(instruction, returns_unit, item)?;
+        let terminator = parse_terminator(instruction, returns_unit, source, item)?;
         let mut instruction_bytes = Vec::new();
         crate::text_straight_line_assembly::encode_operations(
             operations,
             &mut values,
+            &inferred,
             types,
+            float_constants,
+            string_constants,
+            callees,
             source,
             item,
             &mut instruction_bytes,
@@ -133,6 +160,39 @@ pub(crate) fn encode_control_flow_body(
                 })?;
                 write_uleb(merge, &mut instruction_bytes, item, instruction.span)?;
             }
+            ControlTerminator::Switch(switch) => {
+                crate::text_switch_int::encode(
+                    &switch,
+                    &values,
+                    &labels,
+                    &mut instruction_bytes,
+                    item,
+                    instruction.span,
+                )?;
+            }
+            ControlTerminator::EnumSwitch(switch) => {
+                crate::text_switch_enum::encode(
+                    &switch,
+                    body,
+                    types,
+                    block_parameter_indices,
+                    &values,
+                    &labels,
+                    &mut instruction_bytes,
+                    item,
+                    instruction.span,
+                )?;
+            }
+            ControlTerminator::Indirect(branch) => {
+                crate::text_indirect_branch::encode(
+                    &branch,
+                    &values,
+                    &labels,
+                    &mut instruction_bytes,
+                    item,
+                    instruction.span,
+                )?;
+            }
             ControlTerminator::Return(value) => {
                 write_uleb(0x1e5, &mut instruction_bytes, item, instruction.span)?;
                 write_uleb(0, &mut instruction_bytes, item, instruction.span)?;
@@ -147,6 +207,59 @@ pub(crate) fn encode_control_flow_body(
                         instruction.span,
                     )?;
                 }
+            }
+            ControlTerminator::Fail(value) => {
+                write_uleb(0x1e6, &mut instruction_bytes, item, instruction.span)?;
+                write_uleb(0, &mut instruction_bytes, item, instruction.span)?;
+                write_uleb(0, &mut instruction_bytes, item, instruction.span)?;
+                write_value_delta(
+                    &values,
+                    &value,
+                    current_value,
+                    &mut instruction_bytes,
+                    item,
+                    instruction.span,
+                )?;
+            }
+            ControlTerminator::Unreachable { undefined_behavior } => {
+                write_uleb(0x1e8, &mut instruction_bytes, item, instruction.span)?;
+                write_uleb(
+                    if undefined_behavior { 1 << 48 } else { 0 },
+                    &mut instruction_bytes,
+                    item,
+                    instruction.span,
+                )?;
+                write_uleb(0, &mut instruction_bytes, item, instruction.span)?;
+            }
+            ControlTerminator::Trap(code) => {
+                write_uleb(0x1e9, &mut instruction_bytes, item, instruction.span)?;
+                write_uleb(0, &mut instruction_bytes, item, instruction.span)?;
+                write_uleb(0, &mut instruction_bytes, item, instruction.span)?;
+                crate::leb::write_integer_immediate(
+                    false,
+                    u128::from(code),
+                    &mut instruction_bytes,
+                )
+                .map_err(|error| item_error(item, instruction.span, error.to_string()))?;
+            }
+            ControlTerminator::TailCall(call) => {
+                crate::text_direct_call::encode_tail(
+                    &call,
+                    &values,
+                    callees,
+                    &mut instruction_bytes,
+                    item,
+                    instruction.span,
+                )?;
+            }
+            ControlTerminator::Longjmp(longjmp) => {
+                crate::text_longjmp::encode(
+                    &longjmp,
+                    &values,
+                    &mut instruction_bytes,
+                    item,
+                    instruction.span,
+                )?;
             }
         }
 
@@ -197,7 +310,7 @@ pub(crate) fn encode_control_flow_body(
     })
 }
 
-fn write_target(
+pub(crate) fn write_target(
     values: &[&str],
     labels: &[&str],
     current_value: u64,
@@ -221,7 +334,7 @@ fn write_target(
     Ok(())
 }
 
-fn target_index(
+pub(crate) fn target_index(
     labels: &[&str],
     label: &str,
     item: TextItem,
@@ -234,7 +347,7 @@ fn target_index(
         .ok_or_else(|| item_error(item, span, "branch target does not name a block"))
 }
 
-fn write_value_delta(
+pub(crate) fn write_value_delta(
     values: &[&str],
     name: &str,
     current_value: u64,
@@ -253,7 +366,7 @@ fn write_value_delta(
     write_uleb(delta, output, item, span)
 }
 
-fn write_uleb(
+pub(crate) fn write_uleb(
     value: u64,
     output: &mut Vec<u8>,
     item: TextItem,

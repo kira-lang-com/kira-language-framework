@@ -14,6 +14,13 @@ const S4: Code = Code::new(Dialect::Tir, Area::ControlFlow, 4);
 const S5: Code = Code::new(Dialect::Tir, Area::ControlFlow, 5);
 const S6: Code = Code::new(Dialect::Tir, Area::ControlFlow, 6);
 
+pub(crate) fn is_forbidden_in_structured_control_flow(opcode: &str) -> bool {
+    matches!(
+        opcode,
+        "br.indirect" | "invoke" | "landingpad" | "resume" | "throw" | "setjmp" | "longjmp"
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConstructKind {
     Loop { continue_block: usize },

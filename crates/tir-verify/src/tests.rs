@@ -435,3 +435,101 @@ fn scalar_memory_take_then_read_is_use_before_init() {
         "load after take must be rejected: {diagnostics:?}"
     );
 }
+
+#[test]
+fn static_access_read_scopes_verify_in_text_and_binary() {
+    let source = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.access(%v: i32) -> i32 engine(native) {\nbb0(%v: i32):\n  %slot = stack.alloc i32\n  store [init] %v to %slot\n  %first = access.begin [read] [static] %slot\n  %second = access.begin [read] [static] %slot\n  access.end %second\n  access.end %first\n  %loaded = load [trivial] %slot\n  stack.dealloc %slot\n  return %loaded\n}\n";
+    let parsed = parse_text_module(source).expect("text parses");
+    let text_errors = verify_text_module(&parsed, Default::default())
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(
+        text_errors.is_empty(),
+        "nonconflicting accesses: {text_errors:?}"
+    );
+    let bytes = assemble_text_module(&parsed).expect("valid accesses assemble");
+    let module = BinaryModule::decode(&bytes).expect("CODE decodes");
+    let binary_errors = verify_binary_module_records(&module, u64::MAX)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(
+        binary_errors.is_empty(),
+        "binary verifier: {binary_errors:?}"
+    );
+}
+
+#[test]
+fn v7_rejects_overlapping_static_modify_accesses() {
+    let source = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.access() -> unit engine(native) {\nbb0:\n  %slot = stack.alloc i32\n  %first = access.begin [read] [static] %slot\n  %second = access.begin [modify] [static] %slot\n  access.end %second\n  access.end %first\n  stack.dealloc %slot\n  return\n}\n";
+    let parsed = parse_text_module(source).expect("text parses");
+    let diagnostics = verify_text_module(&parsed, Default::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.to_string() == "TIR-VFY-0007"),
+        "expected V7 for overlapping static access: {diagnostics:?}"
+    );
+    let bytes =
+        assemble_text_module(&parsed).expect("access CODE can be assembled for verification");
+    let module = BinaryModule::decode(&bytes).expect("CODE decodes");
+    let binary_errors = verify_binary_module_records(&module, u64::MAX);
+    assert!(
+        binary_errors
+            .iter()
+            .any(|diagnostic| diagnostic.code.to_string() == "TIR-VFY-0007"),
+        "binary verifier must report V7: {binary_errors:?}"
+    );
+}
+
+#[test]
+fn v8_rejects_address_only_scalable_vector_as_ssa_parameter() {
+    let source = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.wide(%v: svec<i32>) -> unit engine(native) {\nbb0(%v: svec<i32>):\n  return\n}\n";
+    let parsed = parse_text_module(source).expect("text parses");
+    let diagnostics = verify_text_module(&parsed, Default::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code.to_string() == "TIR-VFY-0008"),
+        "address-only scalable vector should produce V8: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn v9_forbids_inline_assembly_in_runtime_engine() {
+    let source = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.asm() -> unit engine(runtime) {\nbb0:\n  asm\n  return\n}\n";
+    let parsed = parse_text_module(source).expect("text parses");
+    let diagnostics = verify_text_module(&parsed, Default::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code.to_string() == "TIR-VFY-0009"),
+        "runtime engine cannot use inline assembly: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn v14_const_poison_requires_permissive_semantics() {
+    let defined = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.poison() -> i32 engine(native) {\nbb0:\n  %value = const.poison i32\n  return %value\n}\n";
+    let parsed = parse_text_module(defined).expect("text parses");
+    let diagnostics = verify_text_module(&parsed, Default::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code.to_string() == "TIR-VFY-0014"),
+        "defined semantics cannot contain const.poison: {diagnostics:?}"
+    );
+    let permissive = defined.replace(
+        "profile app semantics defined",
+        "profile app semantics permissive",
+    );
+    let parsed = parse_text_module(&permissive).expect("permissive text parses");
+    let diagnostics = verify_text_module(&parsed, Default::default());
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code.to_string() == "TIR-VFY-0014"),
+        "permissive semantics must not trigger V14: {diagnostics:?}"
+    );
+}

@@ -333,7 +333,7 @@ fn aggregate_value_list_start(instruction: &TextInstruction) -> Option<usize> {
     let start = text_instruction_operands_start(&instruction.tokens);
     if !matches!(
         instruction.opcode.as_str(),
-        "struct.new" | "array.new" | "enum.new"
+        "struct.new" | "array.new" | "enum.new" | "const.aggregate"
     ) {
         return None;
     }
@@ -343,6 +343,13 @@ fn aggregate_value_list_start(instruction: &TextInstruction) -> Option<usize> {
         if matches!(instruction.opcode.as_str(), "struct.new" | "array.new")
             && has_punctuation(token, '(')
             && nesting.is_empty()
+        {
+            return Some(index + 1);
+        }
+        if instruction.opcode == "const.aggregate"
+            && has_punctuation(token, '(')
+            && nesting.is_empty()
+            && index > start
         {
             return Some(index + 1);
         }

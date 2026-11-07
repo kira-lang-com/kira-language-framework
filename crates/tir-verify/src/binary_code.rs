@@ -2,6 +2,9 @@ mod atomics;
 mod borrow_scopes;
 mod borrowed_uses;
 mod coroutines;
+pub(crate) mod gpu_builtin;
+pub(crate) mod gpu_spec_const;
+pub(crate) mod gpu_sync;
 mod heap;
 mod loadable;
 mod owned_values;
@@ -54,6 +57,7 @@ pub(super) fn verify(
     code: &BinaryCodeTable,
     signatures: &BinarySignatureTable,
     types: &BinaryTypeTable,
+    constants: Option<&tir_format::BinaryConstantTable>,
     generics: Option<&BinaryGenericTable>,
     strings: Option<&StringTable>,
     imports: Option<&[BinaryImport]>,
@@ -73,6 +77,31 @@ pub(super) fn verify(
             continue;
         }
         let value_types = types::infer_value_types(body, signatures, types);
+        diagnostics.extend(gpu_spec_const::verify(
+            body,
+            signature.map(|signature| signature.target),
+            types,
+            constants,
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_sync::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_builtin::verify(
+            body,
+            signature.map(|signature| signature.target),
+            types,
+            strings,
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(types::verify_symbol_instructions(
+            body,
+            types,
+            globals,
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
         diagnostics.extend(types::verify_function_references(
             body,
             signatures,
@@ -93,6 +122,22 @@ pub(super) fn verify(
         if let Some(signature) = signature {
             diagnostics.extend(borrow_scopes::verify(body, &signature.name));
             diagnostics.extend(static_access::verify(body, &signature.name));
+            if !signature.returns_twice {
+                for instruction in body
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.instructions.iter().flatten())
+                    .filter(|instruction| instruction.opcode == 0x214)
+                {
+                    diagnostics.push(Diagnostic::error(
+                        Code::new(Dialect::Tir, Area::Verifier, 2),
+                        format!(
+                            "function @{} CODE offset {}: setjmp requires returns_twice",
+                            signature.name, instruction.offset
+                        ),
+                    ));
+                }
+            }
         }
         diagnostics.extend(borrowed_uses::verify(
             body,
@@ -133,6 +178,36 @@ pub(super) fn verify(
         }
         diagnostics.extend(structure::verify_body(body, &value_types));
         if let Some(signature) = signature {
+            diagnostics.extend(types::verify_indirect_branch_integrity(
+                body,
+                &value_types,
+                types,
+                &signature.name,
+            ));
+            diagnostics.extend(types::verify_control_instructions(
+                body,
+                &value_types,
+                types,
+                &signature.name,
+            ));
+            diagnostics.extend(types::verify_varargs_instructions(
+                body,
+                &value_types,
+                types,
+                &signature.name,
+            ));
+            diagnostics.extend(types::verify_device_instructions(
+                body,
+                &value_types,
+                types,
+                &signature.name,
+            ));
+            diagnostics.extend(types::verify_hint_instructions(
+                body,
+                &value_types,
+                types,
+                &signature.name,
+            ));
             diagnostics.extend(types::verify_scalar_instructions(
                 body,
                 &value_types,

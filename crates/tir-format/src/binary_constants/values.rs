@@ -458,8 +458,19 @@ impl ConstantDecoder<'_> {
 fn read_integer_bits(bytes: &[u8], cursor: &mut usize, bits: u64) -> Result<Vec<u8>, FormatError> {
     let bit_width =
         usize::try_from(bits).map_err(|_| malformed(*cursor, "integer width overflows memory"))?;
+    if !(1..=16384).contains(&bit_width) {
+        return Err(malformed(
+            *cursor,
+            "integer width is outside the TIR type range",
+        ));
+    }
     let byte_width = bit_width.div_ceil(8);
-    let mut result = reserve(byte_width, bytes, *cursor)?;
+    // A minimal ULEB can be shorter than the zero-extended integer byte width.
+    // The encoded section size therefore cannot bound this allocation.
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(byte_width)
+        .map_err(|_| malformed(*cursor, "integer constant allocation failed"))?;
     result.resize(byte_width, 0);
     let maximum_bytes = bit_width.div_ceil(7);
     for group in 0..maximum_bytes {

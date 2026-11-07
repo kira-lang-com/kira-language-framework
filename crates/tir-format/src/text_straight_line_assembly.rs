@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use tir_diag::Span;
 use tir_types::{FunctionType, Type};
 
 use crate::text::TokenKind;
 use crate::text_function_constant_assembly::{ParsedEntryConstant, parse_entry_constant};
 use crate::text_integer_operation_assembly::{integer_operation_info, parse_integer_operation};
-use crate::text_select_assembly::parse_select;
+use crate::text_straight_line_encoding_helpers as helpers;
+pub(crate) use crate::text_straight_line_encoding_helpers::error;
+use crate::text_straight_line_encoding_helpers::{trivial_constant_type_index, unsupported, write};
 use crate::types::{BinaryBlock, BinaryBlockParameter, BinaryFunctionBody, BinaryFunctionType};
 use crate::types::{BinaryType, BinaryTypeTable};
 use crate::{FunctionBody, TextItem, TextParseError};
@@ -16,6 +17,7 @@ pub(crate) fn validate(
     signature: &FunctionType,
     source: &str,
     item: TextItem,
+    callees: Option<&crate::text_direct_call::Callees>,
 ) -> Result<(), TextParseError> {
     let block = &body.blocks[0];
     let mut values = block
@@ -29,7 +31,7 @@ pub(crate) fn validate(
     let Some((last, instructions)) = block.instructions.split_last() else {
         return Err(error(item, block.span, "function body has no terminator"));
     };
-    validate_operations(instructions, &mut values, source, item)?;
+    validate_operations(instructions, &mut values, source, item, callees)?;
     if last.opcode != "return" || !last.results.is_empty() {
         return Err(error(
             item,
@@ -66,120 +68,16 @@ pub(crate) fn validate(
     }
 }
 
-pub(crate) fn validate_operations(
-    instructions: &[crate::TextInstruction],
-    values: &mut HashMap<String, Type>,
-    source: &str,
-    item: TextItem,
-) -> Result<(), TextParseError> {
-    for instruction in instructions {
-        let (name, ty) = if integer_operation_info(&instruction.opcode).is_some() {
-            let parsed = parse_integer_operation(instruction, item)?;
-            let types = parsed
-                .operands
-                .iter()
-                .map(|name| {
-                    values.get(name).ok_or_else(|| {
-                        error(
-                            item,
-                            instruction.span,
-                            "integer operation references an undefined SSA value",
-                        )
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if parsed.opcode == "icmp" {
-                if !matches!(types[0], Type::Integer(_) | Type::Pointer(_))
-                    || types.iter().any(|ty| *ty != types[0])
-                    || (matches!(types[0], Type::Pointer(_))
-                        && matches!(parsed.modifiers >> 48, 2..=5))
-                {
-                    return Err(error(
-                        item,
-                        instruction.span,
-                        "icmp operands must have the same integer or pointer type",
-                    ));
-                }
-                (parsed.name, Type::Integer(1))
-            } else {
-                if !matches!(types[0], Type::Integer(_)) || types.iter().any(|ty| *ty != types[0]) {
-                    return Err(error(
-                        item,
-                        instruction.span,
-                        "integer operation operands must have the same integer type",
-                    ));
-                }
-                (parsed.name, (*types[0]).clone())
-            }
-        } else if matches!(instruction.opcode.as_str(), "const.int" | "const.bool") {
-            let constant = parse_entry_constant(instruction, source, item)?;
-            (constant.name().to_owned(), constant.ty().clone())
-        } else if crate::text_memory_assembly::handles(&instruction.opcode) {
-            let parsed = crate::text_memory_assembly::parse(instruction, source, item)?;
-            let result_ty = parsed.result_type(values, item, instruction.span)?;
-            let Some(ty) = result_ty else {
-                continue;
-            };
-            let name = instruction
-                .results
-                .first()
-                .ok_or_else(|| error(item, instruction.span, "memory result is missing"))?;
-            (name.clone(), ty)
-        } else if matches!(
-            instruction.opcode.as_str(),
-            "copy" | "move" | "destroy" | "borrow.begin" | "borrow.end"
-        ) {
-            let parsed = crate::text_ownership_assembly::parse(instruction, item)?;
-            let operand_type = values
-                .get(&parsed.operand)
-                .ok_or_else(|| error(item, instruction.span, "ownership operand is undefined"))?
-                .clone();
-            let Some(name) = parsed.result else {
-                continue;
-            };
-            (name, operand_type)
-        } else if instruction.opcode == "select" {
-            let parsed = parse_select(instruction, item)?;
-            let condition = values
-                .get(&parsed.condition)
-                .ok_or_else(|| error(item, instruction.span, "select condition is undefined"))?;
-            let when_true = values
-                .get(&parsed.when_true)
-                .ok_or_else(|| error(item, instruction.span, "select true operand is undefined"))?;
-            let when_false = values.get(&parsed.when_false).ok_or_else(|| {
-                error(item, instruction.span, "select false operand is undefined")
-            })?;
-            if condition != &Type::Integer(1) || when_true != when_false {
-                return Err(error(
-                    item,
-                    instruction.span,
-                    "select requires an i1 condition and matching value types",
-                ));
-            }
-            (parsed.name, when_true.clone())
-        } else {
-            return Err(error(
-                item,
-                instruction.span,
-                "straight-line assembly supports integer operations, integer/boolean constants and select",
-            ));
-        };
-        if values.insert(name, ty).is_some() {
-            return Err(error(
-                item,
-                instruction.span,
-                "SSA value is defined more than once",
-            ));
-        }
-    }
-    Ok(())
-}
+pub(crate) use crate::text_straight_line_validation::validate_operations;
 
 pub(crate) fn encode(
     body: &FunctionBody,
     function_index: u64,
     function: &BinaryFunctionType,
     types: &BinaryTypeTable,
+    float_constants: &std::collections::HashMap<usize, (u64, u64)>,
+    string_constants: &std::collections::HashMap<usize, u64>,
+    callees: &crate::text_direct_call::Callees,
     source: &str,
     item: TextItem,
 ) -> Result<BinaryFunctionBody, TextParseError> {
@@ -189,34 +87,35 @@ pub(crate) fn encode(
         .iter()
         .map(|parameter| parameter.name.as_str())
         .collect();
+    let mut inferred = block
+        .parameters
+        .iter()
+        .map(|parameter| (parameter.name.clone(), parameter.ty.clone()))
+        .collect::<HashMap<_, _>>();
+    validate_operations(
+        &block.instructions[..block.instructions.len() - 1],
+        &mut inferred,
+        source,
+        item,
+        Some(callees),
+    )?;
     let mut bytes = Vec::new();
     encode_operations(
         &block.instructions[..block.instructions.len() - 1],
         &mut values,
+        &inferred,
         types,
+        float_constants,
+        string_constants,
+        callees,
         source,
         item,
         &mut bytes,
     )?;
     let terminator = block.instructions.last().expect("validated return");
-    write(0x1e5, &mut bytes, item, terminator.span)?;
-    write(0, &mut bytes, item, terminator.span)?;
-    write(0, &mut bytes, item, terminator.span)?;
-    if let [_, _, name] = terminator.tokens.as_slice() {
-        let TokenKind::Atom(name) = &name.kind else {
-            return Err(error(item, terminator.span, "invalid return operand"));
-        };
-        let position = values
-            .iter()
-            .position(|candidate| candidate == name)
-            .ok_or_else(|| error(item, terminator.span, "undefined return value"))?;
-        write(
-            (values.len() - position) as u64,
-            &mut bytes,
-            item,
-            terminator.span,
-        )?;
-    }
+    crate::text_straight_line_encoding_helpers::encode_return(
+        terminator, &values, &mut bytes, item,
+    )?;
     Ok(BinaryFunctionBody {
         function_index,
         body_byte_size: 0,
@@ -244,13 +143,277 @@ pub(crate) fn encode(
 pub(crate) fn encode_operations<'a>(
     instructions: &'a [crate::TextInstruction],
     values: &mut Vec<&'a str>,
+    inferred: &HashMap<String, Type>,
     types: &BinaryTypeTable,
+    float_constants: &std::collections::HashMap<usize, (u64, u64)>,
+    string_constants: &std::collections::HashMap<usize, u64>,
+    callees: &crate::text_direct_call::Callees,
     source: &str,
     item: TextItem,
     mut bytes: &mut Vec<u8>,
 ) -> Result<(), TextParseError> {
     for instruction in instructions {
-        if let Some((opcode, _)) = integer_operation_info(&instruction.opcode) {
+        if crate::text_gpu_sync::handles(&instruction.opcode) {
+            crate::text_gpu_sync::encode(instruction, source, item, &mut bytes)?;
+        } else if instruction.opcode == "gpu.builtin" {
+            crate::text_gpu_builtin::encode(
+                instruction,
+                source,
+                item,
+                types,
+                string_constants,
+                &mut bytes,
+            )?;
+        } else if matches!(
+            instruction.opcode.as_str(),
+            "const.vec" | "const.aggregate" | "const.sampler" | "gpu.spec_const"
+        ) {
+            crate::text_straight_line_constants::encode(
+                instruction,
+                source,
+                item,
+                types,
+                float_constants,
+                callees,
+                &mut bytes,
+            )?;
+        } else if crate::text_pointer_address::handles(&instruction.opcode) {
+            let operation = crate::text_pointer_address::parse(instruction, source, item)?;
+            crate::text_pointer_address::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_enum_address::handles(&instruction.opcode) {
+            let operation = crate::text_enum_address::parse(instruction, source, item)?;
+            crate::text_enum_address::encode(
+                &operation,
+                values,
+                inferred,
+                callees,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_address_projection::handles(&instruction.opcode) {
+            let projection = crate::text_address_projection::parse(instruction, source, item)?;
+            crate::text_address_projection::encode(
+                &projection,
+                values,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_enum_payload::handles(&instruction.opcode) {
+            let operation = crate::text_enum_payload::parse(instruction, source, item)?;
+            crate::text_enum_payload::encode(
+                &operation,
+                values,
+                inferred,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_aggregate_destructure::handles(&instruction.opcode) {
+            let operation = crate::text_aggregate_destructure::parse(instruction, source, item)?;
+            crate::text_aggregate_destructure::encode(
+                &operation,
+                values,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_nominal_construction::handles(&instruction.opcode) {
+            let operation = crate::text_nominal_construction::parse(instruction, source, item)?;
+            crate::text_nominal_construction::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_vector_gather::handles(&instruction.opcode) {
+            let operation = crate::text_vector_gather::parse(instruction, source, item)?;
+            crate::text_vector_gather::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_vector_memory::handles(&instruction.opcode) {
+            let operation = crate::text_vector_memory::parse(instruction, source, item)?;
+            crate::text_vector_memory::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_managed_heap::handles(&instruction.opcode) {
+            let managed = crate::text_managed_heap::parse(instruction, source, item)?;
+            crate::text_managed_heap::encode(
+                &managed,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_global_reference::handles(&instruction.opcode) {
+            let global = crate::text_global_reference::parse(instruction, source, item)?;
+            crate::text_global_reference::encode(
+                &global,
+                callees,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if instruction.opcode == "descriptor.ref" {
+            let descriptor = crate::text_descriptor_reference::parse(instruction, source, item)?;
+            crate::text_descriptor_reference::encode(
+                &descriptor,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if instruction.opcode == "func.ref" {
+            let reference = crate::text_function_reference::parse(instruction, source, item)?;
+            crate::text_function_reference::encode(
+                &reference,
+                callees,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if instruction.opcode == "block.addr" {
+            let address = crate::text_block_address::parse(instruction, source, item)?;
+            crate::text_block_address::encode(&address, &mut bytes, item, instruction.span)?;
+        } else if instruction.opcode == "call" {
+            let operation = crate::text_direct_call::parse(instruction, source, item)?;
+            crate::text_direct_call::encode(
+                &operation,
+                values,
+                callees,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if instruction.opcode == "call.indirect" {
+            let operation = crate::text_indirect_call::parse(instruction, source, item)?;
+            crate::text_indirect_call::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_simple_instructions::handles(&instruction.opcode) {
+            let operation = crate::text_simple_instructions::parse(instruction, source, item)?;
+            crate::text_simple_instructions::encode(
+                &operation,
+                values,
+                &mut bytes,
+                string_constants.get(&instruction.span.start).copied(),
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_tuple_simple::handles(&instruction.opcode) {
+            let operation = crate::text_tuple_simple::parse(instruction, source, item)?;
+            crate::text_tuple_simple::encode(
+                &operation,
+                values,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_array_simple::handles(&instruction.opcode) {
+            let operation = crate::text_array_simple::parse(instruction, source, item)?;
+            crate::text_array_simple::encode(
+                &operation,
+                values,
+                &mut bytes,
+                types,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_raw_memory::opcode(&instruction.opcode).is_some() {
+            let operation = crate::text_raw_memory::parse(instruction, source, item)?;
+            crate::text_raw_memory::encode(&operation, values, &mut bytes, item, instruction.span)?;
+        } else if crate::text_raw_access::handles(&instruction.opcode) {
+            let operation = crate::text_raw_access::parse(instruction, source, item)?;
+            crate::text_raw_access::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_device_io::handles(&instruction.opcode) {
+            let operation = crate::text_device_io::parse(instruction, source, item)?;
+            crate::text_device_io::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_raw_heap::handles(&instruction.opcode) {
+            let operation = crate::text_raw_heap::parse(instruction, source, item)?;
+            crate::text_raw_heap::encode(&operation, values, &mut bytes, item, instruction.span)?;
+        } else if crate::text_fp_misc::handles(&instruction.opcode) {
+            let operation = crate::text_fp_misc::parse(instruction, source, item)?;
+            crate::text_fp_misc::encode(&operation, values, &mut bytes, item, instruction.span)?;
+        } else if crate::text_atomic_simple::handles(&instruction.opcode) {
+            let operation = crate::text_atomic_simple::parse(instruction, source, item)?;
+            crate::text_atomic_simple::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_atomic_wait_notify::handles(&instruction.opcode) {
+            let operation = crate::text_atomic_wait_notify::parse(instruction, source, item)?;
+            crate::text_atomic_wait_notify::encode(
+                &operation,
+                values,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_atomic_update::handles(&instruction.opcode) {
+            let operation = crate::text_atomic_update::parse(instruction, source, item)?;
+            crate::text_atomic_update::encode(
+                &operation,
+                values,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_varargs_simple::handles(&instruction.opcode) {
+            let operation = crate::text_varargs_simple::parse(instruction, source, item)?;
+            crate::text_varargs_simple::encode(
+                &operation,
+                values,
+                types,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if let Some((opcode, _)) = integer_operation_info(&instruction.opcode) {
             let parsed = parse_integer_operation(instruction, item)?;
             write(opcode, &mut bytes, item, instruction.span)?;
             write(parsed.modifiers, &mut bytes, item, instruction.span)?;
@@ -267,8 +430,101 @@ pub(crate) fn encode_operations<'a>(
                     instruction.span,
                 )?;
             }
-        } else if matches!(instruction.opcode.as_str(), "const.int" | "const.bool") {
+        } else if crate::text_float_assembly::operation_info(&instruction.opcode).is_some() {
+            let parsed = crate::text_float_assembly::parse(instruction, item)?;
+            write(parsed.opcode, &mut bytes, item, instruction.span)?;
+            write(parsed.modifiers, &mut bytes, item, instruction.span)?;
+            write(1, &mut bytes, item, instruction.span)?;
+            for operand in &parsed.operands {
+                let position = values
+                    .iter()
+                    .position(|name| name == operand)
+                    .ok_or_else(|| {
+                        error(item, instruction.span, "undefined floating-point operand")
+                    })?;
+                write(
+                    (values.len() - position) as u64,
+                    &mut bytes,
+                    item,
+                    instruction.span,
+                )?;
+            }
+        } else if crate::text_vector_permute::handles(&instruction.opcode) {
+            let operation = crate::text_vector_permute::parse(instruction, source, item)?;
+            crate::text_vector_permute::encode(
+                &operation,
+                values,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+        } else if crate::text_vector_simple::opcode(&instruction.opcode).is_some() {
+            let parsed = crate::text_vector_simple::parse(instruction, source, item)?;
+            let ty = parsed
+                .ty
+                .as_ref()
+                .map(|ty| {
+                    crate::text_conversion_assembly::target_index(types, ty).ok_or_else(|| {
+                        error(item, instruction.span, "vector target type is not interned")
+                    })
+                })
+                .transpose()?;
+            write(parsed.opcode, &mut bytes, item, instruction.span)?;
+            write(parsed.modifiers, &mut bytes, item, instruction.span)?;
+            write(1, &mut bytes, item, instruction.span)?;
+            for operand in &parsed.args {
+                let position = values
+                    .iter()
+                    .position(|name| name == operand)
+                    .ok_or_else(|| error(item, instruction.span, "undefined vector operand"))?;
+                write(
+                    (values.len() - position) as u64,
+                    &mut bytes,
+                    item,
+                    instruction.span,
+                )?;
+            }
+            if let Some(index) = ty {
+                write(index as u64, &mut bytes, item, instruction.span)?;
+            }
+        } else if crate::text_conversion_assembly::opcode(&instruction.opcode).is_some() {
+            let conversion = crate::text_conversion_assembly::parse(instruction, source, item)?;
+            let position = values
+                .iter()
+                .position(|name| name == &conversion.source)
+                .ok_or_else(|| error(item, instruction.span, "undefined conversion operand"))?;
+            let type_index =
+                crate::text_conversion_assembly::target_index(types, &conversion.target)
+                    .ok_or_else(|| {
+                        error(
+                            item,
+                            instruction.span,
+                            "conversion target type is not interned",
+                        )
+                    })?;
+            write(conversion.opcode, &mut bytes, item, instruction.span)?;
+            write(conversion.modifiers, &mut bytes, item, instruction.span)?;
+            write(1, &mut bytes, item, instruction.span)?;
+            write(
+                (values.len() - position) as u64,
+                &mut bytes,
+                item,
+                instruction.span,
+            )?;
+            write(type_index as u64, &mut bytes, item, instruction.span)?;
+        } else if matches!(
+            instruction.opcode.as_str(),
+            "const.int"
+                | "const.bool"
+                | "const.zero"
+                | "const.float"
+                | "const.null"
+                | "const.poison"
+                | "const.bytes"
+                | "const.string"
+        ) {
             let constant = parse_entry_constant(instruction, source, item)?;
+            let zero_type = constant.ty().clone();
             match constant {
                 ParsedEntryConstant::Integer(value) => {
                     let Type::Integer(width) = value.ty else {
@@ -307,191 +563,138 @@ pub(crate) fn encode_operations<'a>(
                             )
                         })?;
                 }
-                _ => {
-                    return Err(error(
-                        item,
-                        instruction.span,
-                        "unsupported constant in a straight-line function",
-                    ));
+                ParsedEntryConstant::Float(value) => {
+                    let (type_index, constant_index) = float_constants
+                        .get(&instruction.span.start)
+                        .copied()
+                        .ok_or_else(|| {
+                            error(item, instruction.span, "const.float has no CONSTANTS entry")
+                        })?;
+                    let parsed_type = types.entries.get(type_index as usize);
+                    if !matches!(parsed_type, Some(BinaryType::Float(float))
+                        if value.ty == Type::Float(*float))
+                    {
+                        return Err(error(
+                            item,
+                            instruction.span,
+                            "const.float CONSTANTS type mismatch",
+                        ));
+                    }
+                    write(0x001, &mut bytes, item, instruction.span)?;
+                    write(0, &mut bytes, item, instruction.span)?;
+                    write(1, &mut bytes, item, instruction.span)?;
+                    write(type_index, &mut bytes, item, instruction.span)?;
+                    write(constant_index, &mut bytes, item, instruction.span)?;
+                }
+                ParsedEntryConstant::String(_) => {
+                    let string_index = string_constants
+                        .get(&instruction.span.start)
+                        .copied()
+                        .ok_or_else(|| {
+                            error(
+                                item,
+                                instruction.span,
+                                "const.string is not interned in STRINGS",
+                            )
+                        })?;
+                    write(0x006, &mut bytes, item, instruction.span)?;
+                    write(0, &mut bytes, item, instruction.span)?;
+                    write(1, &mut bytes, item, instruction.span)?;
+                    write(string_index, &mut bytes, item, instruction.span)?;
+                }
+                ParsedEntryConstant::Null(value) => {
+                    if !types.entries.iter().any(|entry|
+                        matches!(entry, BinaryType::Pointer(space) if *space == value.space_code))
+                    {
+                        return Err(error(item, instruction.span, "const.null pointer type is not interned"));
+                    }
+                    write(0x003, &mut bytes, item, instruction.span)?;
+                    write(0, &mut bytes, item, instruction.span)?;
+                    write(1, &mut bytes, item, instruction.span)?;
+                    bytes.push(value.space_code);
+                }
+                ParsedEntryConstant::Poison(_) => {
+                    let index = trivial_constant_type_index(types, &zero_type)
+                    .ok_or_else(|| {
+                        error(
+                            item,
+                            instruction.span,
+                            "const.poison type is not interned or is not a supported trivial type",
+                        )
+                    })?;
+                    write(0x005, &mut bytes, item, instruction.span)?;
+                    write(0, &mut bytes, item, instruction.span)?;
+                    write(1, &mut bytes, item, instruction.span)?;
+                    write(index as u64, &mut bytes, item, instruction.span)?;
+                }
+                ParsedEntryConstant::Bytes(value) => {
+                    let Some(index) =
+                        crate::text_memory_assembly::supported_type_index(types, &value.ty)
+                    else {
+                        return Err(error(
+                            item,
+                            instruction.span,
+                            "const.bytes type is not a supported scalar type",
+                        ));
+                    };
+                    let expected_bytes = match value.ty {
+                        Type::Integer(width) if width % 8 == 0 => usize::from(width / 8),
+                        Type::Float(float) if float.bits() % 8 == 0 => {
+                            usize::from(float.bits() / 8)
+                        }
+                        _ => {
+                            return Err(error(
+                                item,
+                                instruction.span,
+                                "const.bytes requires a byte-aligned scalar type",
+                            ));
+                        }
+                    };
+                    if expected_bytes != value.bytes.len() {
+                        return Err(error(
+                            item,
+                            instruction.span,
+                            "const.bytes payload length must match its scalar type",
+                        ));
+                    }
+                    write(0x007, &mut bytes, item, instruction.span)?;
+                    write(0, &mut bytes, item, instruction.span)?;
+                    write(1, &mut bytes, item, instruction.span)?;
+                    write(index as u64, &mut bytes, item, instruction.span)?;
+                    write(value.bytes.len() as u64, &mut bytes, item, instruction.span)?;
+                    bytes.extend_from_slice(&value.bytes);
+                }
+                ParsedEntryConstant::Zero(_) => {
+                    let type_index = trivial_constant_type_index(types, &zero_type)
+                    .ok_or_else(|| {
+                        error(
+                            item,
+                            instruction.span,
+                            "const.zero type is not interned or is not a supported scalar/vector",
+                        )
+                    })?;
+                    write(0x004, &mut bytes, item, instruction.span)?;
+                    write(0, &mut bytes, item, instruction.span)?;
+                    write(1, &mut bytes, item, instruction.span)?;
+                    write(type_index as u64, &mut bytes, item, instruction.span)?;
                 }
             }
         } else if crate::text_memory_assembly::handles(&instruction.opcode) {
             let parsed = crate::text_memory_assembly::parse(instruction, source, item)?;
             parsed.encode(values, types, &mut bytes, item, instruction.span)?;
+        } else if crate::text_access_assembly::handles(&instruction.opcode) {
+            helpers::encode_access(instruction, values, &mut bytes, item)?;
         } else if matches!(
             instruction.opcode.as_str(),
             "copy" | "move" | "destroy" | "borrow.begin" | "borrow.end"
         ) {
-            let parsed = crate::text_ownership_assembly::parse(instruction, item)?;
-            let position = values
-                .iter()
-                .position(|name| name == &parsed.operand)
-                .ok_or_else(|| error(item, instruction.span, "ownership operand is undefined"))?;
-            write(parsed.opcode, &mut bytes, item, instruction.span)?;
-            write(0, &mut bytes, item, instruction.span)?;
-            write(
-                u64::from(parsed.result.is_some()),
-                &mut bytes,
-                item,
-                instruction.span,
-            )?;
-            write(
-                (values.len() - position) as u64,
-                &mut bytes,
-                item,
-                instruction.span,
-            )?;
+            helpers::encode_ownership(instruction, values, &mut bytes, item)?;
         } else if instruction.opcode == "select" {
-            let parsed = parse_select(instruction, item)?;
-            write(0x03d, &mut bytes, item, instruction.span)?;
-            write(0, &mut bytes, item, instruction.span)?;
-            write(1, &mut bytes, item, instruction.span)?;
-            for operand in [&parsed.condition, &parsed.when_true, &parsed.when_false] {
-                let position = values
-                    .iter()
-                    .position(|name| name == operand)
-                    .ok_or_else(|| error(item, instruction.span, "undefined SSA operand"))?;
-                write(
-                    (values.len() - position) as u64,
-                    &mut bytes,
-                    item,
-                    instruction.span,
-                )?;
-            }
+            helpers::encode_select(instruction, values, &mut bytes, item)?;
         } else {
-            return Err(error(
-                item,
-                instruction.span,
-                "unsupported straight-line instruction",
-            ));
+            return Err(unsupported(item, instruction.span));
         }
-        if let Some(result) = instruction.results.first() {
-            values.push(result);
-        }
+        values.extend(instruction.results.iter().map(String::as_str));
     }
     Ok(())
-}
-
-fn write(
-    value: u64,
-    output: &mut Vec<u8>,
-    item: TextItem,
-    span: Span,
-) -> Result<(), TextParseError> {
-    crate::leb::write_uleb(value, output)
-        .map_err(|err| error(item, span, format!("CODE encoding failed: {err}")))
-}
-
-fn error(item: TextItem, span: Span, message: impl Into<String>) -> TextParseError {
-    TextParseError {
-        span: Span::new(
-            item.span.start.saturating_add(span.start),
-            item.span.start.saturating_add(span.end),
-        ),
-        message: message.into(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{BinaryModule, assemble_text_module, disassemble_text_module, parse_text_module};
-
-    fn module_with_body(body: &str) -> String {
-        format!(
-            "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.chain(%a: i32, %b: i32) -> i32 engine(native) {{\nbb0(%a: i32, %b: i32):\n{body}\n}}\n"
-        )
-    }
-
-    #[test]
-    fn integer_chain_is_canonical_after_disassembly() {
-        let source = module_with_body(
-            "  %sum = add %a, %b\n  %product = mul %sum, %b\n  %result = sub %product, %a\n  return %result",
-        );
-        let text = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&text).expect("chain assembles");
-        let module = BinaryModule::decode(&bytes).expect("binary decodes");
-        let disassembled = disassemble_text_module(&module, u64::MAX).expect("chain disassembles");
-        let round_trip =
-            assemble_text_module(&parse_text_module(&disassembled).expect("text reparses"))
-                .expect("binary reassembles");
-        assert_eq!(bytes, round_trip);
-    }
-
-    #[test]
-    fn intermediate_icmp_i1_type_is_interned_and_round_trips() {
-        let source = module_with_body(
-            "  %equal = icmp eq %a, %b\n  %sum = add %a, %b\n  %result = select %equal, %sum, %a\n  return %result",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("icmp chain assembles");
-        let module = BinaryModule::decode(&bytes).expect("binary decodes");
-        let types = module.type_table(u64::MAX).expect("type table decodes");
-        assert!(
-            types
-                .entries
-                .iter()
-                .any(|ty| matches!(ty, crate::BinaryType::Integer(1)))
-        );
-        let text = disassemble_text_module(&module, u64::MAX).expect("icmp chain disassembles");
-        let reassembled = assemble_text_module(&parse_text_module(&text).expect("text parses"))
-            .expect("round trip assembles");
-        assert_eq!(bytes, reassembled);
-    }
-
-    #[test]
-    fn mixed_constants_arithmetic_and_compare_round_trip() {
-        let source = module_with_body(
-            "  %five = const.int i32, 5\n  %sum = add %a, %five\n  %same = icmp eq %sum, %b\n  %flag = const.bool true\n  %keep = and %same, %flag\n  %value = select %keep, %sum, %b\n  return %value",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("mixed function assembles");
-        let decoded = BinaryModule::decode(&bytes).expect("binary decodes");
-        let text = disassemble_text_module(&decoded, u64::MAX).expect("binary disassembles");
-        let reassembled = assemble_text_module(&parse_text_module(&text).expect("text parses"))
-            .expect("binary reassembles");
-        assert_eq!(bytes, reassembled);
-    }
-
-    #[test]
-    fn undefined_or_mismatched_chain_inputs_are_rejected() {
-        for body in [
-            "  %sum = add %a, %missing\n  %product = mul %sum, %b\n  return %product",
-            "  %sum = icmp eq %a, %b\n  %product = add %sum, %a\n  return %product",
-            "  %sum = add %a, %b\n  %sum = mul %sum, %b\n  return %sum",
-        ] {
-            let text = parse_text_module(&module_with_body(body)).expect("text parses");
-            assert!(
-                assemble_text_module(&text).is_err(),
-                "invalid body assembled: {body}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod ownership_tests {
-    use crate::{BinaryModule, assemble_text_module, disassemble_text_module, parse_text_module};
-
-    #[test]
-    fn explicit_copy_move_destroy_round_trip() {
-        let source = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.own(%a: i32, %b: i32) -> i32 engine(native) {\nbb0(%a: i32, %b: i32):\n  %dup = copy %a\n  %taken = move %dup\n  destroy %a\n  %sum = add %taken, %b\n  return %sum\n}\n";
-        let parsed = parse_text_module(source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("ownership ops assemble");
-        let binary = BinaryModule::decode(&bytes).expect("binary decodes");
-        let text = disassemble_text_module(&binary, u64::MAX).expect("ownership ops disassemble");
-        let rebuilt =
-            assemble_text_module(&parse_text_module(&text).expect("canonical text reparses"))
-                .expect("canonical text reassembles");
-        assert_eq!(bytes, rebuilt);
-    }
-
-    #[test]
-    fn ownership_instruction_arity_is_enforced() {
-        let body = "  %dup = copy %a, %b\n  destroy %dup\n  %sum = add %a, %b\n  return %sum";
-        let source = format!(
-            "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.own(%a: i32, %b: i32) -> i32 engine(native) {{\nbb0(%a: i32, %b: i32):\n{body}\n}}\n"
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        assert!(assemble_text_module(&parsed).is_err());
-    }
 }

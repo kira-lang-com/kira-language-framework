@@ -39,7 +39,12 @@ pub(super) fn verify(
         let Some(ty) = value_types.get(value).copied().flatten() else {
             continue;
         };
-        if borrowed.contains(&(value as u64)) || aggregate_instructions::is_trivial_type(types, ty)
+        if borrowed.contains(&(value as u64))
+            || matches!(
+                types.entries.get(ty as usize),
+                Some(BinaryType::Address { .. })
+            )
+            || aggregate_instructions::is_trivial_type(types, ty)
         {
             continue;
         }

@@ -287,7 +287,12 @@ fn verify_mask_clause(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mask_count = clause_count(instruction, "mask");
-    let passthru_count = clause_count(instruction, "passthru");
+    // Passthru is inside `[mask %m, passthru %v]`, not a separate bracket.
+    let passthru_count = instruction
+        .tokens
+        .windows(2)
+        .filter(|tokens| is_punctuation(&tokens[0], ',') && atom(&tokens[1]) == Some("passthru"))
+        .count();
     if mask_count != usize::from(expected) || passthru_count != usize::from(expected && passthru) {
         report(
             diagnostics,

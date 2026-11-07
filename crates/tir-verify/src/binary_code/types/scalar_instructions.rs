@@ -97,9 +97,17 @@ fn verify_integer(
                 && operands[1] == first
                 && result_has_overflow_shape(instruction, result_index, first, value_types, types)
         }
-        14..=16 | 30..=34 | 37 => {
+        14..=16 | 30..=34 => {
             operands.len() == 1
                 && is_integer(types, first)
+                && (relative != 33 || integer_width_multiple_of_16(types, first))
+                && result_type(value_types, result_index) == Some(first)
+        }
+        37 => {
+            operands.len() == 1
+                && (is_integer(types, first)
+                    || is_float(types, first)
+                    || matches!(type_at(types, first), Some(BinaryType::Pointer(_))))
                 && result_type(value_types, result_index) == Some(first)
         }
         22 | 23 => {
@@ -325,6 +333,10 @@ fn is_integer(types: &BinaryTypeTable, index: u64) -> bool {
     matches!(numeric_kind(types, index), Some(NumericKind::Integer(_)))
 }
 
+fn integer_width_multiple_of_16(types: &BinaryTypeTable, index: u64) -> bool {
+    matches!(numeric_kind(types, index), Some(NumericKind::Integer(bits)) if bits % 16 == 0)
+}
+
 fn is_float(types: &BinaryTypeTable, index: u64) -> bool {
     matches!(numeric_kind(types, index), Some(NumericKind::Float(_)))
 }
@@ -516,5 +528,90 @@ fn bit_size(types: &BinaryTypeTable, index: u64) -> Option<u64> {
         BinaryType::FixedVector { lanes, element } => lanes.checked_mul(bit_size(types, *element)?),
         BinaryType::ScalableVector { .. } => None,
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod extended_integer_tests {
+    use super::*;
+
+    fn verify_width(opcode: u64, ty: BinaryType, element: Option<BinaryType>) -> bool {
+        let mut types = BinaryTypeTable::default();
+        let ty_index = if let Some(element) = element {
+            types.entries.push(element);
+            types.entries.push(ty);
+            1
+        } else {
+            types.entries.push(ty);
+            0
+        };
+        let operands = if opcode == 0x041 {
+            vec![BinaryOperand::Value(0)]
+        } else {
+            vec![BinaryOperand::Value(0), BinaryOperand::Value(0)]
+        };
+        let instruction = BinaryInstruction {
+            offset: 0,
+            opcode,
+            modifiers: 0,
+            result_count: 1,
+            terminator: false,
+            operands,
+        };
+        verify_integer(&instruction, &[Some(ty_index), Some(ty_index)], 1, &types).is_none()
+    }
+
+    #[test]
+    fn v2_bswap_enforces_element_width_in_binary() {
+        for width in [8, 24, 31, 40] {
+            assert!(!verify_width(0x041, BinaryType::Integer(width), None));
+        }
+        for width in [16, 32, 64, 128] {
+            assert!(verify_width(0x041, BinaryType::Integer(width), None));
+        }
+        assert!(!verify_width(
+            0x041,
+            BinaryType::FixedVector {
+                lanes: 4,
+                element: 0
+            },
+            Some(BinaryType::Integer(8))
+        ));
+        assert!(verify_width(
+            0x041,
+            BinaryType::FixedVector {
+                lanes: 4,
+                element: 0
+            },
+            Some(BinaryType::Integer(32))
+        ));
+    }
+
+    #[test]
+    fn v2_clmul_and_clmulh_enforce_32_or_64_bit_elements() {
+        for opcode in [0x043, 0x044] {
+            for width in [1, 8, 16, 128] {
+                assert!(!verify_width(opcode, BinaryType::Integer(width), None));
+            }
+            for width in [32, 64] {
+                assert!(verify_width(opcode, BinaryType::Integer(width), None));
+            }
+            assert!(!verify_width(
+                opcode,
+                BinaryType::FixedVector {
+                    lanes: 2,
+                    element: 0
+                },
+                Some(BinaryType::Integer(16))
+            ));
+            assert!(!verify_width(
+                opcode,
+                BinaryType::FixedVector {
+                    lanes: 2,
+                    element: 0
+                },
+                Some(BinaryType::Integer(64))
+            ));
+        }
     }
 }

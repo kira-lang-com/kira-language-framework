@@ -3,7 +3,8 @@ use std::fmt::Write as _;
 use crate::StringTable;
 use crate::types::{
     BinaryCodeTable, BinaryConstantTable, BinaryEngine, BinaryFunctionBody, BinaryFunctionType,
-    BinarySignature, BinarySignatureTable, BinaryTarget, BinaryType, BinaryTypeTable,
+    BinaryGlobalTable, BinarySignature, BinarySignatureTable, BinaryTarget, BinaryType,
+    BinaryTypeTable,
 };
 
 pub(crate) fn format_function_declarations(
@@ -11,6 +12,7 @@ pub(crate) fn format_function_declarations(
     types: &BinaryTypeTable,
     code: &BinaryCodeTable,
     constants: &BinaryConstantTable,
+    globals: &BinaryGlobalTable,
     strings: &StringTable,
 ) -> Result<String, crate::FormatError> {
     let mut text = String::new();
@@ -24,7 +26,7 @@ pub(crate) fn format_function_declarations(
             .iter()
             .find(|body| body.function_index == function_index as u64);
         format_function(
-            &mut text, record, function, types, signatures, body, constants, strings,
+            &mut text, record, function, types, signatures, body, constants, globals, strings,
         )?;
     }
     Ok(text)
@@ -38,6 +40,7 @@ fn format_function(
     signatures: &BinarySignatureTable,
     body: Option<&BinaryFunctionBody>,
     constants: &BinaryConstantTable,
+    globals: &BinaryGlobalTable,
     strings: &StringTable,
 ) -> Result<(), crate::FormatError> {
     if !record.generic_parameters.is_empty()
@@ -142,7 +145,7 @@ fn format_function(
     }
     if let Some(body) = body {
         crate::text_function_body_disassembly::format_return_body(
-            text, body, function, types, signatures, constants, strings,
+            text, body, function, types, signatures, constants, globals, strings,
         )?;
     }
     Ok(())

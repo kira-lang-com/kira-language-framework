@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use tir_diag::Span;
-use tir_types::Type;
+use tir_types::{FloatType, Type};
 
 use crate::types::{BinaryType, BinaryTypeTable};
 use crate::{TextInstruction, TextItem, TextParseError};
@@ -122,21 +122,16 @@ impl MemoryOperation {
             Ok((values.len() - position) as u64)
         };
         match self {
-            Self::StackAlloc {
-                ty: Type::Integer(width),
-            } => {
-                let index = types.entries.iter().position(|type_entry|
-                    matches!(type_entry, BinaryType::Integer(bits) if *bits == u64::from(*width)))
-                    .ok_or_else(|| error(item, span, "stack allocation's integer type is not interned"))?;
+            Self::StackAlloc { ty } => {
+                let index = supported_type_index(types, ty).ok_or_else(|| {
+                    error(
+                        item,
+                        span,
+                        "stack allocation's loadable type is not interned",
+                    )
+                })?;
                 write(index as u64, output)?;
                 write(0, output)?; // no dynamic count
-            }
-            Self::StackAlloc { .. } => {
-                return Err(error(
-                    item,
-                    span,
-                    "only integer stack allocation types are currently supported",
-                ));
             }
             Self::StackDealloc { address }
             | Self::Destroy { address }
@@ -213,11 +208,11 @@ pub(crate) fn parse(
             let ty = crate::parse_type(operands.trim()).map_err(|err| {
                 error(item, span, format!("invalid stack allocation type: {err}"))
             })?;
-            if !matches!(ty, Type::Integer(_)) {
+            if !is_supported_storage_type(&ty) {
                 return Err(error(
                     item,
                     span,
-                    "only integer stack allocation is implemented",
+                    "only loadable scalar and fixed-vector stack storage is implemented",
                 ));
             }
             Ok(MemoryOperation::StackAlloc { ty })
@@ -302,6 +297,54 @@ pub(crate) fn parse(
         }
         _ => Err(error(item, span, "not a supported memory instruction")),
     }
+}
+
+fn supports_scalar_float(float: FloatType) -> bool {
+    matches!(
+        float,
+        FloatType::F16
+            | FloatType::Bf16
+            | FloatType::F32
+            | FloatType::F64
+            | FloatType::F128
+            | FloatType::F8E4M3
+            | FloatType::F8E5M2
+            | FloatType::E8M0
+    )
+}
+
+pub(crate) fn is_supported_storage_type(ty: &Type) -> bool {
+    match ty {
+        Type::Integer(bits) => *bits > 0,
+        Type::Float(float) => supports_scalar_float(*float),
+        Type::FixedVector { lanes, element } => {
+            *lanes > 0
+                && matches!(element.as_ref(), Type::Integer(_) | Type::Float(_))
+                && is_supported_storage_type(element)
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn supported_type_index(types: &BinaryTypeTable, ty: &Type) -> Option<usize> {
+    if !is_supported_storage_type(ty) {
+        return None;
+    }
+    types.entries.iter().position(|entry| match (ty, entry) {
+        (Type::Integer(width), BinaryType::Integer(bits)) => u64::from(*width) == *bits,
+        (Type::Float(float), BinaryType::Float(encoded)) => float == encoded,
+        (
+            Type::FixedVector { lanes, element },
+            BinaryType::FixedVector {
+                lanes: binary_lanes,
+                element: binary_element,
+            },
+        ) => {
+            u64::from(*lanes) == *binary_lanes
+                && supported_type_index(types, element) == usize::try_from(*binary_element).ok()
+        }
+        _ => false,
+    })
 }
 
 fn take_mode<'a>(
@@ -396,5 +439,63 @@ mod tests {
             assemble_text_module(&parsed).is_err(),
             "wrong-typed store must not assemble"
         );
+    }
+
+    #[test]
+    fn supported_scalar_float_stack_storage_round_trips() {
+        for ty in [
+            "f16", "bf16", "f32", "f64", "f128", "f8e4m3", "f8e5m2", "e8m0",
+        ] {
+            let text = format!(
+                "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.float(%value: {ty}) -> {ty} engine(native) {{\nbb0(%value: {ty}):\n  %slot = stack.alloc {ty}\n  store [init] %value to %slot\n  %loaded = load [trivial] %slot\n  stack.dealloc %slot\n  return %loaded\n}}\n"
+            );
+            let parsed = parse_text_module(&text).expect("float text parses");
+            let bytes = assemble_text_module(&parsed).expect("float stack assembles");
+            let binary = BinaryModule::decode(&bytes).expect("binary decodes");
+            let text =
+                disassemble_text_module(&binary, u64::MAX).expect("float stack disassembles");
+            assert_eq!(
+                bytes,
+                assemble_text_module(
+                    &parse_text_module(&text).expect("canonical float text parses")
+                )
+                .expect("canonical float reassembles")
+            );
+        }
+    }
+
+    #[test]
+    fn fixed_vector_stack_storage_round_trips() {
+        for ty in ["vec<4 x i32>", "vec<3 x f32>", "vec<8 x i1>"] {
+            let text = format!(
+                "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.vector(%value: {ty}) -> {ty} engine(native) {{\nbb0(%value: {ty}):\n  %slot = stack.alloc {ty}\n  store [init] %value to %slot\n  %loaded = load [trivial] %slot\n  stack.dealloc %slot\n  return %loaded\n}}\n"
+            );
+            let parsed = parse_text_module(&text).expect("vector text parses");
+            let bytes = assemble_text_module(&parsed).expect("vector CODE assembles");
+            let binary = BinaryModule::decode(&bytes).expect("vector binary decodes");
+            let canonical =
+                disassemble_text_module(&binary, u64::MAX).expect("vector stack CODE disassembles");
+            let rebuilt =
+                assemble_text_module(&parse_text_module(&canonical).expect("text reparses"))
+                    .expect("vector CODE reassembles");
+            assert_eq!(
+                bytes, rebuilt,
+                "vector storage is canonically encoded: {ty}"
+            );
+        }
+    }
+
+    #[test]
+    fn subbyte_scalar_float_stack_storage_is_rejected() {
+        for ty in ["f4e2m1", "f6e2m3", "f6e3m2"] {
+            let text = format!(
+                "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.float() -> unit engine(native) {{\nbb0:\n  %slot = stack.alloc {ty}\n  stack.dealloc %slot\n  return\n}}\n"
+            );
+            let parsed = parse_text_module(&text).expect("text parses");
+            assert!(
+                assemble_text_module(&parsed).is_err(),
+                "subbyte {ty} is not a standalone scalar storage type"
+            );
+        }
     }
 }

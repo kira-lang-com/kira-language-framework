@@ -3,6 +3,418 @@
 This file records behavior present in the current tree and its validation
 evidence. The normative requirements remain in the applicable specification.
 
+## Kira CLI backend selection (2026-11-06)
+
+The Kira driver now declares `--backend runtime|native`, with `native` as
+its default. An explicitly selected runtime build emits `.klbc` by default,
+and native builds emit executables; `kira run --backend runtime` lowers the
+program to `.klbc` and uses the installed `klfvm-run` runner. The runtime
+runner accepts a private entry-convention option so Kira's `runProgram`
+hook runs bytecode with the correct process-exit semantics. The native path
+retains the existing binary compiler and linker. Explicit conflicting
+backend/output format pairs are rejected; KIR output remains available.
+
+## Kira helper / plugin runtime foundation (2026-11-06)
+
+The new `klf-helper-apps` crate and `klf-ridl-wire::transport` implement a
+**Unix-only runtime subset** of RIDL cross-process communication. A host can
+resolve an installed application ID, check its RIDL import ABI, run a separate
+native or VM process with a private inherited channel, automatically dispatch
+its permitted host RIDL calls, and transfer OS descriptors through `SCM_RIGHTS`.
+The companion VM-only runner uses restricted `klf-vm::Instance` loading and
+Kira's existing `.kirb` RIDL-import attributes to bind scalar remote calls
+without a second binding generator. Multiple Kira units importing the same
+module are merged as in Kira's native RIDL path. `InstalledApp::from_compiled`
+reads existing `.ridlmeta` files and validates imported VM modules. Child
+environments are cleared. VM plugin dispatch is now limited to the methods in
+its compiled `ridl.import.entry` map, not all exports of an imported module.
+The compiled `.kirb` is SHA-256 pinned at catalog installation and reverified
+before method routing at launch; expanding the approved import map is refused.
+Native/hybrid artifacts require explicit `Catalog::install_trusted_native`;
+normal installs reject them until OS sandboxing exists. Nested calls use
+distinct reply channels.
+
+`Host::export_vm` registers actual Kira VM functions from generated
+`ridl.surface`/`ridl.entry` records, checks their scalar KIR signatures and
+RIDL metadata hash, and dispatches imported calls into Kira code. The new
+`Host::export_compiled_vm` reads a host-service `.klbc`, `.kirb` and
+`.ridlmeta`, initializes its restricted VM and registers exports without
+handwritten Rust handlers. Tests exercise compiled Kira VM plugins calling
+compiled Kira VM host functions in separate processes. A Kira VM blocked
+inside `Plugin.wait()` can now service its plugin's RIDL callback: the managed
+runtime queues calls from the IPC worker and executes them on the waiting
+Kira thread. `ManagedApp::call` similarly pumps while a typed helper makes
+a nested helper → host → helper round trip. `Instance::try_call` avoids racing
+cross-thread VM entry, and callers receive a refusal when another thread owns
+the VM instead of deadlocking. A peer that dies before answering a RIDL call
+now gives EOF because the sender closes the transferred reply endpoint.
+Callbacks that panic are refused without poisoning the dispatcher.
+Continuous scheduler polling outside plugin lifecycle calls is not yet wired.
+
+Remote object reference orientation, release on final proxy drop and imported
+OS resource ownership are tracked separately from local exports. The wire
+decoder now bounds recursion before decoding an untrusted message and rejects
+malformed multi-descriptor transfers without retaining their handles.
+
+The native and VM runtimes expose `klf.plugin` services for plugin start,
+poll, wait, stop, and typed file sharing. Kira `Foundation` provides
+`Plugin.start(installedId)` and `PluginHandle.shareFile(file, resourceId)`;
+the latter duplicates a `klf.fs` file descriptor into that plugin's channel.
+The Kira package passes frontend checking, and the Rust service integration
+test verifies a real child and a transferred Foundation-managed file. The
+catalog and exported RIDL functions still require Rust embedding setup.
+
+An isolated Kira package can now specify `ridlImports: RidlImportMode = .Host`
+instead of a boolean. The default `.Linked` preserves local provider imports.
+Lowering emits `ridl.remote` KIR metadata so native/hybrid codegen selects
+generated remote adapters instead of local provider `ridlcc` symbols. The
+Unix `klfrt_ridl_remote_scalar` bridge uses the existing `.ridl` contract and
+private RIDL wire channel for signed/unsigned integers up to 64 bits, Bool,
+F32 and F64. Pointer-bearing, borrowed, aggregate and generic imports are
+rejected. Clang compilation, compiler selection and a trusted native child
+calling host RIDL methods through the bridge pass targeted tests; `klf check`
+passes on the modified Kira definitions. A freshly built Kira native plugin
+against an updated runtime archive and native+VM importer composition in a
+hybrid plugin have **not yet been verified**.
+
+Evidence: `cargo nextest run -p klf-ridl-wire -p klf-helper-apps --offline`
+**41 passed**; `cargo nextest run -p klf-ridl --test meta_suite --offline`
+**10 passed**; `cargo nextest run -p klf-vm --test restricted --offline`
+**5 passed**. See `crates/klf-helper-apps/README.md` for the limits.
+
+This **does not complete** Kira-native in-process host RIDL export registration,
+typed helper-app proxies, non-scalar native/hybrid RIDL adapters, resource
+marshalling, OS sandboxing, signed marketplace installation, Windows, or
+native+VM importer composition in a compiled hybrid Kira plugin.
+
+## TIR encoding expansion (2026-11-06, subsequent pass)
+
+**T0 and T1 remain open.** The following new paths are implemented and tested,
+but they do **not** constitute the complete TIR encoding corpus:
+
+- `const.vec` (0x008) now supports scalar integer lanes and exact IEEE
+  `f16`/`bf16`/`f32`/`f64`/`f128` lanes. Inline bit payloads cover vector
+  storage through 16 bytes; larger vectors use typed CONSTANTS records.
+  `const.aggregate` (0x009) now supports nonempty tuples and fixed arrays of
+  trivial integers, IEEE floats and null pointers, as well as non-generic
+  trivial nominal structs and explicit union active members. Nested tuple/
+  array values, active union members of aggregate type, and cross-block SSA
+  round-trip with declared field types and union indexes checked against TYPES.
+  Shared CONSTANTS indexes preserve the correct type/order alongside global
+  initializers and scalar `const.float`, with exact binary/text/binary
+  round-trips. Integer vector literals accept the normative decimal/hex,
+  binary, octal and underscore forms. V2 text/binary and `tir-own` pure-value
+  idempotence checks cover the new subset. Generic and general ownership-
+  sensitive nominal constants and unsupported nested nominal fields still
+  fail closed. The V2 explicit-layout text parser now reads and checks the
+  normative `explicit(size N, align A)` fields at their correct positions.
+- Fixed `vec<N x i1>` constants now pack consecutive lanes low-bit-first,
+  including non-byte-multiple shapes, with inline CODE through the 16-byte
+  storage threshold and typed CONSTANTS for larger masks. `const.sampler`
+  (0x011) now supports the complete 23-byte GPU descriptor, defaults, all
+  named sampler fields, exact f32 LOD literals, field-order-independent
+  canonical text, duplicate/range checks and GPU-only enforcement. GPU V15
+  explicit-type discovery no longer mistakes a `return %ssa` operand for an
+  undeclared nominal type. V2 text/binary and CLI round-trips cover both.
+- `gpu.builtin` (0x400) now covers all section 17.5 name/type pairs,
+  interning builtin names in STRINGS and deriving typed SSA in TYPES. Both
+  text and binary V2 consult the same normative builtin map. A dedicated
+  binary V2 check rejects forged names/types and non-GPU use, with tests
+  deliberately altering decoded CODE records. GPU V15 now distinguishes
+  SSA `%operands` from explicit nominal type mentions (including arithmetic
+  and builtin expressions). Multi-block and multi-function `klf tirc`
+  round-trips preserve binary bytes. Stage-constrained GPU entry and other
+  control instructions remain open.
+- GPU specialization CODE (0x401) now encodes 32-bit IDs, scalar
+  `i1`–`i64` and exact IEEE `f16`/`bf16`/`f32`/`f64` defaults, and 2–4 lane
+  vector defaults, backed by typed CONSTANTS records. Binary V2 rejects
+  forged IDs, CPU placement, mismatched TYPES/CONSTANTS, missing indexes,
+  invalid scalar widths and malformed vector payloads. V15 text rejects
+  inexact or out-of-range defaults. Cross-block SSA and mixed global/
+  floating/vector/specialization CONSTANTS indexes round-trip byte-identically
+  through `klf tirc`. Packed narrow-float specialization lanes remain open;
+  non-byte-aligned signed integers now clear unused high padding bits in
+  both GPU specialization and ordinary aggregate constants.
+- GPU synchronization CODE now round-trips `gpu.barrier` (0x402) and
+  `gpu.memfence` (0x403), with section 22.8 scope bits, the optional
+  barrier-only `unchecked_uniformity` modifier, default all-five memory
+  domains, and the canonical section 22.7 memory-domain byte. V2/V15 tests
+  reject invalid scope/modifier/result combinations, CPU placement, empty
+  masks, duplicate memory domains and unencodable text memory classes.
+  Mixed GPU builtin and synchronization CFGs pass source/binary checks and
+  byte-identical CLI TIRB round-trips. GPU V15 no longer mistakes branch
+  target labels for nominal types. Some text-accepted GPU memory classes
+  remain outside the five-domain binary grammar and fail closed.
+- The `0x120` address group now round-trips `field.addr`, `elem.addr`,
+  `enum.payload.addr`, payloadless `enum.inject`, `addr.toptr`, `ptr.toaddr`,
+  and `addr.cast`. The cast verifies matching static pointee layouts through
+  `tir-layout` and preserves address spaces; CPU pointer conversions are
+  classified unmanaged in ANALYSIS. `const.vec` (0x008) now encodes canonical
+  little-endian fixed integer lanes for `i8`/`i16`/`i32`/`i64` vectors.
+  Storage up to 16 bytes is inline in CODE; larger storage gets a typed
+  CONSTANTS record and CODE index. Mixed `const.float` and multi-function
+  large vectors retain stable per-instruction CONSTANTS indexes. Invalid lane
+  counts, types, ranges, layouts and address-space changes fail closed.
+  Exact IEEE floating-point vector literals are now supported by text
+  assembly for f16, bf16, f32, f64, and f128; packed narrow-float forms
+  remain outside this subset.
+  V2 text/binary and rebuilt `klf tirc` pass byte-identical
+  binary/text/binary round-trips.
+- Raw `vec.mask.active` CODE/text round-trips with `svec<i1>` and the
+  `vec.mask.count`/`vec.mask.first` codecs accept that mask. It is **not V8
+  conformant**: TIR sections 22.6 and 16.3 define the instruction's result as
+  SSA `svec<i1>`, but sections 7.10, 16.2, and V8 require `svec<T>` to be
+  address-only and forbid it as a loadable SSA value. The verifier retains
+  V8 rejection and a conformance test proves it fails closed. This requires
+  a normative spec decision, not an implicit relaxation of V8.
+- The trivial enum payload path additionally supports `enum.take` and
+  borrowed `enum.project`, with empty/scalar/tuple payloads, typed CODE and
+  V2/V4/V5 checks. Nontrivial payloads and general ownership-sensitive
+  variants still fail closed.
+- Nongeneric nominal CODE construction now supports trivial `struct.new`,
+  `struct.extract`, `struct.insert`, `struct.destructure`, `enum.new`, and
+  `enum.tag`; trivial `tuple.destructure` also produces all fields as
+  consecutive SSA results. A post-TYPES
+  pass checks field-index bounds and actual argument/payload types before CODE
+  emission. `struct.extract` derives its result from the declared trivial
+  field. `enum.tag` derives `i8`/`i16`/`i32` from RIDL/packed variant counts,
+  and `i32` from C layout. C enum payload declarations are refused; they
+  cannot use C layout. V2 text/binary checks and a rebuilt `klf tirc`
+  confirm byte-identical round-trips. General nontrivial multi-result
+  destructuring, generic aggregates, and ownership-sensitive projections
+  are still incomplete.
+- Fixed-vector CODE text assembly and disassembly now covers `vec.shuffle`
+  (unsigned lane indexes against concatenated inputs), all 15 `vec.reduce`
+  selectors with optional `mask` and `[reassoc]` for `fadd`/`fmul`,
+  `vec.compress`/`vec.expand`, `vec.slide` (`up`/`down`), `vec.table`,
+  and all four `vec.dot` kinds (`sdot`, `udot`, `usdot`, `bfdot`) with the
+  required 4:1 or 2:1 accumulator lane ratios. Vector memory CODE adds
+  masked/unmasked `vec.load`/`vec.store` with alignment and passthrough,
+  and `vec.gather`/`vec.scatter` with either vector-of-pointers or
+  base-plus-integer-offsets/scale addressing. Binary V2, text V2, and
+  byte-identical `klf tirc` round-trips cover both gather/scatter selectors
+  and masked memory. Text V2 now recognizes bracketed vector selectors and
+  the `passthru` field inside `[mask %m, passthru %v]`.
+  `vec.mask.active` has the V8 normative conflict described above; remaining
+  scalable-vector policies have not been established as fully conformant.
+- The ownership canonicalizer now inserts explicit LIFO stack deallocation
+  where its storage and control-flow proof succeeds, as well as `destroy`
+  for unused scalar counted/unique heap allocations and `weak.new` results
+  created from borrowed strong references. It supports direct return
+  ownership transfers, linear owned-unique move chains, and independent
+  branch exits. Unsupported aliasing, merge CFGs, escaped addresses,
+  default managed type-policy synthesis, and general ownership-flow
+  canonicalization still fail closed.
+- The constant/reference CODE group now assembles/disassembles `func.ref`
+  (including forwarded function values invoked through `call.indirect`),
+  `global.addr` and `tls.addr` with GLOBALS symbol resolution, and
+  `descriptor.ref` with exact TYPES indexing. Cross-section V2 rejects invalid
+  GLOBALS/TYPES indexes and non-thread-local `tls.addr`. CONSTANTS decoding
+  now accepts short canonical ULEB values stored in wide integer types such as
+  `i128 = 1`, rather than incorrectly bounding expanded storage by serialized
+  section size.
+- The heap reference group now round-trips `heap.alloc.counted`,
+  `heap.alloc.unique`, `ref.addr`, `uniq.addr`, `weak.new`, `weak.load`,
+  `ref.unowned`, and `ref.isunique`, in addition to the raw heap forms.
+  V2/V4 validate result types and enforce consuming each owned allocation or
+  newly created weak value. The V8 text verifier now treats `*T` SSA address
+  handles as loadable, matching binary verification, while still rejecting
+  address-only payload values. `weak.load` currently requires one explicitly
+  declared `Optional<$T>` enum with counted copy/destroy policy functions;
+  this avoids incorrectly treating `Optional<ref T>` as trivial. Synthesized
+  `policy default counted` and `policy default affine` remain unimplemented.
+  A rebuilt `klf tirc` passed text/binary V2/V4/V8 and byte-identical
+  binary/text/binary round-trips for the above reference forms.
+- CODE control flow now supports `switch.int`, non-generic nominal
+  `switch.enum` (including declared variant payload block parameters),
+  `block.addr`/`br.indirect` (restricted to direct same-function block-address
+  provenance and parameterless destinations), `fail` in typed `fails`
+  functions, `longjmp`, and `tail.call`. Integer switch cases are checked for
+  unique bit patterns and range; enum cases use increasing definition indexes,
+  require a default unless exhaustive, and must match payload types. T1 V1/V2
+  verification checks CFG ordering, typed cases, and target provenance.
+  `br.indirect` restrictions are V2; V19 remains the distinct function-pointer
+  type-integrity rule for `call.indirect`.
+- Direct, indirect and tail call sites encode and canonically disassemble
+  `cold`, `nounwind`, `noreturn`, `inline`, and `noinline` in bits 41–45,
+  including forbidden combinations. `[builtin]` is intentionally refused:
+  the textual spec spells it, but no corresponding binary modifier bit is
+  allocated in section 22.8. The `longjmp` binary verifier enforces the
+  generic-pointer and `i32` value operands. The rebuilt CLI verified and
+  reproduced byte-identical binary/text/binary for exhaustive enum switching,
+  indirect block branches and typed `fail` across multiple functions.
+- Synchronous non-generic direct `call @f(args)` now resolves forward
+  SIGNATURES declarations and checks argument/result types before CODE emission.
+  Typed `call.indirect %fn : fnT (args)` validates exact function-SSA types
+  and V19 control-flow integrity. The canonical ANALYSIS encoder now includes
+  every used indirect-call function `typeid` (BLAKE3-backed `tir-types`
+  canonical type identity), sorted and deduplicated; disassembly checks this
+  inventory against decoded CODE and refuses mismatches. CLI text verification,
+  binary verification, and byte-identical round-trip were exercised with
+  direct/indirect functions, plus negative signature, ownership and malformed
+  ANALYSIS tests.
+- CPU atomic load/store/fence/RMW/compare-exchange/wait/notify and scalar C
+  `va.start`/`arg`/`copy`/`end` and `setjmp` are supported in the typed CODE
+  text path. The atomics decoder accepts explicit `seq_cst` per section 15.6,
+  compare-exchange produces one `(T, i1)` SSA tuple, and V2/V20 verify typed
+  variadic and nonlocal-jump operations. `setjmp` requires `returns_twice`
+  in text and binary. RMW opcodes 16–18 remain deliberately unsupported
+  because the normative modifier encoding defines a four-bit selector.
+- The CODE text/binary path now covers `raw.load`/`raw.store` for supported
+  byte-aligned scalars (with alignment, volatile, and nontemporal fields),
+  `ptr.offset`/`ptr.diff`, `mem.copy`/`mem.move`/`mem.set`, and `prefetch`,
+  including the supported modifiers. ANALYSIS trust/reason flags are derived
+  from these instructions and reconstructed from CODE on disassembly; a
+  contradictory ANALYSIS section is rejected instead of silently erased.
+- `unreachable` (`[trap]`/`[ub]`) and 16-bit `trap` terminators now encode in
+  single- and multi-block CFGs. V14 checks `[ub]` under defined vs permissive
+  semantics. `heap.alloc.raw` (including permissive-only `[uninit]`),
+  `heap.realloc.raw`, and `heap.free.raw` have typed text/binary paths with
+  V2/V14/V20 tests and unmanaged ANALYSIS records.
+- Tessera driver `mmio.load`, `mmio.store`, and `fence.io` now encode and
+  disassemble with typed 1/2/4/8-byte values, alignment, and legal ordering
+  selectors. The binary MMIO decoder was fixed to read the required alignment
+  operand. V2, V20 and platform V21 tests cover the supported forms, and
+  the driver source-hash requirement remains enforced.
+- Scalar `fclass`, `frexp` (including its `(T, i32)` tuple), `ldexp`,
+  `fp.flags.read`, and `fp.flags.clear` now round-trip, with V2 verification.
+  Text verification was corrected to treat `fp.flags.clear` as defining no SSA
+  result, matching binary CODE. The rebuilt CLI has verified byte-identical
+  binary/text/binary cycles for MMIO, raw heap and FP-status examples.
+- `BinaryModuleBuilder` now supports the eight indexed DEBUG section 17 tables
+  (files, units, source types, scopes, delta-encoded instruction locations,
+  variables, labels, DATA) with typed decode/encode, canonical STRINGS
+  interning, CODE/GLOBALS cross-reference checks, and binary V2 verification.
+  TVISA frame-slot decoding now retains DEBUG variable indices for its own
+  reference checks. Multiple opaque producer-defined CUSTOM section 255
+  payloads also round-trip, in order; the binary reader now requires CAPS 13.
+- CODE text/byte round trips extend to `assume`, `expect` (signed-magnitude
+  expected integer and optional f32 probability), `nop`, `prof.count`,
+  `target.has`, `target.pagesize`, and portable zero-argument intrinsics 11–14.
+  The binary verifier enforces V14 on `assume` and V2 integer/probability,
+  query-result, and intrinsic result-type constraints. Trivial `tuple.new`,
+  `tuple.extract`, `array.new`, `array.extract`, and `array.insert` also
+  assemble/disassemble, including CFG forwarding, with V2 conformance tests.
+- `BinaryModuleBuilder` now always emits mandatory CAPS (section 13), encodes
+  typed METADATA attachments (15) with validated CODE instruction ordinals,
+  and encodes RIDL exports, ABI stamps, and inlinable-body records (12) using
+  the existing RIDL decoder to validate the bytes. CAPS, RIDL, and METADATA
+  strings are interned in STRINGS. Header summary flags 0–5 are derived from
+  actual function modes, engines, targets, and ANALYSIS trust classes; bit 6
+  remains the canonical-encoding flag.
+- The supported CODE text/byte round-trip subset now includes conversions
+  `0x0A0`–`0x0AC` (`trunc`, `zext`, `sext`, float/integer and pointer conversions,
+  `bitcast`, `fcvt`), specified supported rounding and saturation modes,
+  and `math.*` in `0x07A`–`0x092` including `[approx]`. Type-root interning,
+  SSA numbering, and canonical disassembly were extended accordingly.
+- The implemented fixed-vector CODE subset includes `vec.splat`,
+  `vec.extract`, `vec.insert`, `vec.step`, `vec.vscale`, `vec.zip`,
+  `vec.unzip`, `vec.reverse`, `vec.concat`, `vec.split`, `vec.mask.count`,
+  and `vec.mask.first`. These accept supported fixed numeric/mask types and
+  reject mismatched shapes; the relevant V2 paths have binary-verifier tests.
+- `tirc dis` accepts an empty CAPS section (now emitted by the assembler) but
+  refuses to discard nonempty CAPS data; most nonempty specialized sections
+  still have no lossless TIR text disassembly representation.
+
+Evidence: scoped `cargo nextest run -p tir-format -p tir-layout -p tir-verify
+-p tir-own --no-fail-fast`: **558 passed, zero failed**.
+`cargo fmt --all -- --check`, `cargo check -p klf-cli -p
+tvisa-format`, and `cargo build -p klf-cli --bin klf` passed. The rebuilt CLI
+verified and preserved byte-identical binary/text/binary for enum and integer
+switches, direct/indirect block branches, typed error exits, function/global
+references, counted/unique/weak heap operations, fixed-vector math and masked
+loads/stores/gathers/scatters, calls, MMIO, raw heap,
+FP-status, conversion, `math.* [approx]`, and vector examples. Touched Rust
+source files remain below the 700-line limit.
+
+See `TIR-ENCODING-GAPS.md` for the remaining section/opcode families. In
+particular, PROFILE (18) is not yet defined at the byte-layout level in the
+normative spec, the complete section-to-text surface is unfinished, and many
+CODE instruction families have not been implemented or conformance-certified.
+Do not mark T0 complete.
+
+## TIR T0/T1 progress (2026-11-06)
+
+T0 and T1 are **still open**. Changes since the November 5 entry:
+
+- CODE text/binary assembly and canonical disassembly now cover a **restricted**
+  SSA subset containing integer and floating-point scalar/vector operations,
+  comparisons, `select`, `const.int`, `const.float`, `const.bool`, `const.zero`,
+  `const.null`, `const.poison` (permissive only), and byte-aligned scalar
+  `const.bytes`, `const.string` in SSA chains, and `freeze` of supported
+  scalars and numeric vectors.
+  Pointer-valued `const.zero` is supported in SSA chains, too.
+  Section 12.2 integer CODE now also handles modifier-free `sdiv`, `udiv`,
+  `srem`, `urem`, shifts, rotates, funnel shifts, signed/unsigned min/max,
+  leading/trailing/population counts, byte swap, bit reversal and scalar
+  `clmul`/`clmulh`. For T0, `udiv [exact]`, `or [disjoint]` and
+  `ctlz`/`cttz [poison]` encode their specified modifier bits and round-trip;
+  unsupported modes fail explicitly. The binary decoder rejects these bits
+  on unrelated integer opcodes.
+  Multiple float constants across functions and basic blocks use the existing
+  CONSTANTS table; multiple string constants in the same or different blocks
+  use STRINGS. Pointer address spaces, UTF-8 text, and little-endian byte
+  payloads round-trip exactly. The binary header's defined-only flag now
+  follows each function's effective semantic mode, including overrides.
+- The supported ownership and memory instructions include `copy`, `move`,
+  `destroy`, `borrow.begin`/`borrow.end`, `access.begin`/`access.end`,
+  `stack.alloc`, `stack.dealloc`, `load`, `load.borrow`, `store`, `copy.addr`,
+  `move.addr`, and `destroy.addr`. Stack storage accepts integers (including
+  wide widths), supported scalar floats, and fixed vectors of scalar elements;
+  standalone subbyte floats remain rejected. Multi-block typed arguments,
+  dominance, loop back-edges, vector `i1` masks, and exact CODE round-trips
+  have tests. Unimplemented instructions and unsupported modifiers are rejected.
+- The binary V8 loadability check accepts address *handles* (`*T`) as SSA
+  operands without treating their pointees as loadable values. V4 likewise
+  excludes address handles from owned-value consumption; stack deallocation
+  order and address operand types are checked independently.
+- Added `tir-own` and wired `tirc canonicalize` to its limited canonicalizer.
+  It canonicalizes proven pure-value SSA, balanced explicit borrow and static
+  access scopes, linear unique-value moves and final destroys, and restricted
+  owned-unique forwarding through acyclic unconditional block-parameter chains.
+  Direct scalar/vector stack storage is supported in single-block functions and
+  in multi-block CFGs with independent entry-allocated slots, direct accesses,
+  and LIFO deallocation at every return. The restricted CFG pass inserts a
+  per-slot zero initializer when definite initialization cannot be proved and
+  changes later `store [init]`/`copy.addr [init]`/`move.addr [init]` to `[assign]`
+  where needed. Restricted branch-local direct `move.addr` flows are supported;
+  moves that consume an address before a later read remain rejected.
+  Branches, loops, multiple exits, independent slots, floating-point/vector
+  storage, and rejection of aliases or unsafe ownership flows have tests.
+  Arbitrary aliasing, nontrivial copy policies, unrestricted borrow dataflow,
+  and full address-only lowering remain unsupported.
+- Definite-initialization diagnostics `TIR-OWN-0014` and `0015` are wired into
+  text verification for directly tracked stack slots. Borrow scopes, typed
+  branch edges, V1 dominance, V2 scalar/vector `freeze`, V4/V5 ownership,
+  V6/V7, V8/V9/V10/V12/V13/V14,
+  S1/S3/S5/S6/S7, layout, and V21 platform restrictions have targeted tests.
+  The V7 text verifier no longer mistakes SSA names like `%modify` for access
+  modifiers. V21 platform contradictions are reported as `TIR-PLAT-0001`, per
+  section 32.3, in both text and binary verification.
+  V2 additionally checks `bswap` integer element widths are multiples of 16,
+  and `clmul`/`clmulh` are scalar `i32` or `i64`. V14 verifies `[exact]`,
+  `[disjoint]` and `[poison]` integer forms are rejected under defined
+  semantics in both text and binary, and accepted under permissive semantics.
+
+Validation for this increment: `cargo nextest run -p tir-format -p tir-layout
+-p tir-verify -p tir-own --no-fail-fast`: **191 passed**, zero failed; included
+four V21 platform-conformance tests. `cargo check -p klf-cli`,
+`cargo build -p klf-cli --bin klf`, and `cargo fmt --all -- --check`
+passed. The rebuilt CLI completed `canonicalize → text check → asm → binary
+check → dis` with identical canonical text for integer CFG memory, scalar
+floats, vectors, multi-constant floats, byte constants, string selection, and
+permissive poison with `freeze`, integer funnel shifts and integer arithmetic
+modifier flags. A defined-only integer module and a permissive integer module
+both passed `canonicalize → check → asm → binary check → dis` with identical
+canonical text; the CLI rejected the permissive flags when the module was
+changed to defined semantics (`TIR-VFY-0014`).
+Touched Rust source files were kept below the repository's 700-line limit.
+
+**Not yet T0 or T1:** unrestricted section/item and CODE lowering, a complete
+canonical encoding corpus, the full five-pass raw-TIR canonicalizer, general
+alias and borrow analyses, unrestricted address-only lowering, and complete
+positive/negative V1–V21, S1–S7 and GPU conformance suites.
+
 
 ## TIR T0/T1 work in progress (2026-11-05)
 

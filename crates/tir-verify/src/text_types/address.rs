@@ -6,6 +6,7 @@ use tir_format::text::{Token, TokenKind};
 use tir_layout::{DefinitionKind, LayoutEngine};
 use tir_types::Type;
 
+use crate::gpu_profile::policy::TypePolicies;
 use crate::model::ValueUse;
 use crate::ssa::text_instruction_operands_start;
 
@@ -43,6 +44,7 @@ pub(super) fn verify_instruction(
     instruction: &TextInstruction,
     operands: &[ValueUse],
     layouts: &mut LayoutEngine,
+    policies: &TypePolicies,
 ) -> Vec<Diagnostic> {
     let error = |message: &str| Diagnostic::error(V2, message).with_primary_span(instruction.span);
     let Some(address) = operands.first().map(|operand| &operand.ty) else {
@@ -97,20 +99,15 @@ pub(super) fn verify_instruction(
                 diagnostics.push(error("elem.addr index must have an integer type"));
             }
         }
-        "enum.payload.addr" => {
-            let Some(index) = immediate_index(instruction) else {
-                return vec![error(
-                    "enum.payload.addr requires a non-negative integer variant index",
-                )];
-            };
+        "enum.payload.addr" | "enum.inject" => {
             let Type::Address { pointee, .. } = address else {
                 return vec![error(
-                    "enum.payload.addr requires an address to a nominal enum",
+                    "enum address operation requires an address to a nominal enum",
                 )];
             };
             let Type::Nominal { path, arguments } = pointee.as_ref() else {
                 return vec![error(
-                    "enum.payload.addr requires an address to a nominal enum",
+                    "enum address operation requires an address to a nominal enum",
                 )];
             };
             let Some(definition) = layouts.definition(path) else {
@@ -124,8 +121,14 @@ pub(super) fn verify_instruction(
                     "enum.payload.addr enum type has the wrong generic arity",
                 )];
             }
-            if index >= definition.variants.len() {
-                diagnostics.push(error("enum.payload.addr variant index is out of range"));
+            let variant_ty = Type::Nominal {
+                path: path.clone(),
+                arguments: arguments.clone(),
+            };
+            if enum_variant_index(instruction, &variant_ty, policies)
+                .is_none_or(|index| index >= definition.variants.len())
+            {
+                diagnostics.push(error("enum address variant name/index is invalid"));
             }
         }
         "addr.cast" => {
@@ -220,6 +223,7 @@ pub(super) fn infer_enum_payload_address(
     instruction: &TextInstruction,
     address: &Type,
     layouts: &LayoutEngine,
+    policies: &TypePolicies,
 ) -> Option<Type> {
     let Type::Address { pointee, space } = address else {
         return None;
@@ -231,7 +235,9 @@ pub(super) fn infer_enum_payload_address(
     if definition.kind != DefinitionKind::Enum || definition.parameters.len() != arguments.len() {
         return None;
     }
-    let variant = definition.variants.get(immediate_index(instruction)?)?;
+    let variant = definition
+        .variants
+        .get(enum_variant_index(instruction, pointee, policies)?)?;
     let bindings = definition
         .parameters
         .iter()
@@ -265,6 +271,23 @@ fn immediate_index(instruction: &TextInstruction) -> Option<usize> {
         comma + 1,
     )?)?;
     usize::try_from(value).ok()
+}
+
+fn enum_variant_index(
+    instruction: &TextInstruction,
+    ty: &Type,
+    policies: &TypePolicies,
+) -> Option<usize> {
+    if let Some(index) = immediate_index(instruction) {
+        return Some(index);
+    }
+    let start = text_instruction_operands_start(&instruction.tokens);
+    let comma = instruction.tokens[start..]
+        .iter()
+        .position(|token| punctuation(token, ','))?
+        + start;
+    let name = atom_at(&instruction.tokens, comma + 1)?;
+    policies.variant_index(ty, name)
 }
 
 fn punctuation(token: &Token, expected: char) -> bool {

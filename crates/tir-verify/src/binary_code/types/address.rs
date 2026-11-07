@@ -89,6 +89,43 @@ pub(super) fn infer_enum_payload_address(
     address_type(types, payload_type(types, &payload)?, *space)
 }
 
+pub(super) fn has_enum_variant(
+    instruction: &BinaryInstruction,
+    address: Option<u64>,
+    types: &BinaryTypeTable,
+) -> bool {
+    let Some(BinaryType::Address { pointee, .. }) = address.and_then(|index| type_at(types, index))
+    else {
+        return false;
+    };
+    let Some(BinaryType::Nominal {
+        declaration,
+        arguments,
+    }) = type_at(types, *pointee)
+    else {
+        return false;
+    };
+    if types
+        .declarations
+        .get(*declaration as usize)
+        .is_none_or(|decl| {
+            decl.kind != BinaryNominalKind::Enum || decl.generic_parameters.len() != arguments.len()
+        })
+    {
+        return false;
+    }
+    types
+        .definitions
+        .iter()
+        .find(|definition| definition.declaration == *declaration)
+        .and_then(|definition| {
+            index_operand(instruction)
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(|index| definition.variants.get(index))
+        })
+        .is_some()
+}
+
 pub(super) fn substitute_type(
     types: &BinaryTypeTable,
     index: u64,

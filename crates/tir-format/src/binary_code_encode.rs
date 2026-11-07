@@ -52,7 +52,7 @@ impl BinaryCodeTable {
     }
 }
 
-fn encode_function_body(
+pub(crate) fn encode_function_body(
     function: &crate::types::BinaryFunctionBody,
 ) -> Result<Vec<u8>, FormatError> {
     if function.block_count == 0

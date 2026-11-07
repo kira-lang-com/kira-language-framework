@@ -23,7 +23,27 @@ impl FlowDominators {
                     } => {
                         vec![&when_true.label, &when_false.label]
                     }
-                    ControlTerminator::Return(_) => Vec::new(),
+                    ControlTerminator::Switch(switch) => switch
+                        .cases
+                        .iter()
+                        .map(|(_, target)| target.label.as_str())
+                        .chain(std::iter::once(switch.default.label.as_str()))
+                        .collect(),
+                    ControlTerminator::EnumSwitch(switch) => switch
+                        .cases
+                        .iter()
+                        .map(|(_, target)| target.as_str())
+                        .chain(switch.default.as_deref())
+                        .collect(),
+                    ControlTerminator::Indirect(branch) => {
+                        branch.targets.iter().map(String::as_str).collect()
+                    }
+                    ControlTerminator::Return(_)
+                    | ControlTerminator::Fail(_)
+                    | ControlTerminator::Unreachable { .. }
+                    | ControlTerminator::Trap(_)
+                    | ControlTerminator::TailCall(_)
+                    | ControlTerminator::Longjmp(_) => Vec::new(),
                 };
                 targets
                     .iter()

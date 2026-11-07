@@ -2,7 +2,8 @@ use std::fmt::Write as _;
 
 use crate::FormatError;
 use crate::types::{
-    BinaryFunctionBody, BinaryFunctionType, BinaryOperand, BinaryType, BinaryTypeTable,
+    BinaryConstantTable, BinaryFunctionBody, BinaryFunctionType, BinaryGlobalTable, BinaryOperand,
+    BinaryType, BinaryTypeTable,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -12,6 +13,9 @@ pub(crate) fn format_control_flow_body(
     function: &BinaryFunctionType,
     types: &BinaryTypeTable,
     signatures: &crate::types::BinarySignatureTable,
+    constants: &BinaryConstantTable,
+    globals: &BinaryGlobalTable,
+    strings: &crate::StringTable,
 ) -> Result<(), FormatError> {
     if body.block_count == 0 || usize::try_from(body.block_count).ok() != Some(body.blocks.len()) {
         return Err(malformed("CODE block count does not match its body"));
@@ -85,13 +89,43 @@ pub(crate) fn format_control_flow_body(
             text,
             operations,
             types,
+            signatures,
+            constants,
+            globals,
+            strings,
             &mut value_names,
         )?;
         text.push_str("    ");
-        if !instruction.terminator || instruction.result_count != 0 || instruction.modifiers != 0 {
+        if !instruction.terminator
+            || instruction.result_count != 0
+            || (instruction.modifiers != 0
+                && !(instruction.opcode == 0x1e8 && instruction.modifiers == (1 << 48))
+                && !(instruction.opcode == 0x1e7
+                    && crate::text_call_attributes::canonical(instruction.modifiers).is_ok()))
+        {
             return Err(malformed("invalid control-flow terminator"));
         }
         match instruction.opcode {
+            0x1e2 => crate::text_switch_int::format(text, instruction, types, &value_names)?,
+            0x1e3 => crate::text_switch_enum::format(
+                text,
+                instruction,
+                types,
+                &value_names,
+                &body.blocks,
+            )?,
+            0x1e4 => crate::text_indirect_branch::format(
+                text,
+                instruction,
+                types,
+                &value_names,
+                body.blocks.len(),
+                &body
+                    .blocks
+                    .iter()
+                    .map(|block| block.parameters.len())
+                    .collect::<Vec<_>>(),
+            )?,
             0x1e0 => {
                 let [BinaryOperand::BlockTarget { block, arguments }] =
                     instruction.operands.as_slice()
@@ -145,6 +179,52 @@ pub(crate) fn format_control_flow_body(
                 writeln!(text, "return %{}", value_name(*value, &value_names)?)
                     .map_err(formatting_error)?;
             }
+            0x1e6 => {
+                let [BinaryOperand::Value(value)] = instruction.operands.as_slice() else {
+                    return Err(malformed("fail must carry exactly one SSA value"));
+                };
+                let Some(expected) = function.error else {
+                    return Err(malformed("fail requires a function with an error type"));
+                };
+                let actual = value_names
+                    .get(*value as usize)
+                    .ok_or_else(|| malformed("fail uses an undefined SSA value"))?
+                    .1;
+                if actual != expected {
+                    return Err(malformed(
+                        "fail operand type does not match function error type",
+                    ));
+                }
+                writeln!(text, "fail %{}", value_name(*value, &value_names)?)
+                    .map_err(formatting_error)?;
+            }
+            0x1e8 if instruction.operands.is_empty() => {
+                if instruction.modifiers == (1 << 48) {
+                    text.push_str("unreachable [ub]\n");
+                } else {
+                    text.push_str("unreachable\n");
+                }
+            }
+            0x1e9 => {
+                let [BinaryOperand::Integer(code)] = instruction.operands.as_slice() else {
+                    return Err(malformed("trap requires an integer code"));
+                };
+                if code.negative || code.magnitude > u128::from(u16::MAX) {
+                    return Err(malformed("trap code does not fit in u16"));
+                }
+                writeln!(text, "trap {}", code.magnitude).map_err(formatting_error)?;
+            }
+            0x1e7 => {
+                crate::text_direct_call::format_tail(
+                    text,
+                    instruction,
+                    function,
+                    types,
+                    signatures,
+                    &value_names,
+                )?;
+            }
+            0x215 => crate::text_longjmp::format(text, instruction, types, &value_names)?,
             _ => return Err(malformed("unsupported control-flow terminator")),
         }
     }
@@ -152,7 +232,7 @@ pub(crate) fn format_control_flow_body(
     Ok(())
 }
 
-fn value_name(value: u64, names: &[(String, u64)]) -> Result<&str, FormatError> {
+pub(crate) fn value_name(value: u64, names: &[(String, u64)]) -> Result<&str, FormatError> {
     usize::try_from(value)
         .ok()
         .and_then(|index| names.get(index))
@@ -160,7 +240,7 @@ fn value_name(value: u64, names: &[(String, u64)]) -> Result<&str, FormatError> 
         .ok_or_else(|| malformed("control-flow operand is not a defined SSA value"))
 }
 
-fn format_target(
+pub(crate) fn format_target(
     text: &mut String,
     block: u64,
     arguments: &[u64],

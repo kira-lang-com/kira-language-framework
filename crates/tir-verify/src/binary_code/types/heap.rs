@@ -23,6 +23,20 @@ pub(super) fn weak_load_result(weak: Option<u64>, types: &BinaryTypeTable) -> Op
         return None;
     }
     let declaration = optional[0];
+    let lifecycle = types
+        .definitions
+        .iter()
+        .find(|definition| definition.declaration == declaration)?;
+    if !matches!(
+        lifecycle.policy.copy,
+        tir_format::BinaryCopyPolicy::Implicit(_)
+    ) || !matches!(
+        lifecycle.policy.destroy,
+        tir_format::BinaryDestroyPolicy::Function(_)
+    ) || lifecycle.policy.pairing != 0
+    {
+        return None;
+    }
     types
         .entries
         .iter()

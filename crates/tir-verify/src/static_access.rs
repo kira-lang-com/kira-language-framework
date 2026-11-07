@@ -134,20 +134,30 @@ fn end_access(instruction: &TextInstruction, open: &mut Vec<OpenAccess>) {
 }
 
 fn access_mode(instruction: &TextInstruction) -> Option<(bool, Mode)> {
-    let mut checking = None;
-    let mut mode = None;
-    for token in &instruction.tokens {
-        if let TokenKind::Atom(atom) = &token.kind {
+    // Only bracketed modifiers count. SSA identifiers such as `%modify` and
+    // `%dynamic` are ordinary names and must not influence access checking.
+    let mut checking = true; // TIR default: static
+    let mut mode = Mode::Read; // TIR default: read
+    for group in instruction.tokens.windows(3) {
+        let [open, value, close] = group else {
+            continue;
+        };
+        if !matches!(&open.kind, TokenKind::Punctuation('['))
+            || !matches!(&close.kind, TokenKind::Punctuation(']'))
+        {
+            continue;
+        }
+        if let TokenKind::Atom(atom) = &value.kind {
             match atom.as_str() {
-                "read" if mode.is_none() => mode = Some(Mode::Read),
-                "modify" if mode.is_none() => mode = Some(Mode::Modify),
-                "static" if checking.is_none() => checking = Some(true),
-                "dynamic" | "unchecked" if checking.is_none() => checking = Some(false),
-                _ => {}
+                "read" => mode = Mode::Read,
+                "modify" => mode = Mode::Modify,
+                "static" => checking = true,
+                "dynamic" | "unchecked" => checking = false,
+                _ => return None,
             }
         }
     }
-    Some((checking?, mode?))
+    Some((checking, mode))
 }
 
 fn merge_accesses(existing: &mut Vec<OpenAccess>, incoming: Vec<OpenAccess>) -> bool {

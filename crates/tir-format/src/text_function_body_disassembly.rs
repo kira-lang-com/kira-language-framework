@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 
 use crate::types::{
-    BinaryConstantTable, BinaryFunctionBody, BinaryFunctionType, BinaryOperand,
+    BinaryConstantTable, BinaryFunctionBody, BinaryFunctionType, BinaryGlobalTable, BinaryOperand,
     BinarySignatureTable, BinaryType, BinaryTypeTable,
 };
 use crate::{FormatError, StringTable};
@@ -13,6 +13,7 @@ pub(crate) fn format_return_body(
     types: &BinaryTypeTable,
     signatures: &BinarySignatureTable,
     constants: &BinaryConstantTable,
+    globals: &BinaryGlobalTable,
     strings: &StringTable,
 ) -> Result<(), crate::FormatError> {
     if body.block_count != 1
@@ -20,29 +21,80 @@ pub(crate) fn format_return_body(
             block.instructions.as_ref().is_some_and(|instructions| {
                 instructions
                     .first()
-                    .is_some_and(|instruction| matches!(instruction.opcode, 0x1e0 | 0x1e1))
+                    .is_some_and(|instruction| matches!(instruction.opcode, 0x1e0..=0x1e3))
+                    || instructions.last().is_some_and(|instruction| {
+                        matches!(instruction.opcode, 0x1e4..=0x1e9 | 0x215)
+                    })
             })
         })
     {
         return crate::text_control_flow_disassembly::format_control_flow_body(
-            text, body, function, types, signatures,
+            text, body, function, types, signatures, constants, globals, strings,
         );
     }
     if body.block_count != 1 || body.blocks.len() != 1 {
         return Err(malformed("tirc dis supports only one-block return bodies"));
     }
     let block = &body.blocks[0];
+    let unused_result = block.instruction_count == 2
+        && matches!(
+            types.entries.get(function.result as usize),
+            Some(BinaryType::Unit)
+        )
+        && block.instructions.as_ref().is_some_and(|instructions| {
+            instructions
+                .first()
+                .is_some_and(|instruction| instruction.result_count == 1)
+        });
     if block.instruction_count > 2
+        || unused_result
         || (block.instruction_count == 2
             && block.instructions.as_ref().is_some_and(|instructions| {
                 instructions.first().is_some_and(|instruction| {
-                    matches!(instruction.opcode, 0x180..=0x184)
+                    integer_operation_name(instruction.opcode).is_some()
+                        || crate::text_conversion_assembly::name(instruction.opcode).is_some()
+                        || crate::text_vector_simple::name(instruction.opcode).is_some()
+                        || matches!(instruction.opcode, 0x0c3 | 0x0c6)
+                        || matches!(instruction.opcode, 0x0c7 | 0x0c8)
+                        || matches!(instruction.opcode, 0x0c9 | 0x0ca)
+                        || matches!(
+                            instruction.opcode,
+                            0x122..=0x128 | 0x008 | 0x009 | 0x011 | 0x400..=0x403
+                        )
+                        || matches!(
+                            instruction.opcode,
+                            0x100 | 0x101 | 0x102 | 0x10a | 0x10b | 0x103 | 0x106 | 0x10c | 0x10d
+                        )
+                        || matches!(instruction.opcode, 0x104 | 0x105)
+                        || matches!(instruction.opcode, 0x107..=0x109)
+                        || crate::text_raw_memory::name(instruction.opcode).is_some()
+                        || matches!(instruction.opcode, 0x146 | 0x147)
+                        || matches!(instruction.opcode, 0x270..=0x272)
+                        || matches!(instruction.opcode, 0x164..=0x166)
+                        || matches!(instruction.opcode, 0x075..=0x079)
+                        || matches!(instruction.opcode, 0x200 | 0x201 | 0x204)
+                        || matches!(instruction.opcode, 0x205 | 0x206)
+                        || matches!(instruction.opcode, 0x202 | 0x203)
+                        || matches!(instruction.opcode, 0x210..=0x214)
+                        || instruction.opcode == 0x1a0
+                        || instruction.opcode == 0x1a1
+                        || instruction.opcode == 0x00f
+                        || instruction.opcode == 0x00a
+                        || instruction.opcode == 0x00d
+                        || matches!(instruction.opcode, 0x00b | 0x00c)
+                        || matches!(instruction.opcode, 0x160..=0x163 | 0x167..=0x16a)
+                        || matches!(
+                            instruction.opcode,
+                            0x223 | 0x224 | 0x230 | 0x243 | 0x244 | 0x245 | 0x246
+                        )
+                        || matches!(instruction.opcode, 0x180..=0x184)
                         || crate::text_memory_disassembly::handles(instruction.opcode)
+                        || matches!(instruction.opcode, 0x187 | 0x188)
                 })
             }))
     {
         return crate::text_straight_line_disassembly::format(
-            text, body, function, types, signatures, strings,
+            text, body, function, types, signatures, constants, globals, strings,
         );
     }
     let instructions = block
@@ -462,13 +514,36 @@ pub(crate) fn integer_operation_name(opcode: u64) -> Option<(&'static str, usize
         0x020 => Some(("add", 2)),
         0x021 => Some(("sub", 2)),
         0x022 => Some(("mul", 2)),
+        0x027 => Some(("sdiv", 2)),
+        0x028 => Some(("udiv", 2)),
+        0x029 => Some(("srem", 2)),
+        0x02a => Some(("urem", 2)),
         0x02b => Some(("and", 2)),
         0x02c => Some(("or", 2)),
         0x02d => Some(("xor", 2)),
         0x02e => Some(("not", 1)),
         0x02f => Some(("neg", 1)),
         0x030 => Some(("abs", 1)),
+        0x031 => Some(("shl", 2)),
+        0x032 => Some(("lshr", 2)),
+        0x033 => Some(("ashr", 2)),
+        0x034 => Some(("rotl", 2)),
+        0x035 => Some(("rotr", 2)),
+        0x036 => Some(("fshl", 3)),
+        0x037 => Some(("fshr", 3)),
+        0x038 => Some(("smin", 2)),
+        0x039 => Some(("smax", 2)),
+        0x03a => Some(("umin", 2)),
+        0x03b => Some(("umax", 2)),
         0x03c => Some(("icmp", 2)),
+        0x03e => Some(("ctlz", 1)),
+        0x03f => Some(("cttz", 1)),
+        0x040 => Some(("ctpop", 1)),
+        0x041 => Some(("bswap", 1)),
+        0x042 => Some(("bitreverse", 1)),
+        0x043 => Some(("clmul", 2)),
+        0x044 => Some(("clmulh", 2)),
+        0x045 => Some(("freeze", 1)),
         _ => None,
     }
 }
@@ -476,11 +551,15 @@ pub(crate) fn integer_operation_name(opcode: u64) -> Option<(&'static str, usize
 pub(crate) fn valid_integer_operation_modifiers(
     instruction: &crate::types::BinaryInstruction,
 ) -> bool {
-    if instruction.opcode == 0x03c {
-        instruction.modifiers & !(0xf << 48) == 0 && (instruction.modifiers >> 48) <= 9
-    } else {
-        instruction.modifiers == 0
-    }
+    let allowed = match instruction.opcode {
+        0x03c => 0xfu64 << 48,
+        0x028 => 1 << 3,
+        0x02c => 1 << 4,
+        0x03e | 0x03f => 1 << 47,
+        _ => 0,
+    };
+    instruction.modifiers & !allowed == 0
+        && (instruction.opcode != 0x03c || (instruction.modifiers >> 48) <= 9)
 }
 
 fn format_const_int(

@@ -4,6 +4,9 @@ mod atomic_order;
 mod binary_analysis;
 mod binary_code;
 mod binary_constants;
+mod binary_debug;
+#[cfg(test)]
+mod binary_debug_conformance;
 mod binary_header_flags;
 mod binary_references;
 mod binary_semantics;
@@ -17,8 +20,30 @@ mod gpu_profile;
 mod instruction_types;
 mod model;
 mod platform;
+#[cfg(test)]
+mod platform_conformance;
 mod profile;
 mod ridl;
+#[cfg(test)]
+mod rules_conformance;
+#[cfg(test)]
+mod rules_encoding_conformance;
+#[cfg(test)]
+mod rules_encoding_conformance_address;
+#[cfg(test)]
+mod rules_encoding_conformance_aggregate_constants;
+#[cfg(test)]
+mod rules_encoding_conformance_gpu_builtin;
+#[cfg(test)]
+mod rules_encoding_conformance_gpu_spec_const;
+#[cfg(test)]
+mod rules_encoding_conformance_gpu_sync;
+#[cfg(test)]
+mod rules_encoding_conformance_managed;
+#[cfg(test)]
+mod rules_encoding_conformance_sampler;
+#[cfg(test)]
+mod rules_encoding_conformance_vectors;
 mod runtime_engine;
 mod semantics;
 mod signature_types;
@@ -31,6 +56,7 @@ mod text_cfg;
 mod text_layout;
 mod text_modifiers;
 mod text_types;
+mod varargs_rules;
 mod variant_text;
 mod variants;
 mod vector_text;
@@ -113,6 +139,15 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
             &mut diagnostics,
         )
     });
+    let debug = collect_record(module.debug_table(memory_limit), &mut diagnostics);
+    if let Some(Some(debug)) = debug.as_ref() {
+        diagnostics.extend(binary_debug::verify(
+            debug,
+            signatures.as_ref(),
+            code.as_ref(),
+            globals.as_ref(),
+        ));
+    }
     let gpu = if let (Some(signatures), Some(types), Some(constants)) =
         (&signatures, &types, &constants)
     {
@@ -223,6 +258,7 @@ pub fn verify_binary_module_records(module: &BinaryModule, memory_limit: u64) ->
             code,
             signatures,
             types,
+            constants.as_ref(),
             generics.as_ref(),
             strings.as_ref(),
             imports.as_deref(),
@@ -289,7 +325,7 @@ pub fn verify_control_flow(body: &FunctionBody, options: ControlFlowOptions) -> 
         }
         for instruction in &block.instructions {
             if (options.gpu || options.structured)
-                && is_forbidden_in_structured_control_flow(&instruction.opcode)
+                && structured::is_forbidden_in_structured_control_flow(&instruction.opcode)
             {
                 diagnostics.push(
                     Diagnostic::error(
@@ -329,7 +365,7 @@ pub fn verify_control_flow(body: &FunctionBody, options: ControlFlowOptions) -> 
             ),
             [(index, terminator)] if *index + 1 == block.instructions.len() => {
                 if (options.gpu || options.structured)
-                    && is_forbidden_in_structured_control_flow(&terminator.opcode)
+                    && structured::is_forbidden_in_structured_control_flow(&terminator.opcode)
                 {
                     diagnostics.push(
                         Diagnostic::error(
@@ -449,6 +485,12 @@ pub fn verify_text_module(module: &TextModule, defaults: ControlFlowOptions) -> 
                     diagnostic
                 }),
         );
+        diagnostics.extend(varargs_rules::verify(source, &body).into_iter().map(
+            |mut diagnostic| {
+                shift_diagnostic(&mut diagnostic, item.span.start);
+                diagnostic
+            },
+        ));
         diagnostics.extend(
             runtime_engine::verify_instructions(&body, restricted_engine)
                 .into_iter()
@@ -651,12 +693,5 @@ pub fn is_terminator(opcode: &str) -> bool {
             | "deopt"
             | "rt.ignore_hit"
             | "rt.accept_and_end"
-    )
-}
-
-fn is_forbidden_in_structured_control_flow(opcode: &str) -> bool {
-    matches!(
-        opcode,
-        "br.indirect" | "invoke" | "landingpad" | "resume" | "throw" | "setjmp" | "longjmp"
     )
 }

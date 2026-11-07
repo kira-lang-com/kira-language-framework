@@ -1,7 +1,7 @@
 use crate::FormatError;
 use crate::types::{BinaryOperand, BinaryTypeTable};
 
-use super::{malformed, read_symbol, read_type, read_values};
+use super::{malformed, read_index, read_symbol, read_type, read_values};
 
 const ORDER_MASK: u64 = 0x7 << 20;
 const SELECTOR_MASK: u64 = 0xf << 48;
@@ -36,6 +36,7 @@ pub(super) fn decode(
                 read_type(bytes, cursor, base, types)? as u64
             ));
             read_values(bytes, cursor, base, current_value, 1, operands)?;
+            read_mmio_alignment(bytes, cursor, base, operands)?;
             Ok(1)
         }
         0x271 => {
@@ -46,6 +47,7 @@ pub(super) fn decode(
                 return Err(malformed(base + *cursor, "invalid mmio.store modifiers"));
             }
             read_values(bytes, cursor, base, current_value, 2, operands)?;
+            read_mmio_alignment(bytes, cursor, base, operands)?;
             Ok(0)
         }
         0x272 => {
@@ -71,6 +73,24 @@ pub(super) fn decode(
             "unsupported generic or platform opcode",
         )),
     }
+}
+
+fn read_mmio_alignment(
+    bytes: &[u8],
+    cursor: &mut usize,
+    base: usize,
+    operands: &mut Vec<BinaryOperand>,
+) -> Result<(), FormatError> {
+    let offset = *cursor;
+    let alignment = read_index(bytes, cursor, base, "MMIO alignment")?;
+    if alignment != 0 && !alignment.is_power_of_two() {
+        return Err(malformed(
+            base + offset,
+            "MMIO alignment must be zero or a power of two",
+        ));
+    }
+    operands.push(BinaryOperand::Index(alignment));
+    Ok(())
 }
 
 fn require_no_modifiers(modifiers: u64, offset: usize) -> Result<(), FormatError> {

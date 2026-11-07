@@ -11,12 +11,18 @@ mod address;
 mod address_instructions;
 mod aggregate;
 pub(super) mod aggregate_instructions;
+mod control_instructions;
 mod coroutines;
+mod device_instructions;
 mod gpu;
 mod heap;
+mod hint_instructions;
+mod indirect_branch;
 mod inference;
 mod memory_instructions;
 mod scalar_instructions;
+mod symbol_instructions;
+mod varargs_instructions;
 mod vector_instructions;
 
 use aggregate::{infer_aggregate_result, infer_destructure_results, infer_tuple_new};
@@ -27,6 +33,15 @@ pub(super) fn infer_value_types(
     types: &BinaryTypeTable,
 ) -> Vec<Option<u64>> {
     inference::infer_value_types(body, signatures, types)
+}
+
+pub(super) fn verify_symbol_instructions(
+    body: &BinaryFunctionBody,
+    types: &BinaryTypeTable,
+    globals: Option<&tir_format::BinaryGlobalTable>,
+    function_name: &str,
+) -> Vec<Diagnostic> {
+    symbol_instructions::verify(body, types, globals, function_name)
 }
 
 pub(super) fn verify_function_references(
@@ -142,6 +157,51 @@ pub(super) fn specialize_nominal_type(
     arguments: &[u64],
 ) -> Option<u64> {
     address::substitute_type(types, type_index, arguments)
+}
+
+pub(super) fn verify_indirect_branch_integrity(
+    body: &BinaryFunctionBody,
+    value_types: &[Option<u64>],
+    types: &BinaryTypeTable,
+    function_name: &str,
+) -> Vec<Diagnostic> {
+    indirect_branch::verify(body, value_types, types, function_name)
+}
+
+pub(super) fn verify_control_instructions(
+    body: &BinaryFunctionBody,
+    value_types: &[Option<u64>],
+    types: &BinaryTypeTable,
+    function_name: &str,
+) -> Vec<Diagnostic> {
+    control_instructions::verify(body, value_types, types, function_name)
+}
+
+pub(super) fn verify_varargs_instructions(
+    body: &BinaryFunctionBody,
+    value_types: &[Option<u64>],
+    types: &BinaryTypeTable,
+    function_name: &str,
+) -> Vec<Diagnostic> {
+    varargs_instructions::verify(body, value_types, types, function_name)
+}
+
+pub(super) fn verify_device_instructions(
+    body: &BinaryFunctionBody,
+    value_types: &[Option<u64>],
+    types: &BinaryTypeTable,
+    function_name: &str,
+) -> Vec<Diagnostic> {
+    device_instructions::verify(body, value_types, types, function_name)
+}
+
+pub(super) fn verify_hint_instructions(
+    body: &BinaryFunctionBody,
+    value_types: &[Option<u64>],
+    types: &BinaryTypeTable,
+    function_name: &str,
+) -> Vec<tir_diag::Diagnostic> {
+    hint_instructions::verify(body, value_types, types, function_name)
 }
 
 pub(super) fn verify_scalar_instructions(

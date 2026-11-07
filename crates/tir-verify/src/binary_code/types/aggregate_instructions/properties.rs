@@ -66,6 +66,7 @@ pub(super) fn is_trivial(types: &BinaryTypeTable, ty: u64, depth: usize) -> bool
             BinaryType::Integer(_)
             | BinaryType::Float(_)
             | BinaryType::Pointer(_)
+            | BinaryType::Function(_)
             | BinaryType::Unit
             | BinaryType::Sampler
             | BinaryType::AccelerationStructure

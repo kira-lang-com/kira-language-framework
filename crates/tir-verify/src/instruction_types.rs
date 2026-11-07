@@ -226,13 +226,16 @@ pub(super) fn verify_instruction(instruction: &Instruction) -> Vec<Diagnostic> {
             |ty| matches!(ty, Type::Integer(32)),
             &mut diagnostics,
         ),
-        "fp.flags.clear" => verify_constant(
-            &instruction.opcode,
-            &operands,
-            &results,
-            |ty| matches!(ty, Type::Unit),
-            &mut diagnostics,
-        ),
+        "fp.flags.clear" => {
+            require_counts(
+                &instruction.opcode,
+                &operands,
+                &results,
+                0,
+                0,
+                &mut diagnostics,
+            );
+        }
         "math.atan2" | "math.pow" | "math.hypot" => {
             verify_binary(instruction, &operands, &results, is_float, &mut diagnostics);
         }

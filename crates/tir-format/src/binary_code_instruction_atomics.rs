@@ -45,7 +45,7 @@ pub(super) fn decode(
     }
     match relative {
         0 => {
-            if !matches!(order, 0..=2) {
+            if !matches!(order, 0..=2 | 5) {
                 return Err(malformed(
                     base + *cursor,
                     "atomic.load order cannot release",
@@ -58,7 +58,7 @@ pub(super) fn decode(
             Ok(1)
         }
         1 => {
-            if !matches!(order, 0 | 1 | 3) {
+            if !matches!(order, 0 | 1 | 3 | 5) {
                 return Err(malformed(
                     base + *cursor,
                     "atomic.store order cannot acquire",

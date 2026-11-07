@@ -32,19 +32,12 @@ pub(crate) fn format(
         if *space != 0 || selector != 0 {
             return Err(malformed("only generic stack addresses are supported"));
         }
-        let width = match get_type(types, *pointee)? {
-            BinaryType::Integer(bits) => *bits,
-            _ => {
-                return Err(malformed(
-                    "only integer stack allocations can be disassembled",
-                ));
-            }
-        };
+        let stored_type = format_storage_type(types, *pointee)?;
         let address = types.entries.iter().position(|entry| {
             matches!(entry, BinaryType::Address { pointee: pointee_index, space: 0 } if pointee_index == pointee)
         }).ok_or_else(|| malformed("stack address result type is not interned"))?;
         let result = format!("v{}", values.len());
-        writeln!(text, "    %{result} = stack.alloc i{width}").map_err(formatting_error)?;
+        writeln!(text, "    %{result} = stack.alloc {stored_type}").map_err(formatting_error)?;
         values.push((result, address as u64));
         return Ok(());
     }
@@ -133,6 +126,32 @@ fn get_type(types: &BinaryTypeTable, index: u64) -> Result<&BinaryType, FormatEr
         .ok()
         .and_then(|index| types.entries.get(index))
         .ok_or_else(|| malformed("memory type index is out of range"))
+}
+
+pub(crate) fn format_storage_type(
+    types: &BinaryTypeTable,
+    index: u64,
+) -> Result<String, FormatError> {
+    format_storage_type_inner(types, index, 0)
+}
+
+fn format_storage_type_inner(
+    types: &BinaryTypeTable,
+    index: u64,
+    depth: u8,
+) -> Result<String, FormatError> {
+    if depth > 32 {
+        return Err(malformed("stack storage type nesting is too deep"));
+    }
+    match get_type(types, index)? {
+        BinaryType::Integer(bits) => Ok(format!("i{bits}")),
+        BinaryType::Float(float) => Ok(float.to_string()),
+        BinaryType::FixedVector { lanes, element } => {
+            let name = format_storage_type_inner(types, *element, depth + 1)?;
+            Ok(format!("vec<{lanes} x {name}>"))
+        }
+        _ => Err(malformed("unsupported non-scalar stack storage type")),
+    }
 }
 
 fn get_value(values: &[(String, u64)], index: u64) -> Result<(&str, u64), FormatError> {

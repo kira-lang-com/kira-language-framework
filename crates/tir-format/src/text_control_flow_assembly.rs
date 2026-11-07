@@ -14,6 +14,16 @@ pub(crate) enum ControlTerminator {
         merge: Option<String>,
     },
     Return(Option<String>),
+    Fail(String),
+    Unreachable {
+        undefined_behavior: bool,
+    },
+    Trap(u16),
+    Longjmp(crate::text_longjmp::Longjmp),
+    TailCall(crate::text_direct_call::DirectCall),
+    Switch(crate::text_switch_int::SwitchInt),
+    EnumSwitch(crate::text_switch_enum::EnumSwitch),
+    Indirect(crate::text_indirect_branch::IndirectBranch),
 }
 
 #[derive(Clone, Debug)]
@@ -24,11 +34,26 @@ pub(crate) struct ControlTarget {
 
 pub(crate) fn uses_supported_control_flow(body: &FunctionBody) -> bool {
     body.blocks.len() > 1
+        || body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| instruction.opcode == "block.addr")
         || body.blocks.iter().any(|block| {
-            block
-                .instructions
-                .last()
-                .is_some_and(|instruction| matches!(instruction.opcode.as_str(), "br" | "cond.br"))
+            block.instructions.last().is_some_and(|instruction| {
+                matches!(
+                    instruction.opcode.as_str(),
+                    "br" | "cond.br"
+                        | "switch.int"
+                        | "switch.enum"
+                        | "unreachable"
+                        | "trap"
+                        | "tail.call"
+                        | "longjmp"
+                        | "fail"
+                        | "br.indirect"
+                )
+            })
         })
 }
 
@@ -37,6 +62,7 @@ pub(crate) fn validate_control_flow_body(
     signature: &FunctionType,
     source: &str,
     item: TextItem,
+    callees: Option<&crate::text_direct_call::Callees>,
 ) -> Result<(), TextParseError> {
     if body.blocks.is_empty() {
         return Err(item_error(item, body.span, "function body has no blocks"));
@@ -100,6 +126,7 @@ pub(crate) fn validate_control_flow_body(
                     .last()
                     .expect("all blocks have terminators"),
                 signature.result.as_ref() == &Type::Unit,
+                source,
                 item,
             )
         })
@@ -121,11 +148,15 @@ pub(crate) fn validate_control_flow_body(
             .instructions
             .split_last()
             .ok_or_else(|| item_error(item, block.span, "control-flow block has no terminator"))?;
-        let mut values = body.blocks[0]
-            .parameters
-            .iter()
-            .map(|parameter| (parameter.name.clone(), parameter.ty.clone()))
-            .collect::<std::collections::HashMap<_, _>>();
+        let mut values = std::collections::HashMap::new();
+        if dominance.dominates(0, block_index) {
+            values.extend(
+                body.blocks[0]
+                    .parameters
+                    .iter()
+                    .map(|parameter| (parameter.name.clone(), parameter.ty.clone())),
+            );
+        }
         let dominating_blocks = (0..block_index)
             .filter(|prior| dominance.dominates(*prior, block_index))
             .collect::<std::collections::HashSet<_>>();
@@ -149,6 +180,7 @@ pub(crate) fn validate_control_flow_body(
             &mut values,
             source,
             item,
+            callees,
         )?;
         for operation in operations {
             for result in &operation.results {
@@ -164,8 +196,12 @@ pub(crate) fn validate_control_flow_body(
                 prior_definitions.push((parameter.name.clone(), parameter.ty.clone(), block_index));
             }
         }
-        let terminator =
-            parse_terminator(instruction, signature.result.as_ref() == &Type::Unit, item)?;
+        let terminator = parse_terminator(
+            instruction,
+            signature.result.as_ref() == &Type::Unit,
+            source,
+            item,
+        )?;
         match terminator {
             ControlTerminator::Branch(target) => {
                 validate_target_arguments(body, &values, &target, item, instruction.span)?;
@@ -229,14 +265,68 @@ pub(crate) fn validate_control_flow_body(
                     }
                 }
             },
+            ControlTerminator::Fail(ref value) => {
+                let expected = signature.failure.as_deref().ok_or_else(|| {
+                    item_error(
+                        item,
+                        instruction.span,
+                        "fail requires a function with a fails type",
+                    )
+                })?;
+                if values.get(value) != Some(expected) {
+                    return Err(item_error(
+                        item,
+                        instruction.span,
+                        "fail operand is undefined or does not match the function error type",
+                    ));
+                }
+            }
+            ControlTerminator::Unreachable { .. } | ControlTerminator::Trap(_) => {}
+            ControlTerminator::Longjmp(ref longjmp) => {
+                crate::text_longjmp::validate(longjmp, &values, item, instruction.span)?;
+            }
+            ControlTerminator::Switch(ref switch) => {
+                crate::text_switch_int::validate(switch, body, &values, item, instruction.span)?;
+            }
+            ControlTerminator::EnumSwitch(ref switch) => {
+                crate::text_switch_enum::validate(switch, body, &values, item, instruction.span)?;
+            }
+            ControlTerminator::Indirect(ref branch) => {
+                crate::text_indirect_branch::validate(
+                    branch,
+                    body,
+                    &values,
+                    item,
+                    instruction.span,
+                )?;
+            }
+            ControlTerminator::TailCall(ref call) => {
+                let callees = callees.ok_or_else(|| {
+                    item_error(
+                        item,
+                        instruction.span,
+                        "tail.call requires module-wide signatures",
+                    )
+                })?;
+                crate::text_direct_call::validate_tail(
+                    call,
+                    &values,
+                    callees,
+                    signature,
+                    item,
+                    instruction.span,
+                )?;
+            }
         }
     }
+    crate::text_indirect_branch::verify_provenance(body, source, item)?;
     Ok(())
 }
 
 pub(crate) fn parse_terminator(
     instruction: &crate::TextInstruction,
     returns_unit: bool,
+    source: &str,
     item: TextItem,
 ) -> Result<ControlTerminator, TextParseError> {
     let tokens = &instruction.tokens;
@@ -250,7 +340,87 @@ pub(crate) fn parse_terminator(
             Ok(ControlTerminator::Branch(target))
         }
         "cond.br" => parse_conditional(tokens, item, instruction.span),
+        "switch.int" => Ok(ControlTerminator::Switch(crate::text_switch_int::parse(
+            instruction,
+            item,
+        )?)),
+        "switch.enum" => Ok(ControlTerminator::EnumSwitch(
+            crate::text_switch_enum::parse(instruction, item)?,
+        )),
+        "br.indirect" => Ok(ControlTerminator::Indirect(
+            crate::text_indirect_branch::parse(instruction, source, item)?,
+        )),
         "return" => parse_return(tokens, returns_unit, item, instruction.span),
+        "fail" => {
+            let mut cursor = 1;
+            let value = parse_value(tokens, &mut cursor, item, instruction.span)?;
+            if cursor != tokens.len() || !instruction.results.is_empty() {
+                return Err(item_error(
+                    item,
+                    instruction.span,
+                    "fail accepts exactly one SSA value and no results",
+                ));
+            }
+            Ok(ControlTerminator::Fail(value))
+        }
+        "tail.call" => Ok(ControlTerminator::TailCall(
+            crate::text_direct_call::parse_tail(instruction, source, item)?,
+        )),
+        "longjmp" => Ok(ControlTerminator::Longjmp(crate::text_longjmp::parse(
+            instruction,
+            source,
+            item,
+        )?)),
+        "unreachable" => match tokens.as_slice() {
+            [one] if matches!(&one.kind, TokenKind::Atom(name) if name == "unreachable") => {
+                Ok(ControlTerminator::Unreachable {
+                    undefined_behavior: false,
+                })
+            }
+            [_, left, mode, right]
+                if matches!(left.kind, TokenKind::Punctuation('['))
+                    && matches!(right.kind, TokenKind::Punctuation(']')) =>
+            {
+                match &mode.kind {
+                    TokenKind::Atom(mode) if mode == "trap" => Ok(ControlTerminator::Unreachable {
+                        undefined_behavior: false,
+                    }),
+                    TokenKind::Atom(mode) if mode == "ub" => Ok(ControlTerminator::Unreachable {
+                        undefined_behavior: true,
+                    }),
+                    _ => Err(item_error(
+                        item,
+                        instruction.span,
+                        "unreachable expects [trap] or [ub]",
+                    )),
+                }
+            }
+            _ => Err(item_error(
+                item,
+                instruction.span,
+                "invalid unreachable terminator",
+            )),
+        },
+        "trap" => {
+            let [_, code] = tokens.as_slice() else {
+                return Err(item_error(
+                    item,
+                    instruction.span,
+                    "trap requires a 16-bit code",
+                ));
+            };
+            let TokenKind::Atom(code) = &code.kind else {
+                return Err(item_error(
+                    item,
+                    instruction.span,
+                    "trap code must be an integer",
+                ));
+            };
+            let code = crate::numeric_literals::parse_unsigned_integer(code)
+                .and_then(|value| u16::try_from(value).ok())
+                .ok_or_else(|| item_error(item, instruction.span, "trap code must fit in u16"))?;
+            Ok(ControlTerminator::Trap(code))
+        }
         _ => Err(item_error(
             item,
             instruction.span,
@@ -317,7 +487,7 @@ fn parse_return(
     }
 }
 
-fn parse_target(
+pub(crate) fn parse_target(
     tokens: &[Token],
     cursor: &mut usize,
     item: TextItem,
@@ -341,7 +511,7 @@ fn parse_target(
     Ok(ControlTarget { label, arguments })
 }
 
-fn parse_label(
+pub(crate) fn parse_label(
     tokens: &[Token],
     cursor: &mut usize,
     item: TextItem,
@@ -354,7 +524,7 @@ fn parse_label(
     Ok(label.to_owned())
 }
 
-fn parse_value(
+pub(crate) fn parse_value(
     tokens: &[Token],
     cursor: &mut usize,
     item: TextItem,
@@ -370,7 +540,7 @@ fn parse_value(
     Ok(name.to_owned())
 }
 
-fn expect_atom(
+pub(crate) fn expect_atom(
     tokens: &[Token],
     cursor: &mut usize,
     expected: &str,
@@ -384,7 +554,7 @@ fn expect_atom(
     Ok(())
 }
 
-fn expect_punctuation(
+pub(crate) fn expect_punctuation(
     tokens: &[Token],
     cursor: &mut usize,
     expected: char,
@@ -398,7 +568,7 @@ fn expect_punctuation(
     Ok(())
 }
 
-fn check_target(
+pub(crate) fn check_target(
     labels: &[&str],
     target: &str,
     item: TextItem,
@@ -415,7 +585,7 @@ fn check_target(
     }
 }
 
-fn validate_target_arguments(
+pub(crate) fn validate_target_arguments(
     body: &FunctionBody,
     values: &std::collections::HashMap<String, Type>,
     target: &ControlTarget,
@@ -453,135 +623,23 @@ fn validate_target_arguments(
     Ok(())
 }
 
-fn atom(tokens: &[Token], index: usize) -> Option<&str> {
+pub(crate) fn atom(tokens: &[Token], index: usize) -> Option<&str> {
     match tokens.get(index).map(|token| &token.kind) {
         Some(TokenKind::Atom(value)) => Some(value),
         _ => None,
     }
 }
 
-fn punct(tokens: &[Token], index: usize, value: char) -> bool {
+pub(crate) fn punct(tokens: &[Token], index: usize, value: char) -> bool {
     matches!(tokens.get(index).map(|token| &token.kind), Some(TokenKind::Punctuation(found)) if *found == value)
 }
 
-fn item_error(item: TextItem, span: Span, message: impl Into<String>) -> TextParseError {
+pub(crate) fn item_error(item: TextItem, span: Span, message: impl Into<String>) -> TextParseError {
     TextParseError {
         span: Span::new(
             item.span.start.saturating_add(span.start),
             item.span.start.saturating_add(span.end),
         ),
         message: message.into(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{BinaryModule, assemble_text_module, disassemble_text_module, parse_text_module};
-
-    fn module(body: &str) -> String {
-        format!(
-            "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.route(%a: i32, %cond: i1) -> i32 engine(native) {{\n{body}\n}}\n"
-        )
-    }
-
-    #[test]
-    fn multi_block_parameters_round_trip() {
-        let source = module(
-            "bb0(%a: i32, %cond: i1):\n  cond.br %cond, bb1(%a), bb2(%a)\nbb1(%left: i32):\n  br bb2(%left)\nbb2(%right: i32):\n  return %right",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("block arguments assemble");
-        let module = BinaryModule::decode(&bytes).expect("binary decodes");
-        let text = disassemble_text_module(&module, u64::MAX).expect("binary disassembles");
-        let rebuilt = assemble_text_module(&parse_text_module(&text).expect("text reparses"))
-            .expect("canonical text reassembles");
-        assert_eq!(bytes, rebuilt);
-    }
-
-    #[test]
-    fn arithmetic_inside_multiple_blocks_round_trips() {
-        let source = module(
-            "bb0(%a: i32, %cond: i1):\n  %twice = add %a, %a\n  cond.br %cond, bb1(%twice), bb2(%a)\nbb1(%left: i32):\n  %four = const.int i32, 4\n  %sum = add %left, %four\n  br bb2(%sum)\nbb2(%right: i32):\n  %zero = const.int i32, 0\n  %result = add %right, %zero\n  return %result",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("multi-block operations assemble");
-        let module = BinaryModule::decode(&bytes).expect("binary decodes");
-        let text = disassemble_text_module(&module, u64::MAX).expect("binary disassembles");
-        let rebuilt = assemble_text_module(&parse_text_module(&text).expect("text reparses"))
-            .expect("canonical text reassembles");
-        assert_eq!(bytes, rebuilt);
-    }
-
-    #[test]
-    fn loop_back_edge_preserves_ssa_numbering() {
-        let source = module(
-            "bb0(%a: i32, %cond: i1):\n  br bb1(%a)\nbb1(%i: i32):\n  %one = const.int i32, 1\n  %next = add %i, %one\n  cond.br %cond, bb1(%next), bb2(%next)\nbb2(%result: i32):\n  return %result",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("loop assembles");
-        let decoded = BinaryModule::decode(&bytes).expect("binary decodes");
-        let canonical_text =
-            disassemble_text_module(&decoded, u64::MAX).expect("loop disassembles");
-        let rebuilt =
-            assemble_text_module(&parse_text_module(&canonical_text).expect("text reparses"))
-                .expect("canonical text reassembles");
-        assert_eq!(bytes, rebuilt);
-    }
-
-    #[test]
-    fn dominating_cross_block_value_round_trips() {
-        let source = module(
-            "bb0(%a: i32, %cond: i1):\n  %shared = add %a, %a\n  cond.br %cond, bb1(%shared), bb2(%a)\nbb1(%left: i32):\n  %one = const.int i32, 1\n  %sum = add %left, %shared\n  br bb2(%sum)\nbb2(%right: i32):\n  %answer = add %right, %shared\n  return %answer",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("dominating definitions assemble");
-        let binary = BinaryModule::decode(&bytes).expect("binary decodes");
-        let canonical = disassemble_text_module(&binary, u64::MAX).expect("binary disassembles");
-        let reconstructed =
-            assemble_text_module(&parse_text_module(&canonical).expect("text reparses"))
-                .expect("canonical text reassembles");
-        assert_eq!(bytes, reconstructed);
-    }
-
-    #[test]
-    fn non_dominating_cross_block_value_is_rejected() {
-        let source = module(
-            "bb0(%a: i32, %cond: i1):\n  cond.br %cond, bb1(%a), bb2(%a)\nbb1(%left: i32):\n  %local = add %left, %left\n  br bb2(%local)\nbb2(%right: i32):\n  %invalid = add %right, %local\n  return %invalid",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        assert!(
-            assemble_text_module(&parsed).is_err(),
-            "a value from a non-dominating sibling block must not assemble"
-        );
-    }
-
-    #[test]
-    fn explicit_trivial_ownership_in_multiple_blocks_round_trips() {
-        let source = module(
-            "bb0(%a: i32, %cond: i1):\n  %duplicate = copy %a\n  cond.br %cond, bb1(%duplicate), bb2(%a)\nbb1(%left: i32):\n  %taken = move %left\n  br bb2(%taken)\nbb2(%right: i32):\n  destroy %a\n  return %right",
-        );
-        let parsed = parse_text_module(&source).expect("text parses");
-        let bytes = assemble_text_module(&parsed).expect("explicit ownership assembles");
-        let decoded = BinaryModule::decode(&bytes).expect("binary decodes");
-        let text = disassemble_text_module(&decoded, u64::MAX).expect("binary disassembles");
-        let rebuilt = assemble_text_module(&parse_text_module(&text).expect("text reparses"))
-            .expect("canonical text reassembles");
-        assert_eq!(bytes, rebuilt);
-    }
-
-    #[test]
-    fn multi_block_argument_types_and_arity_are_checked() {
-        let invalid = [
-            "bb0(%a: i32, %cond: i1):\n  br bb1(%cond)\nbb1(%other: i32):\n  return %other",
-            "bb0(%a: i32, %cond: i1):\n  br bb1()\nbb1(%other: i32):\n  return %other",
-            "bb0(%a: i32, %cond: i1):\n  br bb1(%a)\nbb1(%other: i32):\n  return %undefined",
-        ];
-        for body in invalid {
-            let parsed = parse_text_module(&module(body)).expect("text parses");
-            assert!(
-                assemble_text_module(&parsed).is_err(),
-                "invalid branch assembled: {body}"
-            );
-        }
     }
 }

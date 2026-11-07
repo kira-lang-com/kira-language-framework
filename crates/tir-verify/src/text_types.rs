@@ -136,6 +136,7 @@ pub(super) fn verify_function(
                 instruction,
                 &operand_types,
                 layouts,
+                policies,
             ));
             let gpu_operand_types = operand_types
                 .iter()

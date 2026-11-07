@@ -2,6 +2,83 @@
 
 Spec: `KLF-RIDL.md`. Done: `IMPLEMENTED.md`. Decisions: `docs/decisions.md`.
 
+## In flight: TIR T0/T1 (2026-11-06)
+
+T0 and T1 remain open. The active incremental record is at the top of
+`IMPLEMENTED.md`. Restricted CODE assembly/disassembly now covers scalar and
+fixed-vector SSA, branch arguments, direct stack storage, explicit ownership
+and access scopes, and additional constant forms. `tir-own` provides only
+conservative, verified subsets of the five mandatory ownership passes; it
+rejects unsupported raw ownership flows rather than treating them as canonical.
+The TIR-scoped suite most recently has **558 passing tests**, including typed
+DEBUG (17) and opaque CUSTOM (255) sections, CAPS/RIDL/METADATA encoding,
+trivial tuples and arrays, conversions, math `[approx]`, target queries,
+zero-argument portable intrinsics, expectation hints, fixed vectors, typed raw
+pointer accesses and raw heap operations, MMIO and I/O fences, `trap` and
+`unreachable`, integer and non-generic enum switches, typed `fail`,
+same-function `block.addr`/`br.indirect`, `longjmp`, `tail.call`, and
+`fclass`/`frexp`/`ldexp`/FP-status instructions, and function/global/descriptor
+references, counted/unique heap allocation, typed payload addresses and weak
+reference new/load with explicit counted `Optional` lifecycle policy; fixed
+vector shuffle, reduction, dot, compress/expand, slide, table, masked load/store,
+and gather/scatter with both vector-pointer and scaled-offset forms.
+The current tree also encodes non-generic trivial nominal `struct.new`,
+`struct.extract`, `struct.insert`, `enum.new`, and `enum.tag` with layout-aware
+tag widths, typed field/payload checks, as well as trivial
+`struct.destructure`/`tuple.destructure` multiple SSA results, and verified
+binary round-trips.
+The current tree also supports trivial `enum.take` and borrowed `enum.project`,
+typed address projections and pointer/address conversions, layout-compatible
+`addr.cast`, and integer `const.vec` using inline CODE up to 16 bytes or
+CONSTANTS records for larger vectors; `const.vec` also supports exact IEEE
+float lanes. Trivial tuple/array and non-generic nominal struct `const.aggregate`
+and explicit union active-member constants use typed CONSTANTS records,
+including nested tuple/array literals, and pass V2 and pure-value ownership
+tests. V2's `explicit(size N, align A)` parser has been corrected to use the
+same field positions as the format grammar. Mixed global/float/
+vector/aggregate constants preserve indexes and round-trip byte-identically.
+`const.vec` additionally supports bit-packed fixed `i1` masks in inline and
+CONSTANTS-backed form; GPU-only `const.sampler` uses the normative 23-byte
+descriptor, with typed V2 and validated text/binary round-trips. V15 no longer
+misclassifies `return %ssa` as an explicit nominal type.
+`gpu.builtin` (0x400) now encodes section 17.5 names and normative result
+TYPES through STRINGS, sharing its type table with V2. Both text and binary
+verification reject mismatched names/types, and binary V2 rejects CPU use;
+the CLI round-trips GPU builtin modules byte-identically. V15 no longer
+misclassifies plain SSA operands in GPU arithmetic as nominal types.
+`gpu.spec_const` (0x401) now emits u32 specialization IDs and typed
+CONSTANTS-backed defaults for integers i1–i64, IEEE f16/bf16/f32/f64,
+and 2–4 lane fixed vectors of supported scalar types. Binary V2 checks
+forged IDs, incompatible/absent CONSTANTS and non-GPU use. Signed integer
+literals with non-byte widths now clear unused padding bits before binary
+CONSTANTS encoding. The rebuilt CLI passes mixed constants/GPU CFG
+byte-identical round-trips; packed narrow-float lanes remain a gap.
+`gpu.barrier`/`gpu.memfence` now have typed CODE assembly/disassembly for
+scope modifiers, five memory-domain bits and optional barrier
+`unchecked_uniformity`, with V2/V15 rejection of invalid combinations.
+The rebuilt CLI passes mixed GPU sync/builtin CFGs and byte-identical TIRB
+round-trips; V15 no longer treats GPU branch labels as nominal types.
+The five-domain CODE grammar does not cover every V15 text memory class;
+unsupported classes deliberately fail closed. The entire GPU family remains
+incomplete.
+`vec.mask.active` can be encoded as raw CODE but remains V8-rejected: TIR
+sections 16.3/22.6 conflict with the address-only `svec` rule in 7.10/16.2.
+T1 V2/V14/V20/V21 checks cover these subsets. PROFILE (18) lacks a normative binary
+record grammar, so it cannot be implemented without a spec decision. The
+binary CODE decoder still covers far more opcodes than the text assembler.
+The rebuilt `klf tirc` completed end-to-end constant and stack-memory round
+trips, conversion/math/vector/atomic/varargs round trips, and direct/indirect
+call round trips with signature verification and V19/V20 typeid reconciliation,
+plus enum/indirect-branch/error-exit, managed/weak-reference and vector-memory
+round trips with V1/V2/V4/V8 verification. The ownership canonicalizer now
+inserts proven LIFO stack cleanups and owned heap/weak destroys, and preserves
+direct managed and unique return ownership transfers.
+An explicit section-by-section
+and opcode-family coverage inventory is in `TIR-ENCODING-GAPS.md`. Next:
+complete the T0 encoding corpus and full
+V1–V21/S1–S7 conformance, then the remaining general ownership and address-only
+canonicalization. This working copy has no `.git` directory; no commit was made.
+
 ## The Kira formatter is done
 
 Committed with the framework's `format` work. It lays Kira out through the

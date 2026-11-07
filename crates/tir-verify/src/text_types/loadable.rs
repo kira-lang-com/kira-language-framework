@@ -54,7 +54,9 @@ fn verify_type(
     layouts: &mut LayoutEngine,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if !policies.is_loadable(ty, layouts) {
+    // `*T` is an SSA address handle, even when its pointee `T` is address-only.
+    // The pointee's value still must not appear as an SSA result/parameter.
+    if !matches!(ty, Type::Address { .. }) && !policies.is_loadable(ty, layouts) {
         diagnostics.push(
             Diagnostic::error(V8, format!("SSA value %{name} has address-only type {ty}"))
                 .with_primary_span(span),

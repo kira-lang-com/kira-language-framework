@@ -16,7 +16,10 @@ pub(crate) fn encode_return_body(
     function: &BinaryFunctionType,
     types: &BinaryTypeTable,
     float_constant: Option<(u64, u64)>,
+    float_constants: &std::collections::HashMap<usize, (u64, u64)>,
     string_constant: Option<u64>,
+    string_constants: &std::collections::HashMap<usize, u64>,
+    callees: &crate::text_direct_call::Callees,
     block_parameter_indices: &[Vec<u64>],
     source: &str,
     item: TextItem,
@@ -27,6 +30,9 @@ pub(crate) fn encode_return_body(
             function_index,
             function,
             types,
+            float_constants,
+            string_constants,
+            callees,
             block_parameter_indices,
             source,
             item,
@@ -36,18 +42,71 @@ pub(crate) fn encode_return_body(
         .blocks
         .first()
         .ok_or_else(|| item_error(item, body.span, "function body has no block"))?;
+    let has_unused_result = block.instructions.len() == 2
+        && block.instructions[0].results.len() == 1
+        && matches!(
+            types.entries.get(function.result as usize),
+            Some(BinaryType::Unit)
+        );
     if block.instructions.len() > 2
+        || has_unused_result
         || (block.instructions.len() == 2
-            && (matches!(
-                block.instructions[0].opcode.as_str(),
-                "copy" | "move" | "destroy" | "borrow.begin" | "borrow.end"
-            ) || crate::text_memory_assembly::handles(&block.instructions[0].opcode)))
+            && (crate::text_integer_operation_assembly::integer_operation_info(
+                &block.instructions[0].opcode,
+            )
+            .is_some()
+                || matches!(
+                    block.instructions[0].opcode.as_str(),
+                    "copy" | "move" | "destroy" | "borrow.begin" | "borrow.end"
+                )
+                || crate::text_memory_assembly::handles(&block.instructions[0].opcode)
+                || crate::text_conversion_assembly::opcode(&block.instructions[0].opcode)
+                    .is_some()
+                || crate::text_vector_simple::opcode(&block.instructions[0].opcode).is_some()
+                || crate::text_vector_permute::handles(&block.instructions[0].opcode)
+                || crate::text_vector_memory::handles(&block.instructions[0].opcode)
+                || crate::text_vector_gather::handles(&block.instructions[0].opcode)
+                || crate::text_simple_instructions::handles(&block.instructions[0].opcode)
+                || crate::text_tuple_simple::handles(&block.instructions[0].opcode)
+                || crate::text_array_simple::handles(&block.instructions[0].opcode)
+                || crate::text_nominal_construction::handles(&block.instructions[0].opcode)
+                || crate::text_aggregate_destructure::handles(&block.instructions[0].opcode)
+                || crate::text_enum_payload::handles(&block.instructions[0].opcode)
+                || crate::text_address_projection::handles(&block.instructions[0].opcode)
+                || crate::text_enum_address::handles(&block.instructions[0].opcode)
+                || crate::text_pointer_address::handles(&block.instructions[0].opcode)
+                || block.instructions[0].opcode == "const.vec"
+                || block.instructions[0].opcode == "const.aggregate"
+                || block.instructions[0].opcode == "const.sampler"
+                || block.instructions[0].opcode == "gpu.builtin"
+                || block.instructions[0].opcode == "gpu.spec_const"
+                || crate::text_gpu_sync::handles(&block.instructions[0].opcode)
+                || crate::text_raw_memory::opcode(&block.instructions[0].opcode).is_some()
+                || crate::text_raw_access::handles(&block.instructions[0].opcode)
+                || crate::text_device_io::handles(&block.instructions[0].opcode)
+                || crate::text_raw_heap::handles(&block.instructions[0].opcode)
+                || crate::text_fp_misc::handles(&block.instructions[0].opcode)
+                || crate::text_atomic_simple::handles(&block.instructions[0].opcode)
+                || crate::text_atomic_wait_notify::handles(&block.instructions[0].opcode)
+                || crate::text_atomic_update::handles(&block.instructions[0].opcode)
+                || crate::text_varargs_simple::handles(&block.instructions[0].opcode)
+                || block.instructions[0].opcode == "call"
+                || block.instructions[0].opcode == "call.indirect"
+                || block.instructions[0].opcode == "block.addr"
+                || block.instructions[0].opcode == "func.ref"
+                || block.instructions[0].opcode == "descriptor.ref"
+                || crate::text_global_reference::handles(&block.instructions[0].opcode)
+                || crate::text_managed_heap::handles(&block.instructions[0].opcode)
+                || crate::text_access_assembly::handles(&block.instructions[0].opcode)))
     {
         return crate::text_straight_line_assembly::encode(
             body,
             function_index,
             function,
             types,
+            float_constants,
+            string_constants,
+            callees,
             source,
             item,
         );

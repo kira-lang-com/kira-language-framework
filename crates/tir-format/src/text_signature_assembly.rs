@@ -42,6 +42,29 @@ pub(crate) fn parse_function(
         .ok_or_else(|| item_error(item, Span::new(0, 0), "invalid function declaration"))?;
     let attributes_start = function_attributes_start(source, header_tokens, close, item)?;
     let attributes = parse_attributes(&header_tokens[attributes_start..], item)?;
+    if attributes.target != BinaryTarget::Gpu
+        && body.as_ref().is_some_and(|body| {
+            body.blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| {
+                    matches!(
+                        instruction.opcode.as_str(),
+                        "const.sampler"
+                            | "gpu.builtin"
+                            | "gpu.spec_const"
+                            | "gpu.barrier"
+                            | "gpu.memfence"
+                    )
+                })
+        })
+    {
+        return Err(item_error(
+            item,
+            Span::new(0, 0),
+            "GPU resource and synchronization operations require target(gpu) code",
+        ));
+    }
     if attributes.target != BinaryTarget::Gpu && attributes.engine.is_none() {
         return Err(item_error(
             item,
@@ -66,12 +89,45 @@ pub(crate) fn parse_function(
         abi: attributes.abi,
         foreign: false,
     };
-    if let Some(body) = &body {
+    if let Some(body) = &body
+        && !body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                matches!(
+                    instruction.opcode.as_str(),
+                    "call"
+                        | "tail.call"
+                        | "func.ref"
+                        | "global.addr"
+                        | "tls.addr"
+                        | "enum.tag"
+                        | "struct.extract"
+                        | "struct.destructure"
+                        | "enum.take"
+                        | "enum.project"
+                        | "field.addr"
+                        | "elem.addr"
+                        | "enum.payload.addr"
+                        | "enum.inject"
+                        | "addr.toptr"
+                        | "ptr.toaddr"
+                        | "addr.cast"
+                        | "const.aggregate"
+                        | "gpu.builtin"
+                        | "gpu.spec_const"
+                        | "gpu.barrier"
+                        | "gpu.memfence"
+                )
+            })
+    {
         crate::text_function_body_assembly::validate_return_body(
             body,
             &function_type,
             source,
             item,
+            None,
         )?;
     }
     let ty = Type::Function(function_type);

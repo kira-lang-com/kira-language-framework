@@ -12,10 +12,11 @@ pub(crate) fn validate_return_body(
     signature: &FunctionType,
     source: &str,
     item: TextItem,
+    callees: Option<&crate::text_direct_call::Callees>,
 ) -> Result<(), TextParseError> {
     if crate::text_control_flow_assembly::uses_supported_control_flow(body) {
         return crate::text_control_flow_assembly::validate_control_flow_body(
-            body, signature, source, item,
+            body, signature, source, item, callees,
         );
     }
     if body.blocks.len() != 1 || body.blocks[0].label != "bb0" {
@@ -26,12 +27,59 @@ pub(crate) fn validate_return_body(
         ));
     }
     let block = &body.blocks[0];
+    let has_unused_result = block.instructions.len() == 2
+        && block.instructions[0].results.len() == 1
+        && signature.result.as_ref() == &Type::Unit;
     if block.instructions.len() > 2
+        || has_unused_result
         || (block.instructions.len() == 2
-            && (matches!(
-                block.instructions[0].opcode.as_str(),
-                "copy" | "move" | "destroy" | "borrow.begin" | "borrow.end"
-            ) || crate::text_memory_assembly::handles(&block.instructions[0].opcode)))
+            && (crate::text_integer_operation_assembly::integer_operation_info(
+                &block.instructions[0].opcode,
+            )
+            .is_some()
+                || matches!(
+                    block.instructions[0].opcode.as_str(),
+                    "copy" | "move" | "destroy" | "borrow.begin" | "borrow.end"
+                )
+                || crate::text_memory_assembly::handles(&block.instructions[0].opcode)
+                || crate::text_conversion_assembly::opcode(&block.instructions[0].opcode)
+                    .is_some()
+                || crate::text_vector_simple::opcode(&block.instructions[0].opcode).is_some()
+                || crate::text_vector_permute::handles(&block.instructions[0].opcode)
+                || crate::text_vector_memory::handles(&block.instructions[0].opcode)
+                || crate::text_vector_gather::handles(&block.instructions[0].opcode)
+                || crate::text_simple_instructions::handles(&block.instructions[0].opcode)
+                || crate::text_tuple_simple::handles(&block.instructions[0].opcode)
+                || crate::text_array_simple::handles(&block.instructions[0].opcode)
+                || crate::text_nominal_construction::handles(&block.instructions[0].opcode)
+                || crate::text_aggregate_destructure::handles(&block.instructions[0].opcode)
+                || crate::text_enum_payload::handles(&block.instructions[0].opcode)
+                || crate::text_address_projection::handles(&block.instructions[0].opcode)
+                || crate::text_enum_address::handles(&block.instructions[0].opcode)
+                || crate::text_pointer_address::handles(&block.instructions[0].opcode)
+                || block.instructions[0].opcode == "const.vec"
+                || block.instructions[0].opcode == "const.aggregate"
+                || block.instructions[0].opcode == "const.sampler"
+                || block.instructions[0].opcode == "gpu.builtin"
+                || block.instructions[0].opcode == "gpu.spec_const"
+                || crate::text_gpu_sync::handles(&block.instructions[0].opcode)
+                || crate::text_raw_memory::opcode(&block.instructions[0].opcode).is_some()
+                || crate::text_raw_access::handles(&block.instructions[0].opcode)
+                || crate::text_device_io::handles(&block.instructions[0].opcode)
+                || crate::text_raw_heap::handles(&block.instructions[0].opcode)
+                || crate::text_fp_misc::handles(&block.instructions[0].opcode)
+                || crate::text_atomic_simple::handles(&block.instructions[0].opcode)
+                || crate::text_atomic_wait_notify::handles(&block.instructions[0].opcode)
+                || crate::text_atomic_update::handles(&block.instructions[0].opcode)
+                || crate::text_varargs_simple::handles(&block.instructions[0].opcode)
+                || block.instructions[0].opcode == "call"
+                || block.instructions[0].opcode == "call.indirect"
+                || block.instructions[0].opcode == "block.addr"
+                || block.instructions[0].opcode == "func.ref"
+                || block.instructions[0].opcode == "descriptor.ref"
+                || crate::text_global_reference::handles(&block.instructions[0].opcode)
+                || crate::text_managed_heap::handles(&block.instructions[0].opcode)
+                || crate::text_access_assembly::handles(&block.instructions[0].opcode)))
     {
         if !simple_block_header(block) {
             return Err(item_error(item, block.span, "unsupported block header"));
@@ -53,7 +101,9 @@ pub(crate) fn validate_return_body(
                 "entry block parameters do not match the function signature",
             ));
         }
-        return crate::text_straight_line_assembly::validate(body, signature, source, item);
+        return crate::text_straight_line_assembly::validate(
+            body, signature, source, item, callees,
+        );
     }
     if !simple_block_header(block) || !supported_instruction_shape(block) {
         return Err(item_error(

@@ -85,6 +85,7 @@ pub(super) fn infer_result_types(
             instruction,
             &first()?,
             layouts,
+            policies,
         )?]),
         "addr.cast" => Some(vec![type_after_keyword(source, instruction, "to")?]),
         "addr.toptr" => {
@@ -140,10 +141,10 @@ pub(super) fn infer_result_types(
         "atomic.rmw" => operands.get(1).map(|operand| vec![operand.ty.clone()]),
         "atomic.cmpxchg" => operands
             .get(1)
-            .map(|operand| vec![operand.ty.clone(), Type::Integer(1)]),
+            .map(|operand| vec![Type::Tuple(vec![operand.ty.clone(), Type::Integer(1)])]),
         "atomic.wait" | "atomic.notify" => Some(vec![Type::Integer(32)]),
         "fp.flags.read" => Some(vec![Type::Integer(32)]),
-        "fp.flags.clear" => Some(vec![Type::Unit]),
+        "fp.flags.clear" => Some(Vec::new()),
         "br" | "cond.br" | "switch.int" | "switch.enum" | "br.indirect" | "return" | "fail"
         | "tail.call" | "unreachable" | "trap" | "try.call" | "invoke" | "coro.yield"
         | "coro.resume" | "coro.finish" | "resume" | "throw" | "longjmp" | "asm.goto" | "deopt"

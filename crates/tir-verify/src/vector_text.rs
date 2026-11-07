@@ -112,7 +112,9 @@ pub(super) fn verify(
         }
         "vec.reverse" => operations::verify_reverse(instruction, &types, &mut diagnostics),
         "vec.slide" => {
-            operations::verify_two_vectors(instruction, &types, &mut diagnostics);
+            if types.len() >= 2 {
+                operations::verify_two_vectors(instruction, &types[..2], &mut diagnostics);
+            }
             operations::verify_optional_choice(instruction, &["up", "down"], &mut diagnostics);
             if types.get(2).is_some_and(|index| !is_integer_scalar(index)) {
                 report(

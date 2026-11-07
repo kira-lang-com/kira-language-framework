@@ -171,9 +171,25 @@ fn parse_layout_rule(
             Ok((LayoutRule::Packed(value), None, None, index + 4))
         }
         Some("explicit") => {
-            let size = field_integer(tokens, index + 3, "size")
+            if !tokens
+                .get(index + 1)
+                .is_some_and(|token| punctuation(token, '('))
+                || !tokens
+                    .get(index + 4)
+                    .is_some_and(|token| punctuation(token, ','))
+                || !tokens
+                    .get(index + 7)
+                    .is_some_and(|token| punctuation(token, ')'))
+            {
+                return Err(parse_error(
+                    tokens,
+                    index,
+                    "invalid explicit(size N, align A) syntax",
+                ));
+            }
+            let size = field_integer(tokens, index + 2, "size")
                 .ok_or_else(|| parse_error(tokens, index, "explicit layout requires a size"))?;
-            let align = field_integer(tokens, index + 6, "align").ok_or_else(|| {
+            let align = field_integer(tokens, index + 5, "align").ok_or_else(|| {
                 parse_error(tokens, index, "explicit layout requires an alignment")
             })?;
             Ok((LayoutRule::Explicit, Some(size), Some(align), index + 8))

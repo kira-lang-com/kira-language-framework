@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
 use crate::binary_generics::BinaryGenericTable;
-use crate::leb::read_uleb;
+use crate::leb::{read_uleb, write_uleb};
 use crate::types::BinaryCodeTable;
 use crate::types::{BinaryGlobalTable, BinarySignatureTable, BinaryTypeTable};
 use crate::{BinaryModule, FormatError, StringTable};
+use tir_core::ContentHash;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BinaryRidlExportKind {
@@ -44,6 +45,107 @@ pub struct BinaryRidlTable {
     pub abi_stamps: Vec<BinaryAbiStamp>,
     pub inlinable_bodies: Vec<BinaryInlinableBody>,
     pub canonical_hash: Option<[u8; 32]>,
+}
+
+impl BinaryRidlTable {
+    pub fn intern_strings(
+        &self,
+        strings: &mut crate::StringTableBuilder,
+    ) -> Result<(), FormatError> {
+        for export in &self.exports {
+            strings
+                .intern(&export.symbol)
+                .map_err(|error| malformed(0, error.message))?;
+        }
+        for stamp in &self.abi_stamps {
+            strings
+                .intern(&stamp.symbol)
+                .map_err(|error| malformed(0, error.message))?;
+        }
+        Ok(())
+    }
+
+    pub fn encode(
+        &self,
+        strings: &StringTable,
+        types: &BinaryTypeTable,
+        signatures: &BinarySignatureTable,
+        generics: &BinaryGenericTable,
+        globals: &BinaryGlobalTable,
+        code: &BinaryCodeTable,
+    ) -> Result<Option<Vec<u8>>, FormatError> {
+        if self.exports.is_empty() && self.abi_stamps.is_empty() && self.inlinable_bodies.is_empty()
+        {
+            if self.canonical_hash.is_some() {
+                return Err(malformed(
+                    0,
+                    "empty RIDL table cannot carry a canonical hash",
+                ));
+            }
+            if signatures
+                .records
+                .iter()
+                .any(|signature| signature.inlinable)
+            {
+                return Err(malformed(0, "RIDL inlinable function body is missing"));
+            }
+            return Ok(None);
+        }
+        let hash = self
+            .canonical_hash
+            .ok_or_else(|| malformed(0, "RIDL canonical hash is missing"))?;
+        let mut output = Vec::new();
+        write_index(&mut output, self.exports.len() as u64)?;
+        for export in &self.exports {
+            write_string_index(&mut output, strings, &export.symbol)?;
+            output.push(match export.kind {
+                BinaryRidlExportKind::Function => 0,
+                BinaryRidlExportKind::Method => 1,
+                BinaryRidlExportKind::Descriptor => 2,
+                BinaryRidlExportKind::Builder => 3,
+                BinaryRidlExportKind::DescriptorSize => 4,
+                BinaryRidlExportKind::Witness => 5,
+                BinaryRidlExportKind::Instance => 6,
+                BinaryRidlExportKind::Global => 7,
+            });
+            write_index(&mut output, export.entity_index)?;
+            output.extend_from_slice(&export.abi_uuid);
+        }
+        write_index(&mut output, self.abi_stamps.len() as u64)?;
+        for stamp in &self.abi_stamps {
+            write_string_index(&mut output, strings, &stamp.symbol)?;
+            output.extend_from_slice(&stamp.uuid);
+        }
+        write_index(&mut output, self.inlinable_bodies.len() as u64)?;
+        for body in &self.inlinable_bodies {
+            write_index(&mut output, body.function_index)?;
+            output.extend_from_slice(&body.hash);
+        }
+        output.extend_from_slice(&hash);
+        let decoded = decode(&output, strings, types, signatures, generics, globals, code)?;
+        if decoded != *self {
+            return Err(malformed(
+                0,
+                "RIDL records disagree with canonical encoding",
+            ));
+        }
+        Ok(Some(output))
+    }
+}
+
+fn write_index(bytes: &mut Vec<u8>, index: u64) -> Result<(), FormatError> {
+    write_uleb(index, bytes).map_err(|error| malformed(bytes.len(), error.to_string()))
+}
+
+fn write_string_index(
+    bytes: &mut Vec<u8>,
+    strings: &StringTable,
+    value: &str,
+) -> Result<(), FormatError> {
+    let index = strings
+        .index_of(value)
+        .ok_or_else(|| malformed(bytes.len(), "RIDL symbol was not interned in STRINGS"))?;
+    write_index(bytes, index)
 }
 
 impl BinaryModule {
@@ -216,7 +318,8 @@ fn decode(
         else {
             return Err(malformed(start, "RIDL inlinable body has no CODE function"));
         };
-        if blake3::hash(&body.canonical_bytes).as_bytes() != &hash {
+        let canonical = crate::binary_code_encode::encode_function_body(body)?;
+        if ContentHash::of(&canonical).as_bytes() != &hash {
             return Err(malformed(
                 start,
                 "RIDL inlinable body hash does not match canonical CODE bytes",

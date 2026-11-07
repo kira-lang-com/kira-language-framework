@@ -455,38 +455,7 @@ fn builtin_type(instruction: &TextInstruction) -> Option<Type> {
             .tokens
             .get(text_instruction_operands_start(&instruction.tokens))?,
     )?;
-    let i1 = Type::Integer(1);
-    let i32 = Type::Integer(32);
-    let f32 = Type::Float(FloatType::F32);
-    Some(match name {
-        "thread_position_in_grid"
-        | "thread_position_in_threadgroup"
-        | "threadgroup_position_in_grid"
-        | "threads_per_threadgroup"
-        | "threadgroups_per_grid" => vector(3, i32),
-        "thread_index_in_threadgroup"
-        | "subgroup_index_in_threadgroup"
-        | "subgroups_per_threadgroup"
-        | "lane_index"
-        | "subgroup_size"
-        | "vertex_id"
-        | "instance_id"
-        | "base_vertex"
-        | "base_instance"
-        | "draw_index"
-        | "view_index"
-        | "sample_index"
-        | "sample_mask_in"
-        | "primitive_id"
-        | "layer"
-        | "viewport_index" => i32,
-        "position" => vector(4, f32),
-        "front_facing" | "helper_invocation" => i1,
-        "barycentric_perspective" | "barycentric_linear" => vector(3, f32),
-        "point_coord" => vector(2, f32),
-        "shading_rate" => vector(2, i32),
-        _ => return None,
-    })
+    tir_format::gpu_builtin_type(name)
 }
 
 fn declared_builtin_type(source: &str, instruction: &TextInstruction) -> Option<Type> {

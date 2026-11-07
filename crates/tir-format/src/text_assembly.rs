@@ -1,14 +1,14 @@
+use crate::text_assembly_helpers::*;
 use std::fmt::Write as _;
 
 use tir_diag::Span;
 use tir_target::Platform;
 
 use crate::{
-    BinaryAddressSpace, BinaryAnalysisSummary, BinaryCodeTable, BinaryConstant,
-    BinaryConstantTable, BinaryFunctionAnalysis, BinaryGlobalTable, BinaryImportEntityKind,
-    BinaryImportKind, BinaryModule, BinaryModuleBuilder, BinaryModuleRecord, BinaryProducer,
-    BinarySignatureTable, Header, ModuleHeader, SemanticsMode, TextItemKind, TextModule,
-    TextParseError, parse_text_module,
+    BinaryAddressSpace, BinaryCodeTable, BinaryConstant, BinaryConstantTable, BinaryGlobalTable,
+    BinaryImportEntityKind, BinaryImportKind, BinaryModule, BinaryModuleBuilder,
+    BinaryModuleRecord, BinaryProducer, BinarySignatureTable, Header, SemanticsMode, TextItemKind,
+    TextModule, TextParseError, parse_text_module,
 };
 
 /// Assembles supported text records into a canonical binary container.
@@ -38,6 +38,56 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             }
         }
     }
+    let callees =
+        crate::text_direct_call::index_callees(&parsed_functions, &parsed_globals, module)?;
+    for function in &parsed_functions {
+        let Some(body) = &function.body else {
+            continue;
+        };
+        if body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                matches!(
+                    instruction.opcode.as_str(),
+                    "call"
+                        | "tail.call"
+                        | "func.ref"
+                        | "global.addr"
+                        | "tls.addr"
+                        | "enum.tag"
+                        | "struct.extract"
+                        | "struct.destructure"
+                        | "enum.take"
+                        | "enum.project"
+                        | "field.addr"
+                        | "elem.addr"
+                        | "enum.payload.addr"
+                        | "enum.inject"
+                        | "addr.toptr"
+                        | "ptr.toaddr"
+                        | "addr.cast"
+                        | "const.aggregate"
+                        | "gpu.builtin"
+                        | "gpu.spec_const"
+                        | "gpu.barrier"
+                        | "gpu.memfence"
+                )
+            })
+        {
+            let tir_types::Type::Function(signature) = &function.ty else {
+                unreachable!()
+            };
+            crate::text_function_body_assembly::validate_return_body(
+                body,
+                signature,
+                module.item_text(function.item),
+                function.item,
+                Some(&callees),
+            )?;
+        }
+    }
     if !module.header.initializers.is_empty() || !module.header.finalizers.is_empty() {
         return Err(error(
             Span::new(0, 0),
@@ -45,12 +95,12 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
         ));
     }
     for function in &parsed_functions {
-        let poison = function
-            .body
-            .as_ref()
-            .and_then(|body| body.blocks.first())
-            .and_then(|block| block.instructions.first())
-            .is_some_and(|instruction| instruction.opcode == "const.poison");
+        let poison = function.body.as_ref().is_some_and(|body| {
+            body.blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| instruction.opcode == "const.poison")
+        });
         let semantics = function
             .record
             .semantics
@@ -66,47 +116,28 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
 
     let mut function_float_constants = Vec::with_capacity(parsed_functions.len());
     for function in &parsed_functions {
-        let constant = function
-            .body
-            .as_ref()
-            .and_then(|body| body.blocks.first())
-            .and_then(|block| block.instructions.first())
-            .filter(|instruction| instruction.opcode == "const.float")
-            .map(|instruction| {
-                crate::text_function_constant_assembly::parse_entry_constant(
-                    instruction,
-                    module.item_text(function.item),
-                    function.item,
-                )
-            })
-            .transpose()?;
-        function_float_constants.push(constant);
-    }
-    let function_code_strings = parsed_functions
-        .iter()
-        .map(|function| {
-            function
-                .body
-                .as_ref()
-                .and_then(|body| body.blocks.first())
-                .and_then(|block| block.instructions.first())
-                .filter(|instruction| instruction.opcode == "const.string")
-                .map(|instruction| {
-                    crate::text_function_constant_assembly::parse_entry_constant(
+        let mut constants = Vec::new();
+        if let Some(body) = &function.body {
+            for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
+                if instruction.opcode == "const.float" {
+                    let constant = crate::text_function_constant_assembly::parse_entry_constant(
                         instruction,
                         module.item_text(function.item),
                         function.item,
-                    )
-                    .map(|constant| match constant {
-                        crate::text_function_constant_assembly::ParsedEntryConstant::String(
-                            value,
-                        ) => value.value,
-                        _ => unreachable!("const.string parser returned another constant kind"),
-                    })
-                })
-                .transpose()
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+                    )?;
+                    constants.push((instruction.span.start, constant));
+                }
+            }
+        }
+        function_float_constants.push(constants);
+    }
+    let function_large_vectors =
+        crate::text_vector_constant_large::collect(module, &parsed_functions)?;
+    let function_aggregates =
+        crate::text_aggregate_constant_intern::collect(module, &parsed_functions, &callees)?;
+    let function_gpu_specializations =
+        crate::text_gpu_spec_const_intern::collect(module, &parsed_functions)?;
+    let function_code_strings = crate::text_code_strings::collect(module, &parsed_functions)?;
 
     let leading_roots = parsed_imports
         .iter()
@@ -123,11 +154,26 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
         .filter(|global| global.initializer.is_some())
         .map(|global| (global.ty.clone(), global.item))
         .collect::<Vec<_>>();
-    for (function, constant) in parsed_functions.iter().zip(&function_float_constants) {
-        if let Some(constant) = constant {
+    for (function, constants) in parsed_functions.iter().zip(&function_float_constants) {
+        for (_, constant) in constants {
             middle_roots.push((constant.ty().clone(), function.item));
         }
     }
+    crate::text_vector_constant_large::append_roots(
+        &parsed_functions,
+        &function_large_vectors,
+        &mut middle_roots,
+    );
+    crate::text_aggregate_constant_intern::append_roots(
+        &parsed_functions,
+        &function_aggregates,
+        &mut middle_roots,
+    );
+    crate::text_gpu_spec_const_intern::append_roots(
+        &parsed_functions,
+        &function_gpu_specializations,
+        &mut middle_roots,
+    );
     let mut trailing_roots = parsed_globals
         .iter()
         .map(|global| (global.ty.clone(), global.item))
@@ -137,56 +183,7 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             .iter()
             .map(|function| (function.ty.clone(), function.item)),
     );
-    for function in &parsed_functions {
-        if let Some(body) = &function.body {
-            for block in body.blocks.iter().skip(1) {
-                for parameter in &block.parameters {
-                    trailing_roots.push((parameter.ty.clone(), function.item));
-                }
-            }
-        }
-    }
-    // CODE can use types not present in a function signature. Intern them
-    // after SIGNATURES roots in first-use order, including implicit i1 results.
-    for function in &parsed_functions {
-        if let Some(body) = &function.body {
-            for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
-                match instruction.opcode.as_str() {
-                    "stack.alloc" => {
-                        let memory = crate::text_memory_assembly::parse(
-                            instruction,
-                            module.item_text(function.item),
-                            function.item,
-                        )?;
-                        if let crate::text_memory_assembly::MemoryOperation::StackAlloc { ty } =
-                            memory
-                        {
-                            trailing_roots.push((
-                                tir_types::Type::Address {
-                                    pointee: Box::new(ty),
-                                    space: None,
-                                },
-                                function.item,
-                            ));
-                        }
-                    }
-                    "icmp" | "const.bool" => {
-                        trailing_roots.push((tir_types::Type::Integer(1), function.item))
-                    }
-                    "const.int" if body.blocks.iter().any(|block| block.instructions.len() > 1) => {
-                        let constant =
-                            crate::text_function_constant_assembly::parse_entry_constant(
-                                instruction,
-                                module.item_text(function.item),
-                                function.item,
-                            )?;
-                        trailing_roots.push((constant.ty().clone(), function.item));
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
+    crate::text_code_type_roots::collect(module, &parsed_functions, &callees, &mut trailing_roots)?;
     let (type_table, import_indices, constant_type_indices, global_indices) =
         crate::text_type_assembly::parse_text_type_table_with_roots(
             module,
@@ -194,6 +191,25 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             &middle_roots,
             &trailing_roots,
         )?;
+    for function in &parsed_functions {
+        let Some(body) = &function.body else {
+            continue;
+        };
+        if body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| crate::text_nominal_construction::handles(&instruction.opcode))
+        {
+            crate::text_nominal_construction::validate_typed(
+                body,
+                module.item_text(function.item),
+                function.item,
+                &type_table,
+                &callees,
+            )?;
+        }
+    }
     let mut import_indices = import_indices.into_iter();
     let mut imports = Vec::with_capacity(parsed_imports.len());
     for mut parsed in parsed_imports {
@@ -230,27 +246,59 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
         globals.push(parsed.record);
     }
     let mut function_float_indices = Vec::with_capacity(parsed_functions.len());
-    for (function, constant) in parsed_functions.iter().zip(&function_float_constants) {
-        let Some(crate::text_function_constant_assembly::ParsedEntryConstant::Float(value)) =
-            constant
-        else {
-            function_float_indices.push(None);
-            continue;
-        };
-        let ty = constant_type_indices.next().ok_or_else(|| {
-            error(
-                function.item.span,
-                "function constant type index was not lowered",
-            )
-        })?;
-        let index = u64::try_from(constants.records.len())
-            .map_err(|_| error(function.item.span, "constant count exceeds ULEB128"))?;
-        constants.records.push(BinaryConstant {
-            ty,
-            value: crate::types::BinaryConstantValue::Float(value.bytes.clone()),
-        });
-        function_float_indices.push(Some((ty, index)));
+    let mut function_float_maps = Vec::with_capacity(parsed_functions.len());
+    for (function, float_constants) in parsed_functions.iter().zip(&function_float_constants) {
+        let mut by_span = std::collections::HashMap::new();
+        for (span, constant) in float_constants {
+            let crate::text_function_constant_assembly::ParsedEntryConstant::Float(value) =
+                constant
+            else {
+                unreachable!("const.float parser returned a different constant kind")
+            };
+            let ty = constant_type_indices.next().ok_or_else(|| {
+                error(
+                    function.item.span,
+                    "function constant type index was not lowered",
+                )
+            })?;
+            let index = u64::try_from(constants.records.len())
+                .map_err(|_| error(function.item.span, "constant count exceeds ULEB128"))?;
+            constants.records.push(BinaryConstant {
+                ty,
+                value: crate::types::BinaryConstantValue::Float(value.bytes.clone()),
+            });
+            by_span.insert(*span, (ty, index));
+        }
+        let entry_span = function
+            .body
+            .as_ref()
+            .and_then(|body| body.blocks.first())
+            .and_then(|block| block.instructions.first())
+            .map(|instruction| instruction.span.start);
+        function_float_indices.push(entry_span.and_then(|span| by_span.get(&span).copied()));
+        function_float_maps.push(by_span);
     }
+    crate::text_vector_constant_large::intern(
+        &parsed_functions,
+        &function_large_vectors,
+        &mut constant_type_indices,
+        &mut constants,
+        &mut function_float_maps,
+    )?;
+    crate::text_aggregate_constant_intern::intern(
+        &parsed_functions,
+        function_aggregates,
+        &mut constant_type_indices,
+        &mut constants,
+        &mut function_float_maps,
+    )?;
+    crate::text_gpu_spec_const_intern::intern(
+        &parsed_functions,
+        function_gpu_specializations,
+        &mut constant_type_indices,
+        &mut constants,
+        &mut function_float_maps,
+    )?;
     let mut signatures = Vec::with_capacity(parsed_functions.len());
     for parsed in &mut parsed_functions {
         parsed.record.function_type = global_indices
@@ -296,6 +344,10 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
         finalizers: Vec::new(),
         source_hash,
     };
+    let default_semantics = header.semantics.unwrap_or(SemanticsMode::Defined);
+    let defined_only = parsed_functions.iter().all(|function| {
+        function.record.semantics.unwrap_or(default_semantics) == SemanticsMode::Defined
+    });
 
     let mut builder = BinaryModuleBuilder::new(
         Header {
@@ -303,7 +355,7 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             month: header.version.month,
             week: header.version.week,
             revision: 0,
-            flags: (1 << 6) | 1,
+            flags: (1 << 6) | u32::from(defined_only),
             profile: header.profile,
             platform: header.platform.unwrap_or(Platform::Portable),
             section_count: 0,
@@ -318,26 +370,37 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
     builder.signatures = BinarySignatureTable {
         records: signatures,
     };
-    builder.code_strings = function_code_strings.iter().flatten().cloned().collect();
-    let function_string_indices = function_code_strings
+    builder.code_strings = function_code_strings
         .iter()
-        .map(|value| {
-            value
-                .as_ref()
-                .map(|value| {
-                    builder.string_index(value).and_then(|index| {
-                        index.ok_or_else(|| {
-                            crate::FormatError::malformed(
-                                None,
-                                "const.string was not interned in STRINGS",
-                            )
-                        })
-                    })
-                })
-                .transpose()
-                .map_err(|format_error| error(Span::new(0, 0), format_error.to_string()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+        .flatten()
+        .map(|(_, value)| value.clone())
+        .collect();
+    let mut function_string_indices = Vec::with_capacity(parsed_functions.len());
+    let mut function_string_maps = Vec::with_capacity(parsed_functions.len());
+    for (function, strings) in parsed_functions.iter().zip(&function_code_strings) {
+        let mut by_span = std::collections::HashMap::new();
+        for (span, value) in strings {
+            let index = builder
+                .string_index(value)
+                .map_err(|format_error| error(function.item.span, format_error.to_string()))?
+                .ok_or_else(|| {
+                    error(
+                        function.item.span,
+                        "const.string was not interned in STRINGS",
+                    )
+                })?;
+            by_span.insert(*span, index);
+        }
+        let first_instruction = function
+            .body
+            .as_ref()
+            .and_then(|body| body.blocks.first())
+            .and_then(|block| block.instructions.first())
+            .map(|instruction| instruction.span.start);
+        function_string_indices
+            .push(first_instruction.and_then(|span| by_span.get(&span).copied()));
+        function_string_maps.push(by_span);
+    }
     let mut code_functions = Vec::new();
     for (function_position, parsed) in parsed_functions.iter().enumerate() {
         let Some(body) = &parsed.body else {
@@ -358,7 +421,10 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             function,
             &builder.types,
             function_float_indices[function_position],
+            &function_float_maps[function_position],
             function_string_indices[function_position],
+            &function_string_maps[function_position],
+            &callees,
             &block_parameter_indices[function_position],
             module.item_text(parsed.item),
             parsed.item,
@@ -367,13 +433,12 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
     builder.code = BinaryCodeTable {
         functions: code_functions,
     };
-    builder.analysis.functions = vec![
-        BinaryFunctionAnalysis {
-            trust_class: 0,
-            reason_mask: 0,
-        };
-        builder.signatures.records.len()
-    ];
+    builder.analysis.functions = parsed_functions
+        .iter()
+        .map(crate::text_analysis_derivation::derive)
+        .collect();
+    builder.analysis.indirect_call_typeids =
+        crate::text_analysis_derivation::indirect_typeids_from_text(module, &parsed_functions)?;
     builder
         .encode()
         .map_err(|format_error| error(Span::new(0, 0), format_error.to_string()))
@@ -393,11 +458,17 @@ pub fn disassemble_text_module(
     if module
         .sections
         .iter()
-        .any(|section| !matches!(section.kind, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 14))
+        .any(|section| !matches!(section.kind, 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 13 | 14))
     {
         return Err(crate::FormatError::malformed(
             None,
             "tirc dis does not yet support nonempty TIR sections",
+        ));
+    }
+    if module.capabilities(memory_limit)? != crate::BinaryCapabilities::default() {
+        return Err(crate::FormatError::malformed(
+            None,
+            "tirc dis cannot represent nonempty CAPS contents in text",
         ));
     }
     let record = module.module_record(memory_limit)?;
@@ -414,11 +485,18 @@ pub fn disassemble_text_module(
         &types,
         &code,
         &constants,
+        &globals,
         &strings,
     )?;
     let analysis = module.analysis_summary(memory_limit)?;
-    if !is_empty_analysis(&analysis, signatures.records.len())
-        || !record.initializers.is_empty()
+    if !crate::text_analysis_derivation::reconstructible_from_code(
+        &analysis,
+        signatures.records.len(),
+        &code,
+        &types,
+        &signatures,
+        &record.name,
+    ) || !record.initializers.is_empty()
         || !record.finalizers.is_empty()
     {
         return Err(crate::FormatError::malformed(
@@ -589,116 +667,4 @@ pub fn disassemble_text_module(
     parse_text_module(&text)
         .map_err(|error| crate::FormatError::malformed(Some(error.span.start), error.message))?;
     Ok(text)
-}
-
-fn is_empty_analysis(analysis: &BinaryAnalysisSummary, signature_count: usize) -> bool {
-    analysis.functions.len() == signature_count
-        && analysis
-            .functions
-            .iter()
-            .all(|function| function.trust_class == 0 && function.reason_mask == 0)
-        && analysis.sandbox_regions.is_empty()
-        && analysis.indirect_call_typeids.is_empty()
-        && analysis.assembly_regions.is_empty()
-}
-
-fn profile_name(profile: tir_target::Profile) -> &'static str {
-    match profile {
-        tir_target::Profile::App => "app",
-        tir_target::Profile::System => "system",
-        tir_target::Profile::Driver => "driver",
-        tir_target::Profile::Kernel => "kernel",
-    }
-}
-
-fn platform_name(platform: tir_target::Platform) -> &'static str {
-    match platform {
-        Platform::Portable => "portable",
-        Platform::Tessera => "tessera",
-        Platform::Macos => "macos",
-        Platform::Ios => "ios",
-        Platform::Windows => "windows",
-        Platform::Linux => "linux",
-        Platform::Android => "android",
-        Platform::Web => "web",
-        Platform::Wasi => "wasi",
-    }
-}
-
-fn semantics_name(semantics: SemanticsMode) -> &'static str {
-    match semantics {
-        SemanticsMode::Defined => "defined",
-        SemanticsMode::Permissive => "permissive",
-    }
-}
-
-fn format_uuid(uuid: [u8; 16]) -> String {
-    let mut text = String::with_capacity(36);
-    for (index, byte) in uuid.into_iter().enumerate() {
-        if matches!(index, 4 | 6 | 8 | 10) {
-            text.push('-');
-        }
-        let _ = write!(text, "{byte:02x}");
-    }
-    text
-}
-
-fn parse_source_hash(header: &ModuleHeader) -> Result<Option<[u8; 32]>, TextParseError> {
-    let Some(source_hash) = &header.source_hash else {
-        return if header.profile == tir_target::Profile::Driver {
-            Err(error(
-                Span::new(0, 0),
-                "driver module header is missing its source hash",
-            ))
-        } else {
-            Ok(None)
-        };
-    };
-    if header.profile != tir_target::Profile::Driver {
-        return Err(error(
-            Span::new(0, 0),
-            "source hash is only valid for driver modules",
-        ));
-    }
-    if source_hash.len() != 64
-        || !source_hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(error(
-            Span::new(0, 0),
-            "driver source hash must contain 64 lowercase hexadecimal digits",
-        ));
-    }
-
-    let mut bytes = [0; 32];
-    for (index, pair) in source_hash.as_bytes().chunks_exact(2).enumerate() {
-        let value = std::str::from_utf8(pair)
-            .ok()
-            .and_then(|pair| u8::from_str_radix(pair, 16).ok())
-            .ok_or_else(|| error(Span::new(0, 0), "invalid driver source hash"))?;
-        bytes[index] = value;
-    }
-    Ok(Some(bytes))
-}
-
-fn item_name(kind: TextItemKind) -> &'static str {
-    match kind {
-        TextItemKind::Import => "import",
-        TextItemKind::Type => "type",
-        TextItemKind::Global => "global",
-        TextItemKind::Function => "function",
-        TextItemKind::Entry => "entry",
-        TextItemKind::Variants => "variants",
-        TextItemKind::Trait => "trait",
-        TextItemKind::Conformance => "conformance",
-        TextItemKind::VTable => "vtable",
-    }
-}
-
-fn error(span: Span, message: impl Into<String>) -> TextParseError {
-    TextParseError {
-        span,
-        message: message.into(),
-    }
 }

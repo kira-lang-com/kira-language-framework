@@ -1,5 +1,5 @@
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
-use tir_format::{BinaryFunctionBody, BinaryTypeTable};
+use tir_format::{BinaryFunctionBody, BinaryType, BinaryTypeTable};
 
 const V8: Code = Code::new(Dialect::Tir, Area::Verifier, 8);
 
@@ -57,6 +57,10 @@ fn check_value(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if value_types.get(value).copied().flatten() != Some(ty)
+        || matches!(
+            types.entries.get(ty as usize),
+            Some(BinaryType::Address { .. })
+        )
         || crate::binary_code::types::aggregate_instructions::is_loadable_type(types, ty)
     {
         return;

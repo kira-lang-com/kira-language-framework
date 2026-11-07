@@ -207,6 +207,20 @@ fn optional_reference_type(types: &BinaryTypeTable, pointee: u64) -> Option<u64>
     if declarations.next().is_some() {
         return None;
     }
+    let lifecycle = types
+        .definitions
+        .iter()
+        .find(|definition| definition.declaration == declaration)?;
+    if !matches!(
+        lifecycle.policy.copy,
+        tir_format::BinaryCopyPolicy::Implicit(_)
+    ) || !matches!(
+        lifecycle.policy.destroy,
+        tir_format::BinaryDestroyPolicy::Function(_)
+    ) || lifecycle.policy.pairing != 0
+    {
+        return None;
+    }
     types
         .entries
         .iter()

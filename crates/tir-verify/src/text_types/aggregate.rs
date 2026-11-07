@@ -277,7 +277,11 @@ pub(super) fn borrowed_results(
                 "struct.extract" | "tuple.extract" | "enum.project"
             ))
         || (has_borrowed_operand && matches!(instruction.opcode.as_str(), "select" | "freeze"));
-    if borrowed_result {
+    if matches!(instruction.opcode.as_str(), "load.borrow" | "borrow.begin") {
+        // An explicit loan stays borrowed even when its value type is trivial:
+        // V5 forbids returning/storing the borrowed SSA result itself.
+        instruction.results.clone()
+    } else if borrowed_result {
         instruction
             .results
             .iter()

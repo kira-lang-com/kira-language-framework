@@ -64,6 +64,10 @@ use helpers::*;
 
 const SELECTOR_MASK: u64 = 0xf << 48;
 
+#[cfg(test)]
+#[path = "binary_code_instruction_integer_conformance.rs"]
+mod integer_conformance;
+
 pub(crate) fn decode_instructions(
     bytes: &[u8],
     base: usize,
@@ -228,6 +232,19 @@ fn decode_instruction(
                 return Err(malformed(
                     base + start,
                     "invalid integer instruction selector",
+                ));
+            }
+            let allowed = match opcode {
+                0x028 => Some(1u64 << 3),
+                0x02c => Some(1u64 << 4),
+                0x03e | 0x03f => Some(1u64 << 47),
+                0x02a | 0x02b | 0x02d | 0x02e | 0x034..=0x03b | 0x03d | 0x040..=0x045 => Some(0),
+                _ => None,
+            };
+            if allowed.is_some_and(|mask| modifiers & !mask != 0) {
+                return Err(malformed(
+                    base + start,
+                    "integer instruction has invalid modifier bits",
                 ));
             }
             let values = match relative {

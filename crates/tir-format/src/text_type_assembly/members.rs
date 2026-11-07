@@ -6,7 +6,9 @@ use super::syntax::{
     span_at, split_ranges, token_text, trim_range,
 };
 use crate::text::TokenKind;
-use crate::types::{BinaryField, BinaryNominalDefinition, BinaryNominalKind, BinaryVariant};
+use crate::types::{
+    BinaryField, BinaryLayout, BinaryNominalDefinition, BinaryNominalKind, BinaryVariant,
+};
 use crate::{TextModule, TextParseError, parse_type};
 use tir_diag::Span;
 use tir_types::Type;
@@ -44,6 +46,16 @@ pub(super) fn parse_definition(
                 builder,
             )?);
         }
+    }
+    if parsed.declaration.kind == BinaryNominalKind::Enum
+        && parsed.layout == BinaryLayout::C
+        && variants.iter().any(|variant| !variant.payload.is_empty())
+    {
+        return Err(item_error(
+            parsed.item,
+            Span::new(0, 0),
+            "C enumerations cannot carry variant payloads",
+        ));
     }
     let policy = parse_policy(parsed, builder.function_indices())?;
     Ok(BinaryNominalDefinition {

@@ -149,16 +149,10 @@ pub(super) fn verify(
 fn is_borrowed(
     value: u64,
     borrowed: &HashSet<u64>,
-    value_types: &[Option<u64>],
-    types: &BinaryTypeTable,
+    _value_types: &[Option<u64>],
+    _types: &BinaryTypeTable,
 ) -> bool {
     borrowed.contains(&value)
-        && usize::try_from(value)
-            .ok()
-            .and_then(|index| value_types.get(index))
-            .copied()
-            .flatten()
-            .is_some_and(|ty| !aggregate_instructions::is_trivial_type(types, ty))
 }
 
 fn instruction_values(instruction: &BinaryInstruction) -> Vec<u64> {

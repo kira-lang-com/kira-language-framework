@@ -427,10 +427,67 @@ fn check_function_type(
 }
 
 pub(super) fn explicit_types(source: &str, instruction: &tir_format::TextInstruction) -> Vec<Type> {
+    if matches!(
+        instruction.opcode.as_str(),
+        "return"
+            | "br"
+            | "cond.br"
+            | "switch.int"
+            | "switch.enum"
+            | "br.indirect"
+            | "gpu.barrier"
+            | "gpu.memfence"
+    ) {
+        return Vec::new();
+    }
+    if instruction.opcode == "gpu.builtin" {
+        return source
+            .get(instruction.span.start..instruction.span.end)
+            .and_then(|text| text.rsplit_once(':'))
+            .and_then(|(_, ty)| parse_type(ty.trim()).ok())
+            .into_iter()
+            .collect();
+    }
+    if instruction.opcode == "gpu.spec_const" {
+        return source
+            .get(instruction.span.start..instruction.span.end)
+            .and_then(|text| text.splitn(3, ',').nth(1))
+            .and_then(|text| parse_type(text.trim()).ok())
+            .into_iter()
+            .collect();
+    }
     let start = crate::ssa::text_instruction_operands_start(&instruction.tokens);
     let mut types = HashSet::new();
     for start in start..instruction.tokens.len() {
         let first = &instruction.tokens[start];
+        if start > 0
+            && matches!(
+                instruction.tokens[start - 1].kind,
+                TokenKind::Punctuation('%')
+            )
+        {
+            continue;
+        }
+        if matches!(first.kind, TokenKind::Punctuation('%')) {
+            let previous = start
+                .checked_sub(1)
+                .and_then(|index| instruction.tokens.get(index))
+                .and_then(atom);
+            let explicit_type = matches!(previous, Some("to" | "as"))
+                || start == crate::ssa::text_instruction_operands_start(&instruction.tokens)
+                    && matches!(
+                        instruction.opcode.as_str(),
+                        "stack.alloc"
+                            | "const.zero"
+                            | "const.poison"
+                            | "const.bytes"
+                            | "const.aggregate"
+                            | "raw.load"
+                    );
+            if !explicit_type {
+                continue;
+            }
+        }
         if matches!(
             first.kind,
             TokenKind::String(_) | TokenKind::Newline | TokenKind::End

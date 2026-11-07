@@ -493,10 +493,12 @@ fn validate_required_sections<'a>(
 ) -> Result<(), FormatError> {
     let mut strings = false;
     let mut module = false;
+    let mut capabilities = false;
     let mut analysis = false;
     for section in sections {
         strings |= section.kind == 1;
         module |= section.kind == 2;
+        capabilities |= section.kind == 13;
         analysis |= section.kind == 14;
     }
     if !strings {
@@ -504,6 +506,9 @@ fn validate_required_sections<'a>(
     }
     if !module {
         return Err(FormatError::malformed(None, "MODULE section is missing"));
+    }
+    if !capabilities {
+        return Err(FormatError::malformed(None, "CAPS section is missing"));
     }
     if !analysis {
         return Err(FormatError::malformed(None, "ANALYSIS section is missing"));

@@ -34,11 +34,7 @@ pub(super) fn verify(
                 continue;
             }
             for (value, _) in crate::ssa::text_value_uses(instruction) {
-                if borrowed.contains(&value)
-                    && value_types
-                        .get(&value)
-                        .is_some_and(|ty| !policies.is_trivial(ty))
-                {
+                if borrowed.contains(&value) {
                     diagnostics.push(
                         Diagnostic::error(
                             V5,

@@ -399,7 +399,10 @@ pub(super) fn verify_optional_choice(
         })
         .collect::<Vec<_>>();
     if tail.is_empty()
-        || tail.len() == 1 && atom(tail[0]).is_some_and(|choice| choices.contains(&choice))
+        || tail.len() == 3
+            && is_punctuation(tail[0], '[')
+            && atom(tail[1]).is_some_and(|choice| choices.contains(&choice))
+            && is_punctuation(tail[2], ']')
     {
         true
     } else {

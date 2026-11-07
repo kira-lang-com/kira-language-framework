@@ -51,7 +51,8 @@ fn verify_instruction(
     let relative = instruction.opcode - 0x140;
     let selector = (instruction.modifiers & SELECTOR_MASK) >> 48;
     let allowed = match relative {
-        0 | 2 | 3 | 4 | 13 => SELECTOR_MASK,
+        0 | 2 | 3 | 4 => SELECTOR_MASK,
+        13 => SELECTOR_MASK | 0x7,
         6 | 7 => VOLATILE | NONTEMPORAL,
         8 => INBOUNDS,
         10 => VOLATILE | NOOVERLAP,
@@ -101,6 +102,7 @@ fn verify_instruction(
         12 => verify_memory_set(instruction, &values, value_types, types),
         13 => {
             values.len() == 1
+                && selector <= 1
                 && instruction.result_count == 0
                 && value_type(value_types, values[0]).is_some_and(|ty| is_memory_pointer(types, ty))
         }
