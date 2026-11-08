@@ -145,6 +145,172 @@ but they do **not** constitute the complete TIR encoding corpus:
   byte-identical CLI TIRB round-trips. GPU V15 no longer mistakes branch
   target labels for nominal types. Some text-accepted GPU memory classes
   remain outside the five-domain binary grammar and fail closed.
+- Fragment GPU CODE (0x405–0x409) now assembles and disassembles
+  `frag.demote`, `frag.load_attachment n`, `frag.raster_order.begin`/`end`,
+  and `frag.imageblock.addr`. Attachment indexes use the normative unsigned
+  32-bit integer immediate, and result types are `vec<4 x f32>` and
+  `ptr<tile>` respectively. Type roots are interned even for intermediate
+  fragment values; text rejects malformed operands, duplicate SSA and CPU
+  targets. Binary V2 independently rejects CPU use, nonzero modifiers,
+  invalid result counts and out-of-range/negative attachment indexes.
+  Scoped format/verification tests and the rebuilt CLI pass a byte-identical
+  binary/text/binary round-trip across all five fragment opcodes. Full GPU
+  stage/capability/entry graph conformance is still open.
+- GPU development-only `gpu.printf` (0x40A) now uses a STRINGS format
+  index and a counted SSA argument list, with canonical Kira string escaping
+  and relative CODE value deltas. Empty formats, zero arguments, repeated
+  strings across functions, escaped quotations and cross-block SSA values
+  round-trip byte-identically. Text rejects CPU targets, malformed quoting,
+  non-SSA arguments and undefined values. Binary V2 rejects forged CPU
+  placement, nonzero result/modifier words, invalid STRINGS references and
+  wrong operand shapes; pipeline release stripping and full entry capability
+  enforcement remain separate T1/T3 work.
+- GPU derivatives and quads (0x420–0x426) now round-trip `gpu.ddx`/`gpu.ddy`
+  coarse/fine modes (modifier bit 36), `gpu.fwidth`, `quad.broadcast`,
+  `quad.swap` x/y/diagonal selector bits 48–51 and `quad.all`/`quad.any`.
+  The optional `unchecked_uniformity` bit 34 is preserved and validated.
+  Typed SSA inference checks floating scalar/vector derivative inputs,
+  `quad.broadcast` i32 lane operands, and i1 quad predicates, with TYPE
+  interning for i1 results and cross-block vector values. Binary V2 rejects
+  wrong targets, modifiers, result counts, selectors and SSA operand shapes.
+  Fixed a pre-existing V2 collective validator bug: one-operand CODE decodes
+  to `BinaryOperand::Value`, not a one-element `Values` list. All seven
+  opcodes pass typed text and binary verification and a mixed CFG/printf CLI
+  binary/text/binary byte-identical round-trip. Quad-uniform dynamic-flow
+  verification remains governed by the existing uniformity rules.
+- GPU subgroup CODE (0x440–0x452) now assembles and disassembles all
+  19 collective opcodes, including ballot/vote/elect, lane shuffle and
+  broadcast, reductions and inclusive/exclusive scans. The 15 normative
+  reduction operator codes are typechecked against integer/IEEE float
+  scalars; optional power-of-two cluster sizes 1–128 encode in the two
+  auxiliary CODE fields. `subgroup.ballot` interns `vec<4 x i32>`, vote
+  results intern i1, and queries intern i32. Format conformance covers all
+  opcode names, operator/cluster combinations, and multi-block ballot
+  forwarding. Binary V2 rejects CPU use, unexpected result/modifier words,
+  malformed operand counts, operator codes outside 0–14, and invalid cluster
+  sizes. Full subgroup uniformity/capability/backend conformance remains open.
+- GPU texture CODE now covers `tex.query` (0x48B) with all seven
+  selector fields and dimension-aware scalar/vec2/vec3 result types,
+  plus non-sparse `tex.read` (0x488) and `tex.write` (0x489) with
+  texture-handle/access checks, integer coordinates, array-layer and
+  multisample indexes, and typed read/write components. Unused query
+  results intern their own TYPES roots even when absent from function
+  signatures. Binary V2 independently checks selector bits, CPU targets,
+  result counts, CODE operand shapes and missing/off-limit offsets.
+  Binary sparse `tex.read` is valid when bit 35 adds an i1 residency result;
+  its text assembly/disassembly is **not yet supported** and still fails
+  closed. Sampling, gather, atomic, offsets and the other texture opcodes
+  remain T0 gaps. All supported forms passed a multi-function, byte-identical
+  rebuilt CLI round-trip with source and binary verification.
+- GPU sampled texture CODE now also round-trips `tex.sample` (0x480)
+  and `tex.lod` (0x48C), including sampleable non-multisampled handles,
+  normalized floating-point coordinates, separate array layers, optional
+  `tex.sample` offsets in −8…7 with sign-and-magnitude encoding, optional
+  typed `f32` `min_lod`, and bit-34 `unchecked_uniformity`. `tex.lod`
+  produces a `vec<2 x f32>` TYPES root even when unused. Corrected the
+  text GPU verifier to check the sampler in operand 1 and coordinates in
+  operand 2 for `tex.lod`. Binary V2 independently rejects forged CPU
+  use, modifiers, selectors, SSA result counts, offsets and operand shapes.
+  Sparse sampling, other sampler instructions and texture atomics remain
+  outside the text CODE subset and fail closed.
+- Explicit GPU sampling CODE now also round-trips `tex.sample_level`
+  (0x481) and `tex.sample_bias` (0x483): mandatory typed `f32` LOD/bias,
+  optional signed spatial offsets and `f32` min_lod, and array textures with
+  separate integer layers. `tex.sample_bias` accepts bit-34 unchecked
+  uniformity; `tex.sample_level` rejects it per the decoder's modifier map.
+  Text and binary V2 conformance include rejected wrong LOD types, missing
+  operands, forged modifiers and incorrect result counts. A mixed CFG/array
+  CLI module assembles and disassembles byte-identically.
+- Explicit GPU gradient sampling `tex.sample_grad` (0x482) now encodes
+  two mandatory `f32` gradients in the same scalar/vector shape as the
+  normalized coordinates, with optional signed offsets and `f32` min_lod;
+  cube/cube-array offsets remain two-dimensional. Unsupported bit-34
+  unchecked-uniformity and sparse residency forms are rejected, including
+  independent binary V2 result/modifier/arity checks. A cross-block 2D
+  and cube gradient CLI module verifies and round-trips byte-identically.
+- GPU comparison sampling `tex.sample_compare` (0x484) and
+  `tex.sample_compare_level` (0x485) now emit canonical typed CODE with
+  scalar f32 texture components and comparison references, explicit f32
+  LOD for comparison-level sampling, and optional signed offsets/min_lod.
+  Implicit comparison permits bit-34 unchecked uniformity; explicit-level
+  comparison disallows it. Positive V2 tests and forged result/modifier/
+  operand tests pass, as does a cube-array/CFG CLI byte-identical TIRB
+  round-trip. Sparse residency is still not encoded by this text path.
+- GPU texture gather CODE `tex.gather` (0x486) and
+  `tex.gather_compare` (0x487) now encode canonical four-lane sample results,
+  channel selectors 0–3 via CODE bits 48–51, typed scalar/vector texture
+  components and `f32` gather-compare references, with optional signed offsets,
+  `f32` min_lod and bit-34 unchecked uniformity. Unused vector result TYPES
+  are interned. Forged selector/result/operand variants fail V2. A rebuilt
+  CLI module with integer and floating channels, array comparison and
+  cross-block SSA round-trips byte-identically. Sparse residency remains open.
+- GPU sampler feedback `tex.feedback` (0x48D) now round-trips
+  non-multisampled sampleable textures with typed components, normalized
+  coordinates and array layers, signed constant offsets, optional f32
+  `min_lod`, and unchecked-uniformity bit 34. Binary V2 rejects CPU
+  placement, forged result counts, modifiers, SSA operand shapes, sparse
+  requests without residency and out-of-range offsets. GPU-entry capability
+  regression confirms `sampler_feedback` is mandatory, plus
+  `compute_derivatives` when reached from compute. A rebuilt CLI verifies
+  multi-function feedback and CFG byte-identically. Sparse residency and
+  entry metadata encoding are still separate incomplete work.
+- GPU texture atomic `tex.atomic` (0x48A) now encodes all 15
+  operation IDs (xchg/add/sub/and/nand/or/xor/max/min/umax/umin and
+  fadd/fsub/fmax/fmin), preserving the trailing ULEB operation field.
+  Readwrite non-multisampled textures, typed integer texel coordinates,
+  array layers, scalar i32/f32 values and exactly one prior-value result
+  are checked in text and binary. Zero constant offsets and zero modifier
+  bits are required, while malformed operation IDs and operand lists are
+  V2-rejected. All named texture opcodes 0x480–0x48D now have a text
+  encoder/disassembler for non-sparse forms. A mixed scalar/array/CFG
+  CLI module reassembles byte-identically. Sparse residency and complete
+  GPU-entry/backend conformance remain open.
+- Sparse texel reads `tex.read` (0x488) now preserve the optional CODE
+  modifier bit 35 and two SSA results: the typed pixel component plus
+  the final i1 residency flag. Canonical `%value, %resident = tex.read
+  ... [sparse]` text round-trips integer/float vectors, array layers,
+  multisample indexes and cross-block SSA; missing/extra residency results
+  or forged selector bits fail closed. Binary V2 and GPU-entry capability
+  regression verify sparse_residency bit 13; raw reads do not need
+  compute_derivatives. Full CLI TIRB reassembly is byte-identical.
+- Sparse sampled-texture CODE now also covers every allowed 0x480–0x487
+  and 0x48D opcode (`tex.sample*`, `tex.gather*`, `tex.feedback`) with
+  modifier bit 35, a second typed i1 residency SSA result and canonical
+  `[unchecked_uniformity] [sparse]` ordering. CODE preserves signed
+  coordinate offsets, f32 LOD/gradient/compare operands, selector bits
+  and the residency value across CFG edges. Binary V2 rejects forged
+  sparse result counts and modifiers, selector 4 for gather and illegal
+  sparse `tex.lod`. Together with sparse `tex.read`, all ten sparse-capable
+  texture opcodes from section 17.6 have non-lossy text/binary CODE,
+  with byte-identical multi-function CLI reassembly. Full entry metadata,
+  target device conformance and backend lowering remain open.
+- GPU mesh/object CODE (0x4C0–0x4C4) now encodes and disassembles
+  `object.dispatch_mesh`, `mesh.set_counts`, `mesh.write.vertex`,
+  `mesh.write.primitive`, and `mesh.write.indices` with typed SSA operands,
+  3-operand dispatch and 2-operand mesh writes, and optional bit-34
+  unchecked uniformity for dispatch/set-counts only. Index operands are
+  restricted to i32, vec<2 x i32> or vec<3 x i32> per section 17.10;
+  vector4 indexes are explicitly rejected, consistent with the preexisting
+  V2 topology checker. Binary V2 independently rejects CPU targets,
+  modifier/result word forgery and operand count/shape errors. All five
+  opcodes pass multi-block typed text and binary verification and
+  byte-identical CLI TIRB round-trips. Entry topology and exactly-once
+  execution rules remain subject to GPU-entry metadata verification.
+- GPU tile/work-graph CODE (0x5A0, 0x5C0–0x5C5) now includes typed
+  `tile.imageblock.addr`, `node.input.addr`/`count`, `node.output.allocate`
+  with thread/group selector bit 48, `node.output.addr`/`commit` and
+  `node.finished_cross_group`. Typed SSA derives `ptr<tile>`,
+  `ptr<node_record>`, i32 and i1 results. Binary V2 independently rejects
+  CPU placement, invalid result counts/modifier bits and operand arities;
+  text V15 now checks that `node.output.addr` has a node-record pointer as
+  its first argument and an integer index as its second.
+- Multi-function CODE type-root interning now retains exact trailing TYPES
+  positions for every block parameter, rather than assuming the roots for
+  all blocks form one contiguous run. The previous assumption produced
+  incorrect V1 edge types when an earlier function contributed other CODE
+  type roots (for example `tile.imageblock.addr` followed by a node CFG).
+  Canonical type-root ordering is preserved, with a permanent regression for
+  multi-function pointer/integer block-argument forwarding.
 - The `0x120` address group now round-trips `field.addr`, `elem.addr`,
   `enum.payload.addr`, payloadless `enum.inject`, `addr.toptr`, `ptr.toaddr`,
   and `addr.cast`. The cast verifies matching static pointee layouts through
@@ -317,7 +483,7 @@ but they do **not** constitute the complete TIR encoding corpus:
   still have no lossless TIR text disassembly representation.
 
 Evidence: scoped `cargo nextest run -p tir-format -p tir-layout -p tir-verify
--p tir-own --no-fail-fast`: **558 passed, zero failed**.
+-p tir-own --no-fail-fast`: **675 passed, zero failed**.
 `cargo fmt --all -- --check`, `cargo check -p klf-cli -p
 tvisa-format`, and `cargo build -p klf-cli --bin klf` passed. The rebuilt CLI
 verified and preserved byte-identical binary/text/binary for enum and integer

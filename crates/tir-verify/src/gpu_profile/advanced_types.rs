@@ -56,7 +56,7 @@ pub(super) fn verify(
         | "coop.extract" | "coop.insert" | "coop.reduce" => {
             verify_cooperative(instruction, source, operands, &mut diagnostics);
         }
-        "node.input.addr" | "node.output.addr" => {
+        "node.input.addr" => {
             if operands.first().is_some_and(|ty| !is_integer_type(ty)) {
                 error(
                     &mut diagnostics,
@@ -65,7 +65,30 @@ pub(super) fn verify(
                 );
             }
         }
+        "node.output.addr" => {
+            require_pointer_space(
+                instruction,
+                operands,
+                0,
+                AddressSpace::NodeRecord,
+                &mut diagnostics,
+            );
+            if operands.get(1).is_some_and(|ty| !is_integer_type(ty)) {
+                error(
+                    &mut diagnostics,
+                    instruction,
+                    "node record index must be an integer",
+                );
+            }
+        }
         "node.output.allocate" => {
+            if operands.first().is_some_and(|ty| !is_integer_type(ty)) {
+                error(
+                    &mut diagnostics,
+                    instruction,
+                    "node output selector must be an integer",
+                );
+            }
             if operands.get(1).is_some_and(|ty| !is_integer_type(ty)) {
                 error(
                     &mut diagnostics,

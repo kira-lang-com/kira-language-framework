@@ -437,6 +437,7 @@ pub(super) fn explicit_types(source: &str, instruction: &tir_format::TextInstruc
             | "br.indirect"
             | "gpu.barrier"
             | "gpu.memfence"
+            | "gpu.printf"
     ) {
         return Vec::new();
     }

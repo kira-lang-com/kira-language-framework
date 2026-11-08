@@ -59,7 +59,7 @@ pub(crate) fn format_return_body(
                         || matches!(instruction.opcode, 0x0c9 | 0x0ca)
                         || matches!(
                             instruction.opcode,
-                            0x122..=0x128 | 0x008 | 0x009 | 0x011 | 0x400..=0x403
+                            0x122..=0x128 | 0x008 | 0x009 | 0x011 | 0x400..=0x403 | 0x405..=0x40a | 0x420..=0x426 | 0x440..=0x452 | 0x480..=0x48d | 0x4c0..=0x4c4 | 0x5a0 | 0x5c0..=0x5c5
                         )
                         || matches!(
                             instruction.opcode,

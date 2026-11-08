@@ -63,6 +63,15 @@ pub(crate) fn validate_return_body(
                 || block.instructions[0].opcode == "gpu.builtin"
                 || block.instructions[0].opcode == "gpu.spec_const"
                 || crate::text_gpu_sync::handles(&block.instructions[0].opcode)
+                || crate::text_gpu_fragment::handles(&block.instructions[0].opcode)
+                || block.instructions[0].opcode == "gpu.printf"
+                || crate::text_gpu_quad::handles(&block.instructions[0].opcode)
+                || crate::text_gpu_subgroup::handles(&block.instructions[0].opcode)
+                || crate::text_gpu_mesh::handles(&block.instructions[0].opcode)
+                || crate::text_gpu_tile_node::handles(&block.instructions[0].opcode)
+                || crate::text_gpu_texture_basic::handles(&block.instructions[0].opcode)
+                || crate::text_gpu_texture_sample::handles(&block.instructions[0].opcode)
+                || crate::text_gpu_texture_atomic::handles(&block.instructions[0].opcode)
                 || crate::text_raw_memory::opcode(&block.instructions[0].opcode).is_some()
                 || crate::text_raw_access::handles(&block.instructions[0].opcode)
                 || crate::text_device_io::handles(&block.instructions[0].opcode)

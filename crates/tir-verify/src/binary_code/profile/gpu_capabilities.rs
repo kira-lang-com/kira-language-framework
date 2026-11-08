@@ -573,3 +573,108 @@ fn add_type(types: &BinaryTypeTable, type_index: u64, seen: &mut Vec<u64>, requi
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod sampler_feedback_conformance {
+    use super::*;
+    use tir_format::{BinaryModule, assemble_text_module, parse_text_module};
+
+    #[test]
+    fn fragment_and_compute_feedback_require_correct_entry_capabilities() {
+        let source = "module @FeedbackCaps tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @FeedbackCaps.read(%tex: texture<2d, f32, sample>, %smp: sampler, %uv: vec<2 x f32>) -> f32 target(gpu) {\nbb0(%tex: texture<2d, f32, sample>, %smp: sampler, %uv: vec<2 x f32>):\n  %result = tex.feedback %tex, %smp, %uv\n  return %result\n}\n";
+        let parsed = parse_text_module(source).expect("feedback source parses");
+        let binary =
+            BinaryModule::decode(&assemble_text_module(&parsed).expect("feedback CODE assembles"))
+                .expect("feedback TIRB decodes");
+        let types = binary.type_table(u64::MAX).expect("TYPES decodes");
+        let signatures = binary
+            .signature_table(u64::MAX, &types)
+            .expect("SIGNATURES decode");
+        let code = binary
+            .code_table(u64::MAX, &signatures)
+            .expect("CODE decodes");
+        let instruction = code.functions[0].blocks[0]
+            .instructions
+            .as_ref()
+            .expect("decoded instructions")
+            .iter()
+            .find(|op| op.opcode == 0x48d)
+            .expect("feedback CODE instruction");
+        let mut fragment = 0;
+        add_instruction_requirements(
+            BinaryEntryKind::Fragment,
+            instruction,
+            &[],
+            &types,
+            None,
+            &mut fragment,
+        );
+        assert_eq!(
+            fragment & ((1 << 14) | (1 << 11)),
+            1 << 14,
+            "fragment feedback must require sampler_feedback without compute_derivatives"
+        );
+        let mut compute = 0;
+        add_instruction_requirements(
+            BinaryEntryKind::Compute,
+            instruction,
+            &[],
+            &types,
+            None,
+            &mut compute,
+        );
+        assert_eq!(
+            compute & ((1 << 14) | (1 << 11)),
+            (1 << 14) | (1 << 11),
+            "compute feedback requires both sampler_feedback and compute_derivatives"
+        );
+    }
+}
+
+#[cfg(test)]
+mod sparse_texture_conformance {
+    use super::*;
+    use tir_format::{BinaryModule, assemble_text_module, parse_text_module};
+
+    #[test]
+    fn sparse_texel_read_requires_sparse_residency_capability() {
+        let source = "module @SparseCaps tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @SparseCaps.read(%tex: texture<2d, i32, read>, %coord: vec<2 x i32>) -> i1 target(gpu) {\nbb0(%tex: texture<2d, i32, read>, %coord: vec<2 x i32>):\n  %value, %resident = tex.read %tex, %coord [sparse]\n  return %resident\n}\n";
+        let parsed = parse_text_module(source).expect("sparse source parses");
+        let binary =
+            BinaryModule::decode(&assemble_text_module(&parsed).expect("sparse CODE assembles"))
+                .expect("TIRB decodes");
+        let types = binary.type_table(u64::MAX).expect("TYPES decode");
+        let signatures = binary
+            .signature_table(u64::MAX, &types)
+            .expect("SIGNATURES decode");
+        let code = binary
+            .code_table(u64::MAX, &signatures)
+            .expect("CODE decode");
+        let instruction = code.functions[0].blocks[0]
+            .instructions
+            .as_ref()
+            .expect("decoded instructions")
+            .iter()
+            .find(|op| op.opcode == 0x488)
+            .expect("tex.read");
+        let mut required = 0;
+        add_instruction_requirements(
+            BinaryEntryKind::Fragment,
+            instruction,
+            &[],
+            &types,
+            None,
+            &mut required,
+        );
+        assert_eq!(
+            required & (1 << 13),
+            1 << 13,
+            "sparse texture reads require sparse_residency entry capability"
+        );
+        assert_eq!(
+            required & (1 << 11),
+            0,
+            "raw texel reads do not require compute derivatives"
+        );
+    }
+}

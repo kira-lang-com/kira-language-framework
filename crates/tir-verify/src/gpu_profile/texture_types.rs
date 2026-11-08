@@ -100,13 +100,34 @@ pub(super) fn verify(instruction: &TextInstruction, operands: &[Type]) -> Vec<Di
         }
     } else if matches!(opcode, "tex.query" | "tex.lod") {
         if opcode == "tex.lod" {
+            if operands.get(1).is_some_and(|ty| ty != &Type::Sampler) {
+                error(
+                    &mut diagnostics,
+                    instruction,
+                    "tex.lod requires a sampler handle",
+                );
+            }
+            if !matches!(access, TextureAccess::Sample | TextureAccess::ReadWrite) || multisampled {
+                error(
+                    &mut diagnostics,
+                    instruction,
+                    "tex.lod requires a sampleable non-multisampled texture",
+                );
+            }
             verify_coordinates(
                 instruction,
-                operands.get(1),
+                operands.get(2),
                 dimension,
                 true,
                 &mut diagnostics,
             );
+            if is_array(dimension) && operands.get(3).is_some_and(|ty| !is_integer(ty)) {
+                error(
+                    &mut diagnostics,
+                    instruction,
+                    "tex.lod array layer must be an integer",
+                );
+            }
         } else if query_type(instruction, dimension).is_none() {
             error(
                 &mut diagnostics,
@@ -164,6 +185,7 @@ pub(super) fn result_arity(instruction: &TextInstruction) -> Option<usize> {
             | "tex.atomic"
             | "tex.query"
             | "tex.lod"
+            | "tex.feedback"
     ) {
         return Some(1 + usize::from(supports_sparse(opcode) && has_sparse_modifier(instruction)));
     }

@@ -48,14 +48,33 @@ pub(crate) fn parse_function(
                 .iter()
                 .flat_map(|block| &block.instructions)
                 .any(|instruction| {
-                    matches!(
-                        instruction.opcode.as_str(),
-                        "const.sampler"
-                            | "gpu.builtin"
-                            | "gpu.spec_const"
-                            | "gpu.barrier"
-                            | "gpu.memfence"
-                    )
+                    crate::text_gpu_texture_atomic::handles(&instruction.opcode)
+                        || crate::text_gpu_texture_sample::handles(&instruction.opcode)
+                        || crate::text_gpu_texture_basic::handles(&instruction.opcode)
+                        || crate::text_gpu_tile_node::handles(&instruction.opcode)
+                        || crate::text_gpu_mesh::handles(&instruction.opcode)
+                        || crate::text_gpu_subgroup::handles(&instruction.opcode)
+                        || matches!(
+                            instruction.opcode.as_str(),
+                            "const.sampler"
+                                | "gpu.builtin"
+                                | "gpu.spec_const"
+                                | "frag.demote"
+                                | "frag.load_attachment"
+                                | "frag.raster_order.begin"
+                                | "frag.raster_order.end"
+                                | "frag.imageblock.addr"
+                                | "gpu.printf"
+                                | "gpu.ddx"
+                                | "gpu.ddy"
+                                | "gpu.fwidth"
+                                | "quad.broadcast"
+                                | "quad.swap"
+                                | "quad.all"
+                                | "quad.any"
+                                | "gpu.barrier"
+                                | "gpu.memfence"
+                        )
                 })
         })
     {
@@ -95,31 +114,50 @@ pub(crate) fn parse_function(
             .iter()
             .flat_map(|block| &block.instructions)
             .any(|instruction| {
-                matches!(
-                    instruction.opcode.as_str(),
-                    "call"
-                        | "tail.call"
-                        | "func.ref"
-                        | "global.addr"
-                        | "tls.addr"
-                        | "enum.tag"
-                        | "struct.extract"
-                        | "struct.destructure"
-                        | "enum.take"
-                        | "enum.project"
-                        | "field.addr"
-                        | "elem.addr"
-                        | "enum.payload.addr"
-                        | "enum.inject"
-                        | "addr.toptr"
-                        | "ptr.toaddr"
-                        | "addr.cast"
-                        | "const.aggregate"
-                        | "gpu.builtin"
-                        | "gpu.spec_const"
-                        | "gpu.barrier"
-                        | "gpu.memfence"
-                )
+                crate::text_gpu_texture_atomic::handles(&instruction.opcode)
+                    || crate::text_gpu_texture_sample::handles(&instruction.opcode)
+                    || crate::text_gpu_texture_basic::handles(&instruction.opcode)
+                    || crate::text_gpu_tile_node::handles(&instruction.opcode)
+                    || crate::text_gpu_mesh::handles(&instruction.opcode)
+                    || crate::text_gpu_subgroup::handles(&instruction.opcode)
+                    || matches!(
+                        instruction.opcode.as_str(),
+                        "call"
+                            | "tail.call"
+                            | "func.ref"
+                            | "global.addr"
+                            | "tls.addr"
+                            | "enum.tag"
+                            | "struct.extract"
+                            | "struct.destructure"
+                            | "enum.take"
+                            | "enum.project"
+                            | "field.addr"
+                            | "elem.addr"
+                            | "enum.payload.addr"
+                            | "enum.inject"
+                            | "addr.toptr"
+                            | "ptr.toaddr"
+                            | "addr.cast"
+                            | "const.aggregate"
+                            | "gpu.builtin"
+                            | "gpu.spec_const"
+                            | "frag.demote"
+                            | "frag.load_attachment"
+                            | "frag.raster_order.begin"
+                            | "frag.raster_order.end"
+                            | "frag.imageblock.addr"
+                            | "gpu.printf"
+                            | "gpu.ddx"
+                            | "gpu.ddy"
+                            | "gpu.fwidth"
+                            | "quad.broadcast"
+                            | "quad.swap"
+                            | "quad.all"
+                            | "quad.any"
+                            | "gpu.barrier"
+                            | "gpu.memfence"
+                    )
             })
     {
         crate::text_function_body_assembly::validate_return_body(

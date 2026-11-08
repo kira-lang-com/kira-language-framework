@@ -35,6 +35,10 @@ pub(crate) fn collect(
                         )?;
                         strings.push((instruction.span.start, builtin.name));
                     }
+                    "gpu.printf" => {
+                        let parsed = crate::text_gpu_printf::parse(instruction, function.item)?;
+                        strings.push((instruction.span.start, parsed.format));
+                    }
                     "target.has" => {
                         let parsed = crate::text_simple_instructions::parse(
                             instruction,

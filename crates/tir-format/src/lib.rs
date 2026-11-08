@@ -62,13 +62,45 @@ mod text_code_type_roots;
 mod text_gpu_builtin;
 #[cfg(test)]
 mod text_gpu_builtin_conformance;
+mod text_gpu_fragment;
+#[cfg(test)]
+mod text_gpu_fragment_conformance;
+mod text_gpu_mesh;
+#[cfg(test)]
+mod text_gpu_mesh_conformance;
+mod text_gpu_printf;
+#[cfg(test)]
+mod text_gpu_printf_conformance;
+mod text_gpu_quad;
+#[cfg(test)]
+mod text_gpu_quad_conformance;
 mod text_gpu_spec_const;
 #[cfg(test)]
 mod text_gpu_spec_const_conformance;
 mod text_gpu_spec_const_intern;
+mod text_gpu_subgroup;
+#[cfg(test)]
+mod text_gpu_subgroup_conformance;
+mod text_gpu_subgroup_format;
 mod text_gpu_sync;
 #[cfg(test)]
 mod text_gpu_sync_conformance;
+mod text_gpu_texture_atomic;
+#[cfg(test)]
+mod text_gpu_texture_atomic_conformance;
+mod text_gpu_texture_basic;
+#[cfg(test)]
+mod text_gpu_texture_basic_conformance;
+mod text_gpu_texture_sample;
+#[cfg(test)]
+mod text_gpu_texture_sample_conformance;
+mod text_gpu_texture_sample_format;
+#[cfg(test)]
+mod text_gpu_texture_sparse_conformance;
+mod text_gpu_tile_node;
+#[cfg(test)]
+mod text_gpu_tile_node_conformance;
+mod text_gpu_tile_node_format;
 pub use text_gpu_builtin::type_for_name as gpu_builtin_type;
 mod text_const_bytes_disassembly;
 mod text_const_string_disassembly;

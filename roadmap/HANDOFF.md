@@ -10,7 +10,7 @@ fixed-vector SSA, branch arguments, direct stack storage, explicit ownership
 and access scopes, and additional constant forms. `tir-own` provides only
 conservative, verified subsets of the five mandatory ownership passes; it
 rejects unsupported raw ownership flows rather than treating them as canonical.
-The TIR-scoped suite most recently has **558 passing tests**, including typed
+The TIR-scoped suite most recently has **675 passing tests**, including typed
 DEBUG (17) and opaque CUSTOM (255) sections, CAPS/RIDL/METADATA encoding,
 trivial tuples and arrays, conversions, math `[approx]`, target queries,
 zero-argument portable intrinsics, expectation hints, fixed vectors, typed raw
@@ -61,6 +61,109 @@ round-trips; V15 no longer treats GPU branch labels as nominal types.
 The five-domain CODE grammar does not cover every V15 text memory class;
 unsupported classes deliberately fail closed. The entire GPU family remains
 incomplete.
+Fragment CODE opcodes 0x405–0x409 now cover `frag.demote`,
+`frag.load_attachment` with full u32 attachment indexes,
+`frag.raster_order.begin`/`end`, and `frag.imageblock.addr`, with
+`vec<4 x f32>` and `ptr<tile>` inferred result types. Binary V2 rejects
+malformed/CPU-targeted CODE, and the CLI passes an all-five-opcode,
+byte-identical round-trip. Full stage/capability conformance is not implied.
+`gpu.printf` (0x40A) now encodes a STRINGS format index and counted SSA
+arguments, preserving Kira escape sequences through canonical text. V2
+rejects non-GPU use, malformed CODE shapes and invalid STRINGS indexes.
+The CLI passes mixed GPU printf/specification/builtin/synchronization CFG
+round-trips byte-identically. Release pipeline stripping and complete GPU
+entry capability checks are not yet implemented.
+GPU derivative/quad CODE 0x420–0x426 now covers `gpu.ddx`/`gpu.ddy`
+coarse/fine modes, `gpu.fwidth`, `quad.broadcast`, `quad.swap` selectors,
+and `quad.all`/`quad.any` i1 predicates. Optional unchecked-uniformity
+modifiers and typed SSA values round-trip across CFGs. Binary V2 rejects
+forged target, selector, operand and result shapes. The existing collective
+binary type checker has been corrected for single-value CODE operands.
+A rebuilt CLI module combining all seven opcodes, specialization constants
+and printf passed V2/V15 and byte-identical TIRB reassembly.
+Subgroup CODE 0x440–0x452 now supports all 19 operations, with canonical
+ballot/vote/shuffle/broadcast/reduction/scan text and typed SSA output.
+All 15 reduction operator codes and optional 1–128 power-of-two clusters
+round-trip; binary V2 rejects forged CPU placement, result/modifier words,
+operator IDs, clusters and operand shapes. Scoped tests cover all opcodes
+and operator permutations; full uniformity and backend work remains open.
+Texture CODE `tex.query` (0x48B) now round-trips seven fields and
+per-dimension scalar/vector result types. Non-sparse `tex.read` (0x488)
+and `tex.write` (0x489) round-trip integer texel coordinates, array-layer
+indexes, multisample indexes and typed payloads. Query-only intermediate
+results intern their TYPES roots. Binary V2 rejects malformed query selectors,
+result shapes, CPU placement and offset/operand forgery, while respecting
+the normative sparse-read result count even though sparse text remains
+unsupported. The rebuilt CLI passes multi-function texture TIRB byte identity.
+Remaining texture CODE forms (including sampling, gathers, atomics, sparse
+text, and offsets) are incomplete.
+Texture sampler CODE now also covers `tex.sample` (0x480) and
+`tex.lod` (0x48C), optional signed constant offsets and typed `min_lod`
+for sample, normalized coordinate and array-layer checks, and the bit-34
+unchecked-uniformity modifier. V2 binary mutation tests reject invalid
+modifiers, results, offsets and CPU targets. The `tex.lod` V15 operand
+check now reads the actual sampler and coordinate positions. Sparse text,
+other sampling selectors and texture atomic CODE remain open.
+`tex.sample_level` (0x481) and `tex.sample_bias` (0x483) now use the
+same typed sampling CODE family, with mandatory `f32` lod/bias fields,
+optional signed offsets and min_lod, and exact V2 modifier/result checks.
+The rebuilt CLI verifies and round-trips explicit LOD/bias with CFG and
+array layers byte-identically. Sparse and advanced gradient/compare/gather
+forms remain open.
+`tex.sample_grad` (0x482) now supports typed `f32` scalar/vector dx/dy
+matching normalized coordinates, signed optional offsets and min_lod,
+with independent V2 result/modifier/arity rejection. All 644 scoped tests
+pass and a rebuilt CLI verifies multi-function 2D/cube gradient CODE
+and cross-block SSA byte-identically.
+`tex.sample_compare` (0x484) and `tex.sample_compare_level` (0x485)
+now encode the f32 component/reference and mandatory explicit comparison
+LOD. Optional signed offsets/min_lod and allowed unchecked-uniformity bits
+round-trip; V2 and malformed-text tests reject invalid component, reference,
+result and modifier forms. A rebuilt CLI verifies mixed comparison/CFG/
+cube-array functions with byte-identical TIRB reassembly.
+`tex.gather` (0x486) and `tex.gather_compare` (0x487) now preserve
+channel selectors (0–3), f32 comparison references, scalar/vector texture
+channel result typing, offsets, min_lod and unchecked uniformity through
+binary CODE. V2 rejects forged selector/modifier/result/operand fields;
+the rebuilt CLI verifies gather/array/CFG modules and byte-identical TIRB.
+`tex.feedback` (0x48D) now round-trips typed sampled textures,
+array layers, signed offsets and min_lod. Binary V2 rejects malformed
+feedback CODE, while an entry-capability regression checks the mandatory
+sampler_feedback bit and compute_derivatives for compute entries. The
+rebuilt CLI verifies a feedback/CFG TIRB byte-identically.
+`tex.atomic` (0x48A) now round-trips all 15 scalar texture operation IDs,
+with readwrite access, non-multisample typed texel coordinates and i32/f32
+payload checks. Binary V2 rejects forged CPU targets, result/modifier
+words, operation IDs and nonzero offsets. The rebuilt CLI verifies
+mixed integer/floating array atomics and CFG byte-identically.
+All 14 named texture opcodes now have non-sparse text CODE coverage;
+sparse residency and advanced entry/backends remain open.
+Sparse `tex.read` (0x488) now preserves bit 35 plus a second i1
+residency result through text and binary, including array/MS inputs
+and CFG branch forwarding. Binary V2 rejects malformed result/modifier
+words; capability checks require `sparse_residency`. Rebuilt CLI proves
+byte-identical round-trip. Sparse sampling variants remain open.
+Sparse sampling/gather/feedback CODE (0x480–0x487, 0x48D) now emits
+modifier bit 35 and two typed SSA results including i1 residency, with
+canonical option ordering, V2 result/modifier/selector tests and typed
+array/CFG forwarding. This completes text/binary coverage for all ten
+normative sparse-capable texture opcodes. A rebuilt CLI produces
+byte-identical TIRB. GPU entry/device/backend conformance remains open.
+Object and mesh CODE 0x4C0–0x4C4 now covers dispatch, count setup,
+vertex/primitive writes and topology-compatible mesh index writes.
+Optional unchecked uniformity uses bit 34 only on dispatch/counts.
+`mesh.write.indices` accepts i32 and vec<2/3 x i32>, not vec4.
+The rebuilt CLI passes mixed object/mesh modules and typed cross-block
+vec3 indexes with byte-identical assembly/disassembly; V2 binary mutation
+tests reject target, modifier, result and arity forgeries.
+Tile/work-graph CODE 0x5A0 and 0x5C0–0x5C5 now covers all seven opcodes,
+including typed `ptr<tile>` / `ptr<node_record>` results, allocation mode
+selectors and V2 forged-CODE rejection. V15 checks `node.output.addr`'s
+allocation pointer first and integer index second. Multi-function CODE
+block-parameter TYPES now use their exact root positions; this fixes V1
+edge-type mismatches when earlier functions contributed CODE-specific roots,
+without altering canonical type ordering. A permanent two-function
+regression verifies this failure mode.
 `vec.mask.active` can be encoded as raw CODE but remains V8-rejected: TIR
 sections 16.3/22.6 conflict with the address-only `svec` rule in 7.10/16.2.
 T1 V2/V14/V20/V21 checks cover these subsets. PROFILE (18) lacks a normative binary

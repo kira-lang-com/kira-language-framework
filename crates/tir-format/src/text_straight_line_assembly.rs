@@ -153,27 +153,15 @@ pub(crate) fn encode_operations<'a>(
     mut bytes: &mut Vec<u8>,
 ) -> Result<(), TextParseError> {
     for instruction in instructions {
-        if crate::text_gpu_sync::handles(&instruction.opcode) {
-            crate::text_gpu_sync::encode(instruction, source, item, &mut bytes)?;
-        } else if instruction.opcode == "gpu.builtin" {
-            crate::text_gpu_builtin::encode(
-                instruction,
-                source,
-                item,
-                types,
-                string_constants,
-                &mut bytes,
-            )?;
-        } else if matches!(
-            instruction.opcode.as_str(),
-            "const.vec" | "const.aggregate" | "const.sampler" | "gpu.spec_const"
-        ) {
+        if crate::text_straight_line_constants::handles(&instruction.opcode) {
             crate::text_straight_line_constants::encode(
                 instruction,
                 source,
                 item,
                 types,
                 float_constants,
+                string_constants,
+                values,
                 callees,
                 &mut bytes,
             )?;

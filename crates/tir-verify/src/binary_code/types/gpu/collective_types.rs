@@ -46,9 +46,11 @@ fn verify_instruction(
         .operands
         .iter()
         .find_map(|operand| match operand {
-            BinaryOperand::Values(values) => Some(values.as_slice()),
+            BinaryOperand::Value(value) => Some(vec![*value]),
+            BinaryOperand::Values(values) => Some(values.clone()),
             _ => None,
-        });
+        })
+        .or_else(|| (expected == 0).then(Vec::new));
     let Some(values) = values.filter(|values| values.len() == expected) else {
         report(
             diagnostics,

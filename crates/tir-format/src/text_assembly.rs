@@ -49,31 +49,50 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             .iter()
             .flat_map(|block| &block.instructions)
             .any(|instruction| {
-                matches!(
-                    instruction.opcode.as_str(),
-                    "call"
-                        | "tail.call"
-                        | "func.ref"
-                        | "global.addr"
-                        | "tls.addr"
-                        | "enum.tag"
-                        | "struct.extract"
-                        | "struct.destructure"
-                        | "enum.take"
-                        | "enum.project"
-                        | "field.addr"
-                        | "elem.addr"
-                        | "enum.payload.addr"
-                        | "enum.inject"
-                        | "addr.toptr"
-                        | "ptr.toaddr"
-                        | "addr.cast"
-                        | "const.aggregate"
-                        | "gpu.builtin"
-                        | "gpu.spec_const"
-                        | "gpu.barrier"
-                        | "gpu.memfence"
-                )
+                crate::text_gpu_texture_atomic::handles(&instruction.opcode)
+                    || crate::text_gpu_texture_sample::handles(&instruction.opcode)
+                    || crate::text_gpu_texture_basic::handles(&instruction.opcode)
+                    || crate::text_gpu_tile_node::handles(&instruction.opcode)
+                    || crate::text_gpu_mesh::handles(&instruction.opcode)
+                    || crate::text_gpu_subgroup::handles(&instruction.opcode)
+                    || matches!(
+                        instruction.opcode.as_str(),
+                        "call"
+                            | "tail.call"
+                            | "func.ref"
+                            | "global.addr"
+                            | "tls.addr"
+                            | "enum.tag"
+                            | "struct.extract"
+                            | "struct.destructure"
+                            | "enum.take"
+                            | "enum.project"
+                            | "field.addr"
+                            | "elem.addr"
+                            | "enum.payload.addr"
+                            | "enum.inject"
+                            | "addr.toptr"
+                            | "ptr.toaddr"
+                            | "addr.cast"
+                            | "const.aggregate"
+                            | "gpu.builtin"
+                            | "gpu.spec_const"
+                            | "frag.demote"
+                            | "frag.load_attachment"
+                            | "frag.raster_order.begin"
+                            | "frag.raster_order.end"
+                            | "frag.imageblock.addr"
+                            | "gpu.printf"
+                            | "gpu.ddx"
+                            | "gpu.ddy"
+                            | "gpu.fwidth"
+                            | "quad.broadcast"
+                            | "quad.swap"
+                            | "quad.all"
+                            | "quad.any"
+                            | "gpu.barrier"
+                            | "gpu.memfence"
+                    )
             })
         {
             let tir_types::Type::Function(signature) = &function.ty else {
@@ -183,7 +202,12 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             .iter()
             .map(|function| (function.ty.clone(), function.item)),
     );
-    crate::text_code_type_roots::collect(module, &parsed_functions, &callees, &mut trailing_roots)?;
+    let block_parameter_positions = crate::text_code_type_roots::collect(
+        module,
+        &parsed_functions,
+        &callees,
+        &mut trailing_roots,
+    )?;
     let (type_table, import_indices, constant_type_indices, global_indices) =
         crate::text_type_assembly::parse_text_type_table_with_roots(
             module,
@@ -224,7 +248,7 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
         imports.push(parsed.record);
     }
     let mut constant_type_indices = constant_type_indices.into_iter();
-    let mut global_indices = global_indices.into_iter();
+    let mut global_index_cursor = global_indices.iter().copied();
     let mut constants = BinaryConstantTable::default();
     let mut globals = Vec::with_capacity(parsed_globals.len());
     for mut parsed in parsed_globals {
@@ -240,7 +264,7 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
             constants.records.push(BinaryConstant { ty, value });
             parsed.record.initializer = Some(index);
         }
-        parsed.record.ty = global_indices
+        parsed.record.ty = global_index_cursor
             .next()
             .ok_or_else(|| error(parsed.item.span, "global type index was not lowered"))?;
         globals.push(parsed.record);
@@ -301,21 +325,21 @@ pub fn assemble_text_module(module: &TextModule) -> Result<Vec<u8>, TextParseErr
     )?;
     let mut signatures = Vec::with_capacity(parsed_functions.len());
     for parsed in &mut parsed_functions {
-        parsed.record.function_type = global_indices
+        parsed.record.function_type = global_index_cursor
             .next()
             .ok_or_else(|| error(parsed.item.span, "function type index was not lowered"))?;
         signatures.push(parsed.record.clone());
     }
 
     let mut block_parameter_indices = Vec::with_capacity(parsed_functions.len());
-    for function in &parsed_functions {
+    for (function, positions) in parsed_functions.iter().zip(&block_parameter_positions) {
         let mut blocks = Vec::new();
         if let Some(body) = &function.body {
             for (block_index, block) in body.blocks.iter().enumerate() {
                 let mut parameters = Vec::with_capacity(block.parameters.len());
                 if block_index != 0 {
-                    for _ in &block.parameters {
-                        parameters.push(global_indices.next().ok_or_else(|| {
+                    for root_position in &positions[block_index] {
+                        parameters.push(*global_indices.get(*root_position).ok_or_else(|| {
                             error(
                                 function.item.span,
                                 "block parameter type index was not lowered",

@@ -3,8 +3,17 @@ mod borrow_scopes;
 mod borrowed_uses;
 mod coroutines;
 pub(crate) mod gpu_builtin;
+pub(crate) mod gpu_fragment;
+mod gpu_mesh;
+pub(crate) mod gpu_printf;
+mod gpu_quad;
 pub(crate) mod gpu_spec_const;
+mod gpu_subgroup;
 pub(crate) mod gpu_sync;
+mod gpu_texture_atomic;
+mod gpu_texture_basic;
+mod gpu_texture_sample;
+mod gpu_tile_node;
 mod heap;
 mod loadable;
 mod owned_values;
@@ -77,6 +86,52 @@ pub(super) fn verify(
             continue;
         }
         let value_types = types::infer_value_types(body, signatures, types);
+        diagnostics.extend(gpu_texture_sample::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_texture_atomic::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_texture_basic::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_tile_node::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_mesh::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_subgroup::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_quad::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_printf::verify(
+            body,
+            signature.map(|signature| signature.target),
+            strings,
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
+        diagnostics.extend(gpu_fragment::verify(
+            body,
+            signature.map(|signature| signature.target),
+            signature.map_or("<unknown>", |signature| signature.name.as_str()),
+        ));
         diagnostics.extend(gpu_spec_const::verify(
             body,
             signature.map(|signature| signature.target),

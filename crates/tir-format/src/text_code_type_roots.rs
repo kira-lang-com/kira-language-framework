@@ -12,17 +12,73 @@ pub(crate) fn collect(
     functions: &[ParsedFunction],
     callees: &crate::text_direct_call::Callees,
     trailing_roots: &mut Vec<(Type, TextItem)>,
-) -> Result<(), TextParseError> {
+) -> Result<Vec<Vec<Vec<usize>>>, TextParseError> {
+    // Record exact positions in the type-root stream. CODE roots are interned
+    // per function, so block parameters cannot be read as one contiguous run
+    // after all function-signature roots in multi-function modules.
+    let mut block_parameter_positions = Vec::with_capacity(functions.len());
     for function in functions {
+        let mut block_positions = Vec::new();
         if let Some(body) = &function.body {
-            for block in body.blocks.iter().skip(1) {
-                for parameter in &block.parameters {
-                    trailing_roots.push((parameter.ty.clone(), function.item));
+            for (block_index, block) in body.blocks.iter().enumerate() {
+                let mut parameter_positions = Vec::new();
+                if block_index != 0 {
+                    for parameter in &block.parameters {
+                        parameter_positions.push(trailing_roots.len());
+                        trailing_roots.push((parameter.ty.clone(), function.item));
+                    }
                 }
+                block_positions.push(parameter_positions);
             }
             // Preserve first-use order after SIGNATURES roots.
             for instruction in body.blocks.iter().flat_map(|block| &block.instructions) {
                 match instruction.opcode.as_str() {
+                    name if crate::text_gpu_texture_sample::handles(name) => {
+                        if let Some(ty) = crate::text_gpu_texture_sample::required_result_root(
+                            instruction,
+                            body,
+                            module.item_text(function.item),
+                            function.item,
+                        )? {
+                            trailing_roots.push((ty, function.item));
+                        }
+                        if instruction.results.len() == 2 {
+                            trailing_roots.push((Type::Integer(1), function.item));
+                        }
+                    }
+                    name if crate::text_gpu_texture_basic::handles(name) => {
+                        if let Some(ty) = crate::text_gpu_texture_basic::required_result_root(
+                            instruction,
+                            body,
+                            module.item_text(function.item),
+                            function.item,
+                        )? {
+                            trailing_roots.push((ty, function.item));
+                        }
+                        if instruction.opcode == "tex.read" && instruction.results.len() == 2 {
+                            trailing_roots.push((Type::Integer(1), function.item));
+                        }
+                    }
+                    name if crate::text_gpu_tile_node::handles(name) => {
+                        if let Some(opcode) = crate::text_gpu_tile_node::opcode(name) {
+                            if let Some(ty) = crate::text_gpu_tile_node::result_type(opcode) {
+                                trailing_roots.push((ty, function.item));
+                            }
+                        }
+                    }
+                    name if crate::text_gpu_subgroup::handles(name) => {
+                        if let Some(ty) = crate::text_gpu_subgroup::result_type(name) {
+                            trailing_roots.push((ty, function.item));
+                        }
+                    }
+                    "quad.all" | "quad.any" => {
+                        trailing_roots.push((Type::Integer(1), function.item));
+                    }
+                    name if crate::text_gpu_fragment::handles(name) => {
+                        if let Some(ty) = crate::text_gpu_fragment::required_result_type(name) {
+                            trailing_roots.push((ty, function.item));
+                        }
+                    }
                     "gpu.builtin" => {
                         let builtin = crate::text_gpu_builtin::parse(
                             instruction,
@@ -347,6 +403,7 @@ pub(crate) fn collect(
                 }
             }
         }
+        block_parameter_positions.push(block_positions);
     }
-    Ok(())
+    Ok(block_parameter_positions)
 }

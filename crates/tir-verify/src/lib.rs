@@ -35,6 +35,10 @@ mod rules_encoding_conformance_aggregate_constants;
 #[cfg(test)]
 mod rules_encoding_conformance_gpu_builtin;
 #[cfg(test)]
+mod rules_encoding_conformance_gpu_fragment;
+#[cfg(test)]
+mod rules_encoding_conformance_gpu_printf;
+#[cfg(test)]
 mod rules_encoding_conformance_gpu_spec_const;
 #[cfg(test)]
 mod rules_encoding_conformance_gpu_sync;
@@ -61,8 +65,6 @@ mod variant_text;
 mod variants;
 mod vector_text;
 
-use std::collections::{HashMap, HashSet};
-
 pub use dominators::DominatorTree;
 pub use model::{
     Block, Edge, Function, Instruction, Terminator, TerminatorKind, ValueDefinition, ValueUse,
@@ -70,6 +72,7 @@ pub use model::{
 pub use ssa::{
     VerifyOptions, terminator_is_s7_forbidden, verify_function, verify_text_value_dominance,
 };
+use std::collections::{HashMap, HashSet};
 pub use text_cfg::text_successors;
 use tir_diag::{Area, Code, Diagnostic, Dialect, Span};
 use tir_format::{
