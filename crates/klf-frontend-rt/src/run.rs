@@ -7,8 +7,9 @@
 //! and its exit status is the driver's.
 
 use crate::{RUN_PROGRAM_SELECTOR, klffe_phase};
-use klf_defsvc::{RunProgramCall, ServiceSink};
+use klf_defsvc::{FrontendMetadata, RunProgramCall, ServiceSink};
 use klf_native_rt::services;
+use klf_services::EntryConvention;
 use std::path::{Path, PathBuf};
 
 /// Where a run's executable is written: `-o` when given, else a place of its
@@ -80,6 +81,80 @@ pub(crate) fn run(
         .status()
         .map_err(|error| format!("cannot run {}: {error}", program.display()))?;
     Ok(status.code().unwrap_or(1))
+}
+
+pub(crate) fn run_bytecode(
+    metadata: &FrontendMetadata,
+    triple: &str,
+    image: &Path,
+    program_arguments: &[String],
+    driver_arguments: &[String],
+) -> Result<i32, String> {
+    let runner = bytecode_runner(triple)?;
+    let convention = match metadata.entry {
+        EntryConvention::Outcome => "outcome",
+        EntryConvention::Process => "process",
+        EntryConvention::ProcessExit => "process-exit",
+    };
+    let command = std::iter::once(runner.to_string_lossy().into_owned())
+        .chain(std::iter::once(format!(
+            "--klf-entry-convention={convention}"
+        )))
+        .chain(std::iter::once(image.to_string_lossy().into_owned()))
+        .chain(program_arguments.iter().cloned())
+        .collect::<Vec<_>>();
+    if metadata.declares(klf_defsvc::Hook::RunProgram) {
+        return run_hook(&command, driver_arguments);
+    }
+    let status = std::process::Command::new(&runner)
+        .arg(image)
+        .args(program_arguments)
+        .env("KLF_VM_ENTRY_CONVENTION", convention)
+        .status()
+        .map_err(|error| format!("cannot run bytecode with {}: {error}", runner.display()))?;
+    Ok(status.code().unwrap_or(1))
+}
+
+fn bytecode_runner(target: &str) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("KLF_VM_RUNNER") {
+        let path = PathBuf::from(path);
+        return path
+            .is_file()
+            .then_some(path)
+            .ok_or_else(|| "KLF_VM_RUNNER does not name a runnable file".into());
+    }
+    let file = if target.contains("-windows-") {
+        "klfvm-run.exe"
+    } else {
+        "klfvm-run"
+    };
+    let mut candidates = Vec::new();
+    if let Some(root) = crate::output::installed_sysroot() {
+        candidates.push(root.join("bin").join(file));
+        candidates.push(root.join("platforms").join(target).join(file));
+    }
+    if let Some(home) = std::env::var_os("KLF_HOME") {
+        candidates.push(
+            PathBuf::from(home)
+                .join("platforms")
+                .join(target)
+                .join(file),
+        );
+    } else {
+        candidates.extend(
+            crate::runtime::installed_distributions()
+                .into_iter()
+                .map(|home| home.join("platforms").join(target).join(file)),
+        );
+    }
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            format!(
+                "no Kira runtime backend runner for `{target}`; install the KLF runtime toolchain"
+            )
+        })
 }
 
 /// Calls the definition's `runProgram` hook through the trampoline's run

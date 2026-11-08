@@ -1,0 +1,19 @@
+[package]
+name = "klf-helper-apps"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+klf-ridl = { path = "../klf-ridl" }
+klf-ridl-wire = { path = "../klf-ridl-wire" }
+klf-vm = { path = "../klf-vm" }
+klf-kir = { path = "../klf-kir" }
+klf-core = { path = "../klf-core" }
+klf-host-files = { path = "../klf-host-files" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

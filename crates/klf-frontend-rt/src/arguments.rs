@@ -50,11 +50,18 @@ mod tests {
 
     fn parse(arguments: &[&str]) -> Result<Invocation, String> {
         let metadata = metadata();
+        parse_with_metadata(arguments, &metadata)
+    }
+
+    fn parse_with_metadata(
+        arguments: &[&str],
+        metadata: &FrontendMetadata,
+    ) -> Result<Invocation, String> {
         let arguments: Vec<String> = arguments.iter().map(|a| (*a).to_owned()).collect();
-        let root = command_tree(&metadata);
+        let root = command_tree(metadata);
         let FileModeSplit { rest, globs } = split_file_modes(&arguments, &metadata.file_modes)?;
         match klf_args::parse(&root, &rest) {
-            Ok(Outcome::Run(matches)) => Ok(invocation(&root, &matches, &metadata, globs)),
+            Ok(Outcome::Run(matches)) => Ok(invocation(&root, &matches, metadata, globs)),
             Ok(other) => Err(format!("{other:?}")),
             Err(error) => Err(error.render(&root)),
         }
@@ -123,5 +130,35 @@ mod tests {
         assert_eq!((run.emit.as_str(), run.program_arguments.len()), ("run", 2));
         assert_eq!(parse(&["check", "a.cpp"]).unwrap().emit, "check");
         assert!(klf_defsvc::driver_cli::validate(&metadata()).is_ok());
+    }
+
+    #[test]
+    fn kira_accepts_both_backend_options_for_build_and_run() {
+        let mut kira = metadata();
+        kira.name = "kira".into();
+        kira.driver = "kira".into();
+        kira.flags.push(DriverFlag {
+            name: "backend".into(),
+            default_value: DriverFlagValue::String("native".into()),
+        });
+        for command in ["build", "run"] {
+            let mut runtime =
+                parse_with_metadata(&[command, "demo.kira", "--backend", "runtime"], &kira)
+                    .unwrap();
+            assert_eq!(
+                runtime.flag_overrides.get("backend"),
+                Some(&DriverFlagValue::String("runtime".into())),
+            );
+            assert_eq!(
+                crate::backend::Backend::select(&kira, &mut runtime),
+                Ok(crate::backend::Backend::Runtime)
+            );
+            let mut native =
+                parse_with_metadata(&[command, "demo.kira", "--backend=native"], &kira).unwrap();
+            assert_eq!(
+                crate::backend::Backend::select(&kira, &mut native),
+                Ok(crate::backend::Backend::Native)
+            );
+        }
     }
 }

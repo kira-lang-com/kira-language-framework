@@ -3,6 +3,7 @@
 use super::tables::parse_linkage;
 use super::{
     ParseError, error, matching_close, split_once_required, split_top_level, symbol, take_quoted,
+    unquote,
 };
 use crate::{
     Conformance, ExportRecord, GlobalDeclaration, GlobalInit, ImportRecord, ModuleAttribute,
@@ -21,11 +22,38 @@ pub(super) fn parse_attribute(offset: usize, line: &str) -> Result<ModuleAttribu
             value: None,
         });
     };
-    let (value, _) = take_quoted(value.trim(), offset)?;
+    let value = unquote(value.trim(), offset)?;
     Ok(ModuleAttribute {
         name: name.trim().to_owned(),
         value: Some(value),
     })
+}
+
+#[cfg(test)]
+mod attribute_tests {
+    use super::*;
+
+    #[test]
+    fn escaped_ridl_imports_roundtrip_through_textual_kir() {
+        let input = r#"attribute ridl.import = "Harmony\tfunction add(a: I64) -> I64\n""#;
+        let parsed = parse_attribute(0, input).unwrap();
+        assert_eq!(parsed.name, "ridl.import");
+        assert_eq!(
+            parsed.value.as_deref(),
+            Some("Harmony\tfunction add(a: I64) -> I64\n")
+        );
+        assert_eq!(
+            parse_attribute(
+                0,
+                r#"attribute ridl.import.entry = "Harmony\tadd\tsymbol\t""#
+            )
+            .unwrap()
+            .value
+            .as_deref(),
+            Some("Harmony\tadd\tsymbol\t")
+        );
+        assert!(parse_attribute(0, r#"attribute ridl.import = "\q""#).is_err());
+    }
 }
 
 pub(super) fn parse_global(offset: usize, line: &str) -> Result<GlobalDeclaration, ParseError> {

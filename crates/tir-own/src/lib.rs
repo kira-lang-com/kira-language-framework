@@ -7,11 +7,39 @@
 //! Never emit an apparently canonical module after skipping a required pass.
 #![forbid(unsafe_code)]
 
+mod borrow_cleanup;
+#[cfg(test)]
+mod borrow_cleanup_tests;
+#[cfg(test)]
+mod constant_conformance_tests;
+#[cfg(test)]
+mod float_canonicalization_tests;
+#[cfg(test)]
+mod integer_canonicalization_tests;
+mod managed_heap;
+#[cfg(test)]
+mod managed_heap_tests;
+#[cfg(test)]
+mod moved_unique_destroy_tests;
+mod pure_values;
+mod scalar_cfg;
+mod scalar_memory;
+mod stack_cleanup;
+#[cfg(test)]
+mod stack_cleanup_tests;
+#[cfg(test)]
+mod unique_cfg_tests;
+mod unique_chain;
+#[cfg(test)]
+mod unique_chain_tests;
 mod unique_linear;
+#[cfg(test)]
+mod unique_transfer_tests;
 
 use std::error::Error;
 use std::fmt;
 
+pub(crate) use pure_values::{is_pure_value_instruction, is_pure_value_type};
 use tir_diag::Severity;
 use tir_format::{
     BinaryModule, TextItemKind, assemble_text_module, disassemble_text_module, parse_function_body,
@@ -38,7 +66,12 @@ fn error(message: impl Into<String>) -> CanonicalizeError {
 /// ownership pattern is a hard error, never a pass-through or silent rewrite.
 /// Full T1 canonicalization remains a separate milestone.
 pub fn canonicalize_text(source: &str) -> Result<String, CanonicalizeError> {
-    let source = insert_unused_unique_destroys(source)?;
+    let source = borrow_cleanup::close_local_borrows(source)?;
+    let source = managed_heap::insert_unused_destroys(&source)?;
+    let source = insert_unused_unique_destroys(&source)?;
+    let source = stack_cleanup::insert_missing_deallocs(&source)?;
+    let source = scalar_memory::zero_initialize_simple_slots(&source)?;
+    let source = scalar_cfg::zero_initialize(&source)?;
     let module = parse_text_module(&source).map_err(|e| error(format!("TIR text: {e}")))?;
     for item in &module.items {
         if item.kind != TextItemKind::Function {
@@ -50,9 +83,9 @@ pub fn canonicalize_text(source: &str) -> Result<String, CanonicalizeError> {
         let signature = parse_function_signature(function)
             .map_err(|e| error(format!("function signature: {e}")))?
             .ok_or_else(|| error("function has no signature"))?;
-        if signature.failure.is_some() || !is_pure_value_type(&signature.result) {
+        if signature.failure.is_some() {
             return Err(error(
-                "TIR ownership canonicalization requires a supported result and no failure type",
+                "TIR ownership canonicalization does not yet lower function failure types",
             ));
         }
         let unique_parameters = signature
@@ -60,21 +93,90 @@ pub fn canonicalize_text(source: &str) -> Result<String, CanonicalizeError> {
             .iter()
             .filter(|p| matches!(p.ty, Type::Unique(_)))
             .count();
-        if signature.parameters.iter().any(|p| {
-            !is_pure_value_type(&p.ty)
-                && !(matches!(p.ty, Type::Unique(_)) && p.convention == Some(Convention::Owned))
-        }) || (unique_parameters != 0 && signature.result != Type::Unit)
-        {
-            return Err(error(
-                "TIR ownership canonicalization requires scalar values or directly destroyed owned unique arguments",
-            ));
-        }
         let body = parse_function_body(function)
             .map_err(|e| error(format!("function body: {e}")))?
             .ok_or_else(|| {
                 error("TIR ownership canonicalization requires a defined function body")
             })?;
-        if unique_parameters != 0 && body.blocks.len() == 1 {
+        let returns_owned_unique = unique_parameters != 0
+            && matches!(signature.result, Type::Unique(_))
+            && signature.parameters.iter().any(|parameter| {
+                parameter.ty == signature.result && parameter.convention == Some(Convention::Owned)
+            });
+        if !is_pure_value_type(&signature.result)
+            && managed_heap::returned_owner_type(&body, function).as_ref()
+                != Some(&signature.result)
+            && !returns_owned_unique
+        {
+            return Err(error(
+                "TIR ownership canonicalization requires a pure result or a directly returned managed heap owner",
+            ));
+        }
+        let uses_weak = body.blocks.iter().any(|block| {
+            block
+                .instructions
+                .iter()
+                .any(|instruction| instruction.opcode == "weak.new")
+        });
+        if signature.parameters.iter().any(|parameter| {
+            !is_pure_value_type(&parameter.ty)
+                && !(matches!(parameter.ty, Type::Unique(_))
+                    && parameter.convention == Some(Convention::Owned))
+                && !(uses_weak
+                    && matches!(parameter.ty, Type::Reference(_))
+                    && parameter.convention == Some(Convention::Borrow))
+        }) || (unique_parameters != 0 && signature.result != Type::Unit && !returns_owned_unique)
+        {
+            return Err(error(
+                "TIR ownership canonicalization requires scalar, directly destroyed owned unique, or borrowed strong-reference arguments for weak.new",
+            ));
+        }
+        let uses_scalar_memory = body.blocks.iter().any(|block| {
+            block
+                .instructions
+                .iter()
+                .any(|instruction| scalar_memory::handles(&instruction.opcode))
+        });
+        let uses_managed_heap = body.blocks.iter().any(|block| {
+            block
+                .instructions
+                .iter()
+                .any(|instruction| managed_heap::handles(&instruction.opcode))
+        });
+        if uses_managed_heap {
+            if unique_parameters != 0 || uses_scalar_memory {
+                return Err(error(
+                    "managed heap canonicalization cannot mix with unique parameter or stack lowering",
+                ));
+            }
+            managed_heap::validate_closed(&body)?;
+        }
+        if uses_scalar_memory {
+            if unique_parameters != 0 {
+                return Err(error(
+                    "scalar memory canonicalization cannot mix with nontrivial owned parameters",
+                ));
+            }
+            if body.blocks.len() == 1 {
+                scalar_memory::validate(&body)?;
+            } else {
+                scalar_cfg::validate(&body)?;
+            }
+        }
+        let has_forwarded_unique = unique_parameters != 0
+            && body.blocks.iter().skip(1).any(|block| {
+                block
+                    .parameters
+                    .iter()
+                    .any(|p| matches!(p.ty, Type::Unique(_)))
+            });
+        if has_forwarded_unique {
+            if !unique_chain::remaining_at_exit(&body, function)?.is_empty() {
+                return Err(error(
+                    "forwarded unique ownership is not consumed at the final return",
+                ));
+            }
+        } else if unique_parameters != 0 && body.blocks.len() == 1 {
             let entry = &body.blocks[0];
             let required = entry
                 .parameters
@@ -110,29 +212,9 @@ pub fn canonicalize_text(source: &str) -> Result<String, CanonicalizeError> {
                 match terminator.opcode.as_str() {
                     "return" => {
                         exits += 1;
-                        if terminator.tokens.len() != 1 {
-                            return Err(error("owned unique function must return unit"));
-                        }
-                        let mut consumed = Vec::new();
-                        for instruction in operations {
-                            if instruction.opcode != "destroy" {
-                                return Err(error(
-                                    "owned unique canonicalization cannot safely resolve arbitrary uses",
-                                ));
-                            }
-                            if let [_, _, token] = instruction.tokens.as_slice()
-                                && let tir_format::text::TokenKind::Atom(value) = &token.kind
-                            {
-                                consumed.push(value.as_str());
-                            }
-                        }
-                        if consumed.len() != required.len()
-                            || required.iter().any(|name| {
-                                consumed.iter().filter(|value| *value == name).count() != 1
-                            })
-                        {
+                        if !unique_linear::remaining_owned_values(block, &required)?.is_empty() {
                             return Err(error(
-                                "each return path must destroy every owned unique argument exactly once",
+                                "every owned unique value must be consumed on each return path",
                             ));
                         }
                     }
@@ -154,12 +236,16 @@ pub fn canonicalize_text(source: &str) -> Result<String, CanonicalizeError> {
             if block
                 .parameters
                 .iter()
-                .any(|p| !is_pure_value_type(&p.ty) && block_index != 0)
+                .any(|p| !is_pure_value_type(&p.ty) && block_index != 0 && !has_forwarded_unique)
                 || block.parameters.iter().any(|p| {
                     !is_pure_value_type(&p.ty)
                         && !(unique_parameters != 0
                             && matches!(p.ty, Type::Unique(_))
                             && p.convention == Some(Convention::Owned))
+                        && !(uses_weak
+                            && block_index == 0
+                            && matches!(p.ty, Type::Reference(_))
+                            && p.convention == Some(Convention::Borrow))
                 })
             {
                 return Err(error(
@@ -167,7 +253,10 @@ pub fn canonicalize_text(source: &str) -> Result<String, CanonicalizeError> {
                 ));
             }
             for instruction in &block.instructions {
-                if !is_pure_value_instruction(&instruction.opcode) {
+                if !is_pure_value_instruction(&instruction.opcode)
+                    && !(uses_scalar_memory && scalar_memory::handles(&instruction.opcode))
+                    && !(uses_managed_heap && managed_heap::handles(&instruction.opcode))
+                {
                     return Err(error(format!(
                         "TIR ownership canonicalization has no safe five-pass lowering for `{}`",
                         instruction.opcode,
@@ -224,7 +313,8 @@ fn insert_unused_unique_destroys(source: &str) -> Result<String, CanonicalizeErr
         let signature = parse_function_signature(function)
             .map_err(|e| error(format!("function signature: {e}")))?
             .ok_or_else(|| error("function has no signature"))?;
-        if signature.result != Type::Unit || signature.failure.is_some() {
+        if !matches!(signature.result, Type::Unit | Type::Unique(_)) || signature.failure.is_some()
+        {
             continue;
         }
         let body =
@@ -274,22 +364,69 @@ fn insert_unused_unique_destroys(source: &str) -> Result<String, CanonicalizeErr
             }
             continue;
         }
-        // In multi-block control flow, only operate on blocks with a branch
-        // or a return, and add destroys immediately before each return.
-        if body.blocks.iter().any(|block| {
-            block.instructions.len() != 1
-                || !matches!(
-                    block.instructions[0].opcode.as_str(),
-                    "return" | "br" | "cond.br"
-                )
-                || (block.instructions[0].opcode == "return"
-                    && block.instructions[0].tokens.len() != 1)
+        if body.blocks.iter().skip(1).any(|block| {
+            block
+                .parameters
+                .iter()
+                .any(|parameter| matches!(parameter.ty, Type::Unique(_)))
         }) {
+            let Ok(remaining) = unique_chain::remaining_at_exit(&body, function) else {
+                continue;
+            };
+            if !remaining.is_empty() {
+                let terminator = body
+                    .blocks
+                    .last()
+                    .and_then(|block| block.instructions.last())
+                    .ok_or_else(|| error("forwarded ownership has no return"))?;
+                let absolute = item.span.start.saturating_add(terminator.span.start);
+                let before = source
+                    .get(..absolute)
+                    .ok_or_else(|| error("forwarded ownership return span is invalid"))?;
+                let line_start = before.rfind('\n').map_or(0, |index| index + 1);
+                let indentation = &source[line_start..absolute];
+                if !indentation.chars().all(char::is_whitespace) {
+                    return Err(error("forwarded ownership return indentation is invalid"));
+                }
+                let insertion = remaining
+                    .iter()
+                    .map(|value| format!("{indentation}destroy %{value}\n"))
+                    .collect::<String>();
+                edits.push((line_start, insertion));
+            }
+            continue;
+        }
+        // Branch-only forwarding blocks preserve the entry owned values;
+        // each return block may then perform linear moves/borrows/destroys.
+        // This forbids ownership changes before a merge or loop back-edge.
+        let required = unique.iter().map(|p| p.name.as_str()).collect::<Vec<_>>();
+        if body
+            .blocks
+            .iter()
+            .any(|block| match block.instructions.split_last() {
+                Some((terminator, _operations)) if terminator.opcode == "return" => {
+                    unique_linear::remaining_owned_values(block, &required).is_err()
+                }
+                Some((terminator, operations))
+                    if matches!(terminator.opcode.as_str(), "br" | "cond.br") =>
+                {
+                    !operations.is_empty()
+                }
+                _ => true,
+            })
+        {
             continue;
         }
         for block in &body.blocks {
-            let terminator = &block.instructions[0];
+            let terminator = block
+                .instructions
+                .last()
+                .expect("validated control-flow block");
             if terminator.opcode != "return" {
+                continue;
+            }
+            let remaining = unique_linear::remaining_owned_values(block, &required)?;
+            if remaining.is_empty() {
                 continue;
             }
             let original_offset = item.span.start.saturating_add(terminator.span.start);
@@ -301,9 +438,9 @@ fn insert_unused_unique_destroys(source: &str) -> Result<String, CanonicalizeErr
             if !indentation.chars().all(char::is_whitespace) {
                 return Err(error("unexpected ownership terminator indentation"));
             }
-            let insertion = unique
+            let insertion = remaining
                 .iter()
-                .map(|parameter| format!("{indentation}destroy %{}\n", parameter.name))
+                .map(|value| format!("{indentation}destroy %{value}\n"))
                 .collect::<String>();
             edits.push((line_start, insertion));
         }
@@ -313,40 +450,6 @@ fn insert_unused_unique_destroys(source: &str) -> Result<String, CanonicalizeErr
         transformed.insert_str(offset, &insertion);
     }
     Ok(transformed)
-}
-
-fn is_pure_value_type(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Integer(_) | Type::Float(_) | Type::Pointer(_) | Type::Unit | Type::Never
-    )
-}
-
-fn is_pure_value_instruction(op: &str) -> bool {
-    matches!(
-        op,
-        "return"
-            | "br"
-            | "cond.br"
-            | "const.int"
-            | "const.bool"
-            | "add"
-            | "sub"
-            | "mul"
-            | "and"
-            | "or"
-            | "xor"
-            | "not"
-            | "neg"
-            | "abs"
-            | "icmp"
-            | "select"
-            | "copy"
-            | "move"
-            | "destroy"
-            | "borrow.begin"
-            | "borrow.end"
-    )
 }
 
 #[cfg(test)]
@@ -382,10 +485,15 @@ mod tests {
     }
 
     #[test]
-    fn raw_ownership_operations_are_not_silently_accepted() {
+    fn local_borrow_scope_is_closed_by_canonicalization() {
         let text = source("  %borrowed = borrow.begin %a\n  return %a");
-        let error = canonicalize_text(&text).expect_err("borrow pass is not yet supported");
-        assert!(error.0.contains("TIR verifier rejected raw input"));
+        let canonical =
+            canonicalize_text(&text).expect("local borrowed value scope closes before return");
+        assert_eq!(canonical.matches("borrow.end %").count(), 1);
+        assert_eq!(
+            canonical,
+            canonicalize_text(&canonical).expect("borrow scope canonicalization is stable")
+        );
     }
 
     #[test]
@@ -414,10 +522,15 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_memory_operations_are_not_silently_accepted() {
+    fn unused_scalar_stack_allocation_gets_deallocated() {
         let text = source("  %slot = stack.alloc i32\n  return %a");
-        let error = canonicalize_text(&text).expect_err("address-only pass is not yet supported");
-        assert!(error.0.contains("no safe five-pass lowering"));
+        let canonical =
+            canonicalize_text(&text).expect("unused scalar stack allocation is cleaned up");
+        assert_eq!(canonical.matches("stack.dealloc %").count(), 1);
+        assert_eq!(
+            canonical,
+            canonicalize_text(&canonical).expect("stack cleanup stays stable")
+        );
     }
 }
 
@@ -483,34 +596,6 @@ mod branch_destroy_tests {
         assert_eq!(
             once,
             canonicalize_text(&once).expect("canonical text remains canonical")
-        );
-    }
-}
-
-#[cfg(test)]
-mod moved_unique_destroy_tests {
-    use super::*;
-
-    #[test]
-    fn inserts_destroy_of_final_unique_move_result() {
-        let text = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.drop(%object: owned uniq i32) -> unit engine(native) {\nbb0(%object: owned uniq i32):\n  %first = move %object\n  %second = move %first\n  return\n}\n";
-        let canonical = canonicalize_text(text).expect("moved unique receives a destroy");
-        assert!(
-            canonical.contains("destroy %v2"),
-            "final owned value must be destroyed: {canonical}"
-        );
-        assert_eq!(
-            canonical,
-            canonicalize_text(&canonical).expect("canonical text is stable")
-        );
-    }
-
-    #[test]
-    fn cannot_move_owned_unique_twice() {
-        let text = "module @Smoke tir 26.11.1 profile app semantics defined\n  producer \"klf\" \"26.11.1\" languages [kira]\n\nfunc module @Smoke.drop(%object: owned uniq i32) -> unit engine(native) {\nbb0(%object: owned uniq i32):\n  %first = move %object\n  %second = move %object\n  return\n}\n";
-        assert!(
-            canonicalize_text(text).is_err(),
-            "a second move from consumed storage must fail"
         );
     }
 }

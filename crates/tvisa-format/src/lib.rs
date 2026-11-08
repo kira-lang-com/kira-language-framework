@@ -7,6 +7,7 @@ mod bodies;
 mod code;
 mod constants;
 mod data;
+mod debug_section;
 mod error;
 mod function_index;
 mod functions;

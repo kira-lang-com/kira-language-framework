@@ -78,6 +78,7 @@ pub(crate) fn emit_natives(
     objects.extend(ridl_objects(
         surface.as_ref(),
         &imported,
+        crate::ridl_imports::remote_imports(module),
         &toolchain,
         &target,
         &scratch,
@@ -155,6 +156,7 @@ pub(crate) fn emit_natives(
 fn ridl_objects(
     surface: Option<&Surface>,
     imported: &[Imported],
+    remote: bool,
     toolchain: &CToolchain,
     target: &str,
     scratch: &Scratch,
@@ -166,7 +168,11 @@ fn ridl_objects(
         sources.push(scratch.write("ridl.ll", text.as_bytes())?);
     }
     for (index, imported) in imported.iter().enumerate() {
-        let text = crate::ridl_imports::source(imported, target, defined)?;
+        let text = if remote {
+            crate::ridl_imports::remote_source(imported, target)?
+        } else {
+            crate::ridl_imports::source(imported, target, defined)?
+        };
         sources.push(scratch.write(&format!("ridl-import-{index}.ll"), text.as_bytes())?);
     }
     sources

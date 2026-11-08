@@ -469,7 +469,11 @@ fn ridl_import_objects(
 ) -> Result<Vec<PathBuf>, String> {
     let mut objects = Vec::new();
     for imported in crate::ridl_imports::imported(module)?.iter() {
-        let source = crate::ridl_imports::source(imported, target, defined)?;
+        let source = if crate::ridl_imports::remote_imports(module) {
+            crate::ridl_imports::remote_source(imported, target)?
+        } else {
+            crate::ridl_imports::source(imported, target, defined)?
+        };
         objects.push(ir_object(&source, toolchain, target, scratch)?);
     }
     let destroys = crate::ridl_surface::destroys(module);

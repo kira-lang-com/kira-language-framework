@@ -96,3 +96,66 @@ pub(crate) fn source(
         .collect();
     klf_ridl::llvm::adapters(&imported.module, &callers, target, defined, true)
 }
+
+/// For separately executed Kira applications, use RIDL wire adapters rather
+/// than linking against the provider's `ridlcc` entry in this process.
+pub(crate) fn remote_source(imported: &Imported, target: &str) -> Result<String, String> {
+    let callers: BTreeMap<String, String> = imported
+        .entries
+        .iter()
+        .map(|(path, symbol)| (path.clone(), klf_kir::c_symbol(symbol).to_owned()))
+        .collect();
+    klf_ridl::llvm::remote_adapters(&imported.module, &callers, target)
+}
+
+pub(crate) fn remote_imports(module: &Module) -> bool {
+    module
+        .attributes
+        .iter()
+        .any(|attribute| attribute.name == "ridl.remote")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_isolated_kira_modules_select_remote_ridl_adapters() {
+        let kir = r#"
+module @Plugin lang "kira" target "aarch64-apple-darwin" stage canonical
+func private foreign @harmony_add(%a: i64, %b: i64) -> i64 engine(native)
+func module @main() -> i64 engine(runtime) {
+entry():
+  %a = const.int i64, 2
+  %b = const.int i64, 40
+  %result = call.foreign @harmony_add(%a, %b)
+  return %result
+}
+"#;
+        let mut program = klf_kir::parse_module(kir).unwrap();
+        program.attributes.extend([
+            klf_kir::ModuleAttribute {
+                name: "ridl.import".into(),
+                value: Some("Harmony\tfunction add(a: I64, b: I64) -> I64\n".into()),
+            },
+            klf_kir::ModuleAttribute {
+                name: "ridl.import.entry".into(),
+                value: Some("Harmony\tadd\tharmony_add\tI64,I64->I64".into()),
+            },
+        ]);
+        let imports = imported(&program).unwrap();
+        assert_eq!(imports.len(), 1);
+        assert!(!remote_imports(&program));
+        let local = source(&imports[0], "aarch64-apple-darwin", &str::to_owned).unwrap();
+        assert!(local.contains("_RIDL1"));
+
+        program.attributes.push(klf_kir::ModuleAttribute {
+            name: "ridl.remote".into(),
+            value: None,
+        });
+        assert!(remote_imports(&program));
+        let remote = remote_source(&imports[0], "aarch64-apple-darwin").unwrap();
+        assert!(remote.contains("klfrt_ridl_remote_scalar"));
+        assert!(!remote.contains("_RIDL1"));
+    }
+}

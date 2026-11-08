@@ -39,6 +39,7 @@ fn configure_allocator() {
 fn configure_allocator() {}
 
 mod arguments;
+mod backend;
 mod build_command;
 mod bundle;
 use build_command::build;
