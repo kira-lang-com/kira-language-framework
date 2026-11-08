@@ -7,6 +7,8 @@
 
 use std::fs;
 use std::io;
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
@@ -88,6 +90,13 @@ fn file(handle: i64) -> Result<Arc<fs::File>, Failure> {
         .get(index)
         .and_then(Option::clone)
         .ok_or(Failure::InvalidHandle)
+}
+
+/// Clones an open Kira file's operating-system handle, without widening the
+/// underlying access rights or transferring ownership of the original file.
+#[cfg(unix)]
+pub fn duplicate_descriptor(handle: i64) -> Result<OwnedFd, Failure> {
+    Ok(file(handle)?.try_clone()?.into())
 }
 
 fn length(count: usize) -> i64 {

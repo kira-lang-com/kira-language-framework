@@ -10,9 +10,35 @@ use klf_core::Name;
 use klf_kir::{Function, ModuleIndex, Operation};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
+// Cranelift reserves every explicit stack slot in the function prologue,
+// including slots in mutually exclusive branches. A large dynamically
+// dispatched Kira method can therefore exhaust the 8 MiB macOS main-thread
+// stack after only a handful of nested calls. Its frame arena is already
+// tied to the call lifetime, so use it when the aggregate native slot budget
+// is exceeded rather than growing one enormous machine stack frame.
+const MAX_NATIVE_STACK_BYTES: u64 = 64 * 1024;
+
 /// The `stack.alloc` results that take runtime frame memory. Empty when every
 /// alloc of the function can be a native slot.
-pub(super) fn frame_allocs<'f>(function: &'f Function, index: &ModuleIndex) -> HashSet<&'f Name> {
+pub(super) fn frame_allocs<'f>(
+    function: &'f Function,
+    index: &ModuleIndex,
+    layouts: &klf_layout::Layouts<'_>,
+) -> HashSet<&'f Name> {
+    let mut all = HashSet::default();
+    let mut native_bytes = 0u64;
+    for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+        if let Operation::StackAlloc(ty) = &instruction.operation {
+            let layout = layouts.layout_of(ty);
+            let align = layout.align.max(8);
+            let bytes = layout.size.max(1).div_ceil(align) * align;
+            native_bytes = native_bytes.saturating_add(bytes);
+            all.extend(instruction.results.iter());
+        }
+    }
+    if native_bytes > MAX_NATIVE_STACK_BYTES {
+        return all;
+    }
     let cyclic: HashSet<usize> = cyclic_blocks(function).into_iter().collect();
     let mut allocs = Vec::new();
     for (block_index, block) in function
@@ -374,5 +400,29 @@ impl Sets {
         }
         self.parent[b] = a;
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn promoted_slots(length: usize) -> usize {
+        let source = format!(
+            "module @FrameBudget lang \"c\" target \"aarch64-apple-darwin\" stage canonical\n\
+             func module @main() -> i64 engine(native) {{\n\
+             bb0():\n  %slot = stack.alloc [{length} x i64]\n\
+             \x20 %zero = const.int i64, 0\n  return %zero\n}}"
+        );
+        let module = klf_kir::parse_module(&source).expect("valid KIR");
+        let index = ModuleIndex::of(&module);
+        let layouts = klf_layout::Layouts::new(&module.types);
+        frame_allocs(&module.functions[0], &index, &layouts).len()
+    }
+
+    #[test]
+    fn oversized_native_frame_uses_runtime_arena() {
+        assert_eq!(promoted_slots(64), 0, "small slots remain native");
+        assert_eq!(promoted_slots(8193), 1, "large slots use frame memory");
     }
 }

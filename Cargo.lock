@@ -699,6 +699,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "klf-helper-apps"
+version = "26.11.1"
+dependencies = [
+ "klf-core",
+ "klf-host-files",
+ "klf-kir",
+ "klf-ridl",
+ "klf-ridl-wire",
+ "klf-vm",
+ "libc",
+]
+
+[[package]]
 name = "klf-host-crypto"
 version = "26.11.1"
 dependencies = [
@@ -889,13 +902,16 @@ dependencies = [
 name = "klf-native-rt"
 version = "26.11.1"
 dependencies = [
+ "klf-core",
  "klf-defsvc",
  "klf-diag",
+ "klf-helper-apps",
  "klf-host-crypto",
  "klf-host-files",
  "klf-host-net",
  "klf-host-process",
  "klf-ridl",
+ "klf-ridl-wire",
  "klf-rt",
  "klf-services",
  "klf-target",
@@ -916,6 +932,9 @@ dependencies = [
 [[package]]
 name = "klf-ridl-wire"
 version = "26.11.1"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "klf-rt"
@@ -1081,6 +1100,7 @@ name = "klf-vm-rt"
 version = "26.11.1"
 dependencies = [
  "klf-diag",
+ "klf-helper-apps",
  "klf-host-process",
  "klf-live",
  "klf-native-rt",
@@ -1532,6 +1552,7 @@ version = "26.11.1"
 dependencies = [
  "tir-core",
  "tir-diag",
+ "tir-layout",
  "tir-target",
  "tir-types",
  "zstd",

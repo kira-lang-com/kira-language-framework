@@ -19,6 +19,9 @@
 mod value;
 mod wire;
 
+#[cfg(unix)]
+pub mod transport;
+
 pub use value::{ObjectRef, Side, Value};
 pub use wire::{MAX_LENGTH, Reader, Writer, describe, frame, unframe};
 
@@ -189,7 +192,7 @@ impl Message {
     /// Returns why the bytes are not a message: a frame that does not decode,
     /// or one naming a message this section does not define.
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
-        let value = unframe(bytes)?;
+        let value = wire::unframe_message(bytes)?;
         let Value::Struct(name, fields) = value else {
             return Err(format!("a message names no kind, got {value}"));
         };

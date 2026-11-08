@@ -39,6 +39,7 @@ members = [
     "crates/klf-kir-passes",
     "crates/klf-ridl",
     "crates/klf-ridl-wire",
+    "crates/klf-helper-apps",
     "crates/klf-klffi",
     "crates/klf-kira-syntax",
     "crates/klf-services",

@@ -68,6 +68,34 @@ fn decode_rejects_bad_magic() {
 }
 
 #[test]
+fn decode_rejects_unsupported_version_and_trailing_data() {
+    let mut bytes = geometry().encode();
+    bytes[4] = 2;
+    assert_eq!(
+        Metadata::decode(&bytes),
+        Err(klf_ridl::meta::MetaError::BadVersion)
+    );
+    let mut bytes = geometry().encode();
+    bytes.push(0);
+    assert_eq!(
+        Metadata::decode(&bytes),
+        Err(klf_ridl::meta::MetaError::TrailingData)
+    );
+}
+
+#[test]
+fn decode_refuses_impossible_counts_without_allocating() {
+    // The metadata has four bytes after the module name for its ABI count.
+    let mut bytes = geometry().encode();
+    let offset = 8 + 4 + geometry().module_name.len();
+    bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(
+        Metadata::decode(&bytes),
+        Err(klf_ridl::meta::MetaError::Truncated)
+    );
+}
+
+#[test]
 fn import_of_a_current_uuid_links() {
     let provider = geometry();
     let check = check_import(&provider, &uuid("6f1c2a9e44d07b31"), false);

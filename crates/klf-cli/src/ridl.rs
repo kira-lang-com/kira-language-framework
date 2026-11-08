@@ -13,7 +13,7 @@ use klf_ridl::{Type, bindgen, emit, parse};
 pub fn command(args: &[String]) -> ExitCode {
     let Some(sub) = args.first().map(String::as_str) else {
         klf_diag::err!(
-            "usage: klf ridl check|emit|layout|mangle <file.ridl> | adapters --target <triple> [-o out.ll] <file.ridl> | bindgen [--lang rust|kira|swift] <file.ridl> | kernel --contract | kernel --entries --target <triple>"
+            "usage: klf ridl check|emit|layout|mangle <file.ridl> | adapters --target <triple> [-o out.ll] <file.ridl> | bindgen [--lang rust|kira|swift] [--package DIR] <file.ridl> | kernel --contract | kernel --entries --target <triple>"
         );
         return ExitCode::FAILURE;
     };
@@ -28,10 +28,10 @@ pub fn command(args: &[String]) -> ExitCode {
     } else {
         args.get(1)
             .cloned()
-            .map(|path| ("rust".to_owned(), path))
+            .map(|path| ("rust".to_owned(), path, None))
             .ok_or_else(|| format!("klf ridl {sub}: expected a .ridl file"))
     };
-    let (language, path) = match parsed {
+    let (language, path, package) = match parsed {
         Ok(parsed) => parsed,
         Err(error) => {
             klf_diag::err!("{error}");
@@ -41,6 +41,22 @@ pub fn command(args: &[String]) -> ExitCode {
     let Some(module) = load(&path) else {
         return ExitCode::FAILURE;
     };
+    if let Some(directory) = package {
+        if sub != "bindgen" || language != "kira" {
+            klf_diag::err!("klf ridl bindgen: --package requires --lang kira");
+            return ExitCode::FAILURE;
+        }
+        return match write_kira_package(&module, &directory) {
+            Ok(()) => {
+                klf_diag::out!("Generated: {directory}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                klf_diag::err!("klf ridl bindgen: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match sub {
         "check" => klf_diag::out!("Check: Ok {path}"),
         "emit" => klf_diag::raw!("{}", emit(&module)),
@@ -86,9 +102,10 @@ fn kernel(args: &[String]) -> ExitCode {
     }
 }
 
-fn bindgen_arguments(args: &[String]) -> Result<(String, String), String> {
+fn bindgen_arguments(args: &[String]) -> Result<(String, String, Option<String>), String> {
     let mut language = "rust".to_owned();
     let mut path = None;
+    let mut package = None;
     let mut rest = args.iter().skip(1);
     while let Some(argument) = rest.next() {
         match argument.as_str() {
@@ -96,6 +113,13 @@ fn bindgen_arguments(args: &[String]) -> Result<(String, String), String> {
                 language.clone_from(rest.next().ok_or_else(|| {
                     "klf ridl bindgen: --lang needs rust, kira or swift".to_owned()
                 })?);
+            }
+            "--package" => {
+                package = Some(
+                    rest.next()
+                        .ok_or("klf ridl bindgen: --package requires a directory")?
+                        .clone(),
+                );
             }
             option if option.starts_with('-') => {
                 return Err(format!("klf ridl bindgen: unknown option `{option}`"));
@@ -105,7 +129,39 @@ fn bindgen_arguments(args: &[String]) -> Result<(String, String), String> {
         }
     }
     let path = path.ok_or_else(|| "klf ridl bindgen: expected a .ridl file".to_owned())?;
-    Ok((language, path))
+    Ok((language, path, package))
+}
+
+fn write_kira_package(module: &Module, directory: &str) -> Result<(), String> {
+    let (manifest, source) = bindgen::kira_package(module)?;
+    let root = Path::new(directory);
+    let app = root.join("app");
+    for path in [root.join("package.kira"), app.join("Bindings.kira")] {
+        if path.exists() {
+            return Err(format!(
+                "{} already exists; refusing to overwrite",
+                path.display()
+            ));
+        }
+    }
+    std::fs::create_dir_all(&app).map_err(|error| error.to_string())?;
+    for (path, data) in [
+        (root.join("package.kira"), manifest),
+        (app.join("Bindings.kira"), source),
+    ] {
+        // Do not replace source the developer has edited: regeneration is an
+        // explicit removal/replacement step, not a surprising overwrite.
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        use std::io::Write;
+        output
+            .write_all(data.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// `klf ridl adapters`: the LLVM IR of a C-view adapter for every export,

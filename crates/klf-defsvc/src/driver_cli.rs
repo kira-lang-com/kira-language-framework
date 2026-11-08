@@ -20,6 +20,8 @@ pub struct Invocation {
     pub export: Option<String>,
     /// What to write: an [`EMIT_KINDS`] entry, or `check` for nothing.
     pub emit: String,
+    /// Whether `--emit` was selected, rather than inferred from an output path.
+    pub emit_explicit: bool,
     pub target: Option<String>,
     pub flag_overrides: HashMap<String, DriverFlagValue>,
     pub file_mode_globs: Vec<(String, String)>,
@@ -369,6 +371,7 @@ pub fn invocation(
         output,
         export: matches.string(root, "export"),
         emit,
+        emit_explicit: matches.present(root, "emit"),
         target: matches.string(root, "target"),
         flag_overrides,
         file_mode_globs: globs,

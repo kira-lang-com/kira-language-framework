@@ -14,12 +14,15 @@ klf-host-files = { path = "../klf-host-files" }
 klf-host-crypto = { path = "../klf-host-crypto" }
 klf-host-net = { path = "../klf-host-net" }
 klf-host-process = { path = "../klf-host-process" }
+klf-helper-apps = { path = "../klf-helper-apps" }
 klf-ridl = { path = "../klf-ridl" }
+klf-core = { path = "../klf-core" }
 klf-rt = { path = "../klf-rt" }
 klf-target = { path = "../klf-target" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+klf-ridl-wire = { path = "../klf-ridl-wire" }
 
 [dev-dependencies]
 klf-services = { path = "../klf-services" }

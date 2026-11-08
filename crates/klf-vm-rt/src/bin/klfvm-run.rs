@@ -9,7 +9,7 @@
 #![allow(unsafe_code)]
 
 use klf_vm_rt::{klfvm_main, klfvm_process_exit_main, klfvm_process_main};
-use std::ffi::{CString, c_char, c_int};
+use std::ffi::{CString, OsString, c_char, c_int};
 use std::process::ExitCode;
 
 /// The environment variable naming the entry convention, one of `outcome`,
@@ -32,8 +32,17 @@ fn convention() -> String {
 }
 
 fn main() -> ExitCode {
-    let convention = convention();
-    let arguments: Vec<CString> = std::env::args_os()
+    let mut arguments: Vec<OsString> = std::env::args_os().collect();
+    let selected = match select_convention(&mut arguments) {
+        Ok(value) => value,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let convention = selected.unwrap_or_else(convention);
+    let arguments: Vec<CString> = arguments
+        .into_iter()
         .map(|argument| CString::new(argument.to_string_lossy().as_bytes()).unwrap_or_default())
         .collect();
     let count = c_int::try_from(arguments.len()).unwrap_or(c_int::MAX);
@@ -44,4 +53,51 @@ fn main() -> ExitCode {
         _ => unsafe { klfvm_main(count, values.as_ptr()) },
     };
     ExitCode::from(u8::try_from(status).unwrap_or(1))
+}
+
+fn select_convention(arguments: &mut Vec<OsString>) -> Result<Option<String>, String> {
+    let Some(value) = arguments.get(1).and_then(|argument| argument.to_str()) else {
+        return Ok(None);
+    };
+    let Some(convention) = value.strip_prefix("--klf-entry-convention=") else {
+        return Ok(None);
+    };
+    if !matches!(convention, "outcome" | "process" | "process-exit") {
+        return Err(format!(
+            "unsupported bytecode entry convention `{convention}`"
+        ));
+    }
+    let convention = convention.to_owned();
+    arguments.remove(1);
+    Ok(Some(convention))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_runner_selects_its_entry_convention_without_forwarding_the_option() {
+        let mut arguments = vec![
+            "klfvm-run".into(),
+            "--klf-entry-convention=process-exit".into(),
+            "app.klbc".into(),
+            "hello".into(),
+        ];
+        assert_eq!(
+            select_convention(&mut arguments),
+            Ok(Some("process-exit".into()))
+        );
+        assert_eq!(
+            arguments,
+            ["klfvm-run", "app.klbc", "hello"].map(OsString::from)
+        );
+        assert!(
+            select_convention(&mut vec![
+                "runner".into(),
+                "--klf-entry-convention=invalid".into()
+            ])
+            .is_err()
+        );
+    }
 }

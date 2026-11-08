@@ -51,6 +51,54 @@ pub fn run_image_from(
 /// The kernel services with output written as the native runtime writes it.
 fn capabilities(process: Option<bool>) -> Capabilities {
     let (mut capabilities, _) = klf_vm::kernel_services();
+    #[cfg(unix)]
+    {
+        use klf_helper_apps::services;
+        capabilities.register_with_memory("klfsvc_plugin_start", |args, memory| {
+            let [address, count] = args else {
+                return services::NOT_INSTALLED.cast_unsigned();
+            };
+            let Some(count) = usize::try_from(*count).ok().filter(|count| *count <= 4096) else {
+                return services::NOT_INSTALLED.cast_unsigned();
+            };
+            let mut name = vec![0_u8; count];
+            if count != 0 && !memory.read_buffer(*address, &mut name) {
+                return services::NOT_INSTALLED.cast_unsigned();
+            }
+            std::str::from_utf8(&name)
+                .map_or(services::NOT_INSTALLED, services::start)
+                .cast_unsigned()
+        });
+        capabilities.register("klfsvc_plugin_poll", |args| {
+            let [handle] = args else {
+                return services::INVALID_HANDLE.cast_unsigned();
+            };
+            services::poll(handle.cast_signed()).cast_unsigned()
+        });
+        capabilities.register("klfsvc_plugin_wait", |args| {
+            let [handle] = args else {
+                return services::INVALID_HANDLE.cast_unsigned();
+            };
+            services::wait(handle.cast_signed()).cast_unsigned()
+        });
+        capabilities.register("klfsvc_plugin_stop", |args| {
+            let [handle] = args else {
+                return services::INVALID_HANDLE.cast_unsigned();
+            };
+            services::stop(handle.cast_signed()).cast_unsigned()
+        });
+        capabilities.register("klfsvc_plugin_share_file", |args| {
+            let [handle, resource, file] = args else {
+                return services::INVALID_RESOURCE.cast_unsigned();
+            };
+            services::share_file(
+                handle.cast_signed(),
+                resource.cast_signed(),
+                file.cast_signed(),
+            )
+            .cast_unsigned()
+        });
+    }
     capabilities.register_with_memory("klfsvc_io_write", |arguments, memory| {
         let [address, length] = arguments else {
             return u64::MAX;

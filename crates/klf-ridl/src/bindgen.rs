@@ -19,7 +19,7 @@ use crate::types::{Scalar, Type};
 mod kira;
 mod rust;
 
-pub use kira::kira_bindings;
+pub use kira::{kira_bindings, kira_package};
 pub use rust::rust_bindings;
 
 /// The symbol of the C-view adapter `klf ridl adapters` defines for the

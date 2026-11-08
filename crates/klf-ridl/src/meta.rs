@@ -112,10 +112,14 @@ impl Metadata {
         if c.take(4)? != MAGIC {
             return Err(MetaError::BadMagic);
         }
-        let _major = c.u16()?;
-        let _minor = c.u16()?;
+        let major = c.u16()?;
+        let minor = c.u16()?;
+        if (major, minor) != (1, 0) {
+            return Err(MetaError::BadVersion);
+        }
         let module_name = c.string()?;
         let abi_count = c.u32()?;
+        c.ensure_count(abi_count, 17)?;
         let mut abis = Vec::with_capacity(abi_count);
         for _ in 0..abi_count {
             let uuid = c.uuid()?;
@@ -123,6 +127,7 @@ impl Metadata {
             abis.push(AbiEntry { uuid, status });
         }
         let import_count = c.u32()?;
+        c.ensure_count(import_count, 20)?;
         let mut imports = Vec::with_capacity(import_count);
         for _ in 0..import_count {
             let module = c.string()?;
@@ -133,9 +138,13 @@ impl Metadata {
         let mut sha256 = [0u8; 32];
         sha256.copy_from_slice(sha_slice);
         let unmanaged_count = c.u32()?;
+        c.ensure_count(unmanaged_count, 4)?;
         let mut unmanaged = Vec::with_capacity(unmanaged_count);
         for _ in 0..unmanaged_count {
             unmanaged.push(c.string()?);
+        }
+        if c.pos != bytes.len() {
+            return Err(MetaError::TrailingData);
         }
         Ok(Self {
             module_name,
@@ -163,16 +172,20 @@ impl Metadata {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MetaError {
     BadMagic,
+    BadVersion,
     BadStatus,
     Truncated,
+    TrailingData,
 }
 
 impl std::fmt::Display for MetaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MetaError::BadMagic => f.write_str("metadata blob has a bad magic"),
+            MetaError::BadVersion => f.write_str("metadata blob has an unsupported version"),
             MetaError::BadStatus => f.write_str("metadata blob has an unknown ABI status"),
             MetaError::Truncated => f.write_str("metadata blob is truncated"),
+            MetaError::TrailingData => f.write_str("metadata blob has trailing data"),
         }
     }
 }
@@ -253,6 +266,13 @@ struct Cursor<'a> {
 }
 
 impl<'a> Cursor<'a> {
+    fn ensure_count(&self, count: usize, minimum_bytes: usize) -> Result<(), MetaError> {
+        if count > (self.bytes.len() - self.pos) / minimum_bytes {
+            return Err(MetaError::Truncated);
+        }
+        Ok(())
+    }
+
     fn take(&mut self, n: usize) -> Result<&'a [u8], MetaError> {
         let end = self.pos.checked_add(n).ok_or(MetaError::Truncated)?;
         if end > self.bytes.len() {

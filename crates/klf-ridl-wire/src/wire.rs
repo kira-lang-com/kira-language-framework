@@ -5,6 +5,7 @@
 //! it the same way. Lengths are read against a limit before anything is
 //! allocated, so a corrupt frame cannot make a peer reserve unbounded memory.
 
+use crate::MAX_DEPTH;
 use crate::value::{ObjectRef, Side, Value};
 use std::fmt;
 use std::fmt::Write as _;
@@ -133,12 +134,26 @@ fn tag(value: &Value) -> u8 {
 pub struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
+    depth: usize,
+    depth_limit: usize,
 }
 
 impl<'a> Reader<'a> {
     #[must_use]
     pub fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, at: 0 }
+        Self {
+            bytes,
+            at: 0,
+            depth: 0,
+            depth_limit: MAX_DEPTH,
+        }
+    }
+
+    fn with_depth_limit(bytes: &'a [u8], limit: usize) -> Self {
+        Self {
+            depth_limit: limit,
+            ..Self::new(bytes)
+        }
     }
 
     /// The values a frame carries.
@@ -161,6 +176,16 @@ impl<'a> Reader<'a> {
     /// Returns where the frame ended early, held a tag it does not define, or
     /// claimed a length past what the frame holds.
     pub fn read(&mut self) -> Result<Value, String> {
+        if self.depth >= self.depth_limit {
+            return Err("KLF-RT-0204: RIDL value exceeds nesting limit".to_owned());
+        }
+        self.depth += 1;
+        let result = self.read_value();
+        self.depth -= 1;
+        result
+    }
+
+    fn read_value(&mut self) -> Result<Value, String> {
         let tag = self.byte()?;
         match tag {
             VOID => Ok(Value::Void),
@@ -299,7 +324,16 @@ pub fn frame(value: &Value) -> Vec<u8> {
 /// # Errors
 /// Returns why the frame does not hold exactly one value.
 pub fn unframe(bytes: &[u8]) -> Result<Value, String> {
-    let mut reader = Reader::new(bytes);
+    unframe_with_limit(bytes, MAX_DEPTH)
+}
+
+/// A message envelope adds up to two containers around the actual values.
+pub(crate) fn unframe_message(bytes: &[u8]) -> Result<Value, String> {
+    unframe_with_limit(bytes, MAX_DEPTH + 2)
+}
+
+fn unframe_with_limit(bytes: &[u8], limit: usize) -> Result<Value, String> {
+    let mut reader = Reader::with_depth_limit(bytes, limit);
     let value = reader.read()?;
     if reader.at != bytes.len() {
         return Err(format!(

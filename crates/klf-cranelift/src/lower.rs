@@ -217,7 +217,7 @@ impl<'a> FnLowerer<'a> {
                     .is_some_and(|&to| to <= position)
             })
         };
-        let frame_allocs = frame::frame_allocs(function, self.index);
+        let frame_allocs = frame::frame_allocs(function, self.index, self.layouts);
         self.runtime_frame = !frame_allocs.is_empty();
         self.set_live(entries.first());
         if self.runtime_frame {

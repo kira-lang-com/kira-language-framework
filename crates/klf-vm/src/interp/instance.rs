@@ -51,6 +51,41 @@ impl Instance {
         base: &Path,
         capabilities: Capabilities,
     ) -> Result<Box<Self>, String> {
+        Self::load_with_policy(program, base, capabilities, false)
+    }
+
+    /// Creates a VM-only helper with no native libraries, raw foreign
+    /// pointers, or dynamic symbol fallback. Every imported function must be
+    /// explicitly provided in `capabilities` before code can initialize.
+    ///
+    /// # Errors
+    /// Refuses any native import or ungranted host capability.
+    pub fn load_restricted(
+        program: Program,
+        capabilities: Capabilities,
+    ) -> Result<Box<Self>, String> {
+        Self::load_with_policy(program, Path::new("."), capabilities, true)
+    }
+
+    fn load_with_policy(
+        program: Program,
+        base: &Path,
+        capabilities: Capabilities,
+        restricted: bool,
+    ) -> Result<Box<Self>, String> {
+        if restricted {
+            for import in &program.imports {
+                match &import.kind {
+                    ImportKind::Call(_) if capabilities.contains(&import.symbol) => {}
+                    _ => {
+                        return Err(format!(
+                            "restricted Kira runtime refuses native import `{}`",
+                            import.symbol
+                        ));
+                    }
+                }
+            }
+        }
         let mut libraries = Vec::new();
         let mut firsts = Vec::new();
         for import in &program.imports {
@@ -208,6 +243,27 @@ impl Instance {
         })
     }
 
+    /// Enters without blocking when another thread owns this instance.
+    /// This keeps RIDL callbacks from deadlocking against a waiting host.
+    #[must_use]
+    pub fn try_call(&self, entry: usize, arguments: &[u64]) -> Option<Outcome> {
+        self.gate.try_enter(|| {
+            // SAFETY: the gate excludes other threads; owner-thread calls
+            // nest in the same way as `with` and existing native callbacks.
+            unsafe {
+                let state = &mut *self.state.get();
+                execute::<false>(
+                    &mut state.machine,
+                    entry,
+                    arguments,
+                    &self.capabilities,
+                    &state.resolved,
+                    None,
+                )
+            }
+        })
+    }
+
     /// Runs `entry` as a C process's `main`, as [`super::run_process`] does,
     /// and then the exit function the program registered.
     pub fn run_process(
@@ -276,11 +332,30 @@ struct Gate {
 }
 
 impl Gate {
-    fn enter<T>(&self, body: impl FnOnce() -> T) -> T {
+    fn try_enter<T>(&self, body: impl FnOnce() -> T) -> Option<T> {
+        let token = Self::token();
+        if self.owner.load(Ordering::Acquire) == token {
+            return Some(body());
+        }
+        let _held = match self.lock.try_lock() {
+            Ok(held) => held,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        self.owner.store(token, Ordering::Release);
+        let _leave = Leave(&self.owner);
+        Some(body())
+    }
+
+    fn token() -> usize {
         thread_local! {
             static TOKEN: u8 = const { 0 };
         }
-        let token = TOKEN.with(|token| std::ptr::from_ref(token) as usize);
+        TOKEN.with(|token| std::ptr::from_ref(token) as usize)
+    }
+
+    fn enter<T>(&self, body: impl FnOnce() -> T) -> T {
+        let token = Self::token();
         if self.owner.load(Ordering::Acquire) == token {
             return body();
         }

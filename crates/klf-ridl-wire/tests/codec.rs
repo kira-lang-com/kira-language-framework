@@ -147,9 +147,14 @@ fn nesting_past_the_depth_limit_is_refused() {
     for _ in 0..(klf_ridl_wire::MAX_DEPTH + 8) {
         value = Value::some(value);
     }
-    // The codec itself is iterative and will write it; the depth limit is the
-    // channel's to enforce, so what this pins down is that a deep value does
-    // not recurse the writer into a stack overflow.
     let bytes = klf_ridl_wire::frame(&value);
-    assert_eq!(klf_ridl_wire::unframe(&bytes).expect("decodes"), value);
+    let error = klf_ridl_wire::unframe(&bytes).unwrap_err();
+    assert!(error.contains("KLF-RT-0204"));
+    let error = Message::decode(
+        &Message::Request(Call::new(1, 1, "tooDeep", vec![value]))
+            .encode()
+            .unwrap(),
+    )
+    .unwrap_err();
+    assert!(error.contains("KLF-RT-0204"));
 }

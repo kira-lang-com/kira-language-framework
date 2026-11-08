@@ -428,7 +428,8 @@ impl DefinitionServiceState {
     /// own name, as C programs do for the modules they load), or
     /// `klf.debug.name` (kind 17: the suffix a generated item's name carries,
     /// then what it is generated for, tab-separated, which the debug
-    /// information shows in place of the suffix).
+    /// information shows in place of the suffix), or `ridl.remote` (kind 18:
+    /// the package's RIDL imports are resolved through its host IPC channel).
     pub(super) fn ll_module_attribute(&mut self, arguments: &[u64]) -> u64 {
         let bytes = std::mem::take(&mut self.kir_attribute_bytes);
         let name = match arguments.get(1) {
@@ -450,6 +451,7 @@ impl DefinitionServiceState {
             Some(15) => "ridl.witness.default",
             Some(16) => "program.export",
             Some(17) => "klf.debug.name",
+            Some(18) => "ridl.remote",
             _ => return u64::MAX,
         };
         let Ok(value) = String::from_utf8(bytes) else {

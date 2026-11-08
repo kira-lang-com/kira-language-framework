@@ -325,3 +325,32 @@ bb0():
 fn zero_initialized_thread_locals_do_not_overlap() {
     parity(THREAD_LOCALS, "tls", &[]);
 }
+
+const LARGE_RECURSIVE_FRAME: &str = r#"module @LargeRecursiveFrame lang "test" target "aarch64-apple-darwin" stage raw
+
+func module @deep(%depth: i64) -> i64 engine(runtime) {
+bb0(%depth: i64):
+  %slot = stack.alloc [131072 x i64]
+  %index = const.int i64, 131071
+  %last = elem.addr %slot, %index
+  store [init] %depth to %last
+  %zero = const.int i64, 0
+  %finished = icmp eq %depth, %zero
+  cond.br %finished, bb_done(), bb_continue()
+bb_done():
+  %base = load [trivial] %last
+  return %base
+bb_continue():
+  %one = const.int i64, 1
+  %next = sub [wrap] %depth, %one
+  %nested = call @deep(%next)
+  %mine = load [trivial] %last
+  %total = add [wrap] %nested, %mine
+  return %total
+}
+"#;
+
+#[test]
+fn deep_calls_do_not_exhaust_main_thread_with_large_native_stack_allocations() {
+    parity(LARGE_RECURSIVE_FRAME, "deep", &[12]);
+}

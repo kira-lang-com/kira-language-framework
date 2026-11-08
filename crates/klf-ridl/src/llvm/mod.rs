@@ -14,10 +14,12 @@ mod adapters;
 mod adopter;
 mod entries;
 mod entries_metadata;
+mod remote;
 mod witnesses;
 
 pub use adapters::adapters;
 pub use entries::{Receiving, entries, entries_requiring_runtime};
+pub use remote::remote_adapters;
 pub use witnesses::{
     Conformance, ImportedTable, WitnessCall, WitnessDefault, WitnessSet, witnesses,
 };
@@ -146,6 +148,17 @@ impl<'a> Ir<'a> {
         out.push_str(&self.globals);
         out.push_str(&self.functions);
         out
+    }
+
+    pub(crate) fn private_bytes(&mut self, name: &str, bytes: &[u8]) -> String {
+        let symbol = quote(name);
+        let escaped: String = bytes.iter().map(|byte| format!("\\{byte:02X}")).collect();
+        let _ = writeln!(
+            self.globals,
+            "{symbol} = private constant [{} x i8] c\"{escaped}\", align 1",
+            bytes.len()
+        );
+        symbol
     }
 }
 

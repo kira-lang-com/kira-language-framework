@@ -3,7 +3,7 @@
 use std::process::Command;
 
 use klf_core::FileId;
-use klf_ridl::bindgen::{caller_symbol, kira_bindings, rust_bindings};
+use klf_ridl::bindgen::{caller_symbol, kira_bindings, kira_package, rust_bindings};
 use klf_ridl::parse;
 
 const SRC: &str = r#"
@@ -73,6 +73,18 @@ fn kira_bindings_declare_ridl_imports() {
     assert!(out.contains("class Scene {}\n"));
     // The struct Kira lowers a `distinct` to reads back as the distinct.
     assert!(out.contains("distinct Tag = U32\n"));
+}
+
+#[test]
+fn generates_a_normal_kira_importable_package_from_the_contract() {
+    let (manifest, source) = kira_package(&module()).unwrap();
+    assert!(manifest.contains("construct Geometry extends Package"));
+    assert!(manifest.contains("let kind: PackageKind = .Library"));
+    assert!(source.contains("@Ridl(\"Geometry\") function area"));
+    assert!(!manifest.contains("ridlImports"));
+    let mut invalid = module();
+    invalid.name = "../Host".to_owned();
+    assert!(kira_package(&invalid).is_err());
 }
 
 #[test]

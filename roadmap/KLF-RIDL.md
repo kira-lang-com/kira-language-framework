@@ -318,6 +318,11 @@ Every driver accepts the uniform interface below. A definition MAY add flags and
 | `<driver> ridl emit <module>` | Write the module's `.ridl` |
 | `<driver> push <host:port>` | Hot module push client (section 17.5) |
 
+Kira additionally accepts `--backend runtime|native` on `build` and `run`.
+`runtime` selects KLF bytecode execution; `native` selects native code and is
+the default. This Kira-specific spelling does not change other languages'
+driver options or function-level `@Runtime`/`@Native` engine annotations.
+
 A path naming a directory stands for every file under it, recursively, whose extension is one the Language declares, in path order. The definition decides what the files mean together.
 
 Declared flags are long options named `--<name>`. Boolean flags accept

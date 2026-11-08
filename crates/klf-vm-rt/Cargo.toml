@@ -21,6 +21,7 @@ klf-live = { path = "../klf-live" }
 klf-rt = { path = "../klf-rt" }
 klf-native-rt = { path = "../klf-native-rt" }
 klf-host-process = { path = "../klf-host-process" }
+klf-helper-apps = { path = "../klf-helper-apps" }
 
 [lints]
 workspace = true

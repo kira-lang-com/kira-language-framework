@@ -101,6 +101,11 @@ klf.process.child_release  klfsvc_process_child_release  (i64) -> i64 # child ->
 klf.process.current_directory  klfsvc_process_current_directory  (ptr, i64) -> i64 # destination, capacity -> length of the working directory, copied only when it fits
 klf.process.processor_count  klfsvc_process_processor_count  () -> i64 # -> threads the host runs at once for this process, at least 1 (D-388)
 klf.process.exit  klfsvc_process_exit  (i64) -> void # status: runs the exit function with reason 0 and ends the process
+klf.plugin.start  klfsvc_plugin_start  (ptr, i64) -> i64 # installed plugin ID bytes, length -> runtime handle, -1 not configured, -2 missing ID, -3 launch failure
+klf.plugin.poll  klfsvc_plugin_poll  (i64) -> i64 # handle -> status, -100 still running, -4 invalid handle, -5 wait failure, -200 minus signal on a signalled exit
+klf.plugin.wait  klfsvc_plugin_wait  (i64) -> i64 # handle -> status, consumes the handle, -4 invalid handle, -5 wait failure
+klf.plugin.stop  klfsvc_plugin_stop  (i64) -> i64 # handle -> status, kills child and consumes handle, -4 invalid handle, -5 wait failure
+klf.plugin.share_file  klfsvc_plugin_share_file  (i64, i64, i64) -> i64 # plugin handle, transfer id, klf.fs file handle -> 1 shared with plugin, -6 invalid resource, -7 already shared
 klf.time.monotonic  klfsvc_time_monotonic  () -> i64 # nanoseconds since the first clock read in this process, never decreasing
 klf.time.wall  klfsvc_time_wall  () -> i64 # nanoseconds since the Unix epoch
 klf.time.sleep  klfsvc_time_sleep  (i64) -> void # pause the calling thread for at least this many nanoseconds, none when not positive
