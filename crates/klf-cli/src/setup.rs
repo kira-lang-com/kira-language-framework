@@ -4,7 +4,7 @@
 //!
 //! A release of `kira-lang-com/kira-language-framework` publishes
 //! `klf-<version>-<host>.tar.gz`, a distribution `klf dist` laid out, and
-//! `kira-lang-com/llvm-ridl` publishes `llvm-ridl-<version>-<host>`, each
+//! `tessera-os/llvm-ridl` publishes `llvm-ridl-<version>-<host>`, each
 //! beside a `.sha256`. They land at `~/.klf/toolchains/klf/release/<version>`,
 //! selected by `current.toml`, and `~/.klf/llvm-ridl/<version>`. `--llvm`
 //! installs the LLVM alone, for a workspace build that lays out its own
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 const FRAMEWORK: &str = "kira-lang-com/kira-language-framework";
-const LLVM: &str = "kira-lang-com/llvm-ridl";
+const LLVM: &str = "tessera-os/llvm-ridl";
 const SET_ASIDE: &str = ".replaced-";
 
 pub(crate) fn command(args: &[String]) -> ExitCode {

@@ -235,8 +235,8 @@ pub const MSVC_SYSTEM_LIBRARIES: [&str; 12] = [
 ];
 
 /// The RIDL LLVM release this KLF links with, published by
-/// `kira-lang-com/llvm-ridl` as `v<version>`.
-pub const LLVM_RIDL_VERSION: &str = "23.1.0-ridl.1";
+/// `tessera-os/llvm-ridl` as `v<version>`.
+pub const LLVM_RIDL_VERSION: &str = "23.1.0-ridl.3";
 
 /// This machine's name in release asset names: `llvm-ridl-<version>-<host>`,
 /// `klf-<version>-<host>`.
