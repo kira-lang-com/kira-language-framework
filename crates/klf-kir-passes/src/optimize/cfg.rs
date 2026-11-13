@@ -11,6 +11,8 @@ use klf_core::Name;
 use klf_kir::{Function, Operation};
 use rustc_hash::FxHashMap as HashMap;
 
+const CFG_SIMPLIFICATION_INSTRUCTION_LIMIT: usize = 16_384;
+
 /// Drops the blocks the entry cannot reach and orders the rest in reverse
 /// postorder. Answers whether a block went.
 pub(super) fn remove_unreachable(function: &mut Function) -> bool {
@@ -32,6 +34,16 @@ pub(super) fn remove_unreachable(function: &mut Function) -> bool {
 
 pub(super) fn simplify(function: &mut Function) -> bool {
     if function.blocks.is_empty() {
+        return false;
+    }
+    if function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .take(CFG_SIMPLIFICATION_INSTRUCTION_LIMIT + 1)
+        .count()
+        > CFG_SIMPLIFICATION_INSTRUCTION_LIMIT
+    {
         return false;
     }
     let mut changed = fold_same_targets(function);

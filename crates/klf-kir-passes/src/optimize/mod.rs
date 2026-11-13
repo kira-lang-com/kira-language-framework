@@ -62,33 +62,64 @@ pub(crate) struct Context<'a> {
 enum KeptTypes {
     /// Outside [`simplify`]: nothing is kept.
     Off,
-    /// Inside it, before they are inferred or since a pass changed the
-    /// function.
-    Stale,
+    /// Inside it, before they are inferred or since a type-preserving pass
+    /// changed the function. The previous map seeds inference for new values.
+    Stale(Option<Rc<ValueTypes>>),
     Known(Rc<ValueTypes>),
 }
+
+const TYPE_INFERENCE_INSTRUCTION_LIMIT: usize = 16_384;
 
 impl Context<'_> {
     /// The type of every value of `function`.
     pub(crate) fn types(&self, function: &Function) -> Rc<ValueTypes> {
         let mut kept = self.types.borrow_mut();
-        match &*kept {
-            KeptTypes::Known(types) => Rc::clone(types),
-            KeptTypes::Stale => {
-                let types = Rc::new(klf_kir::infer_value_types_in(function, self.index));
-                *kept = KeptTypes::Known(Rc::clone(&types));
-                types
+        let too_large = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .take(TYPE_INFERENCE_INSTRUCTION_LIMIT + 1)
+            .count()
+            > TYPE_INFERENCE_INSTRUCTION_LIMIT;
+        if too_large {
+            if let KeptTypes::Known(types) = &*kept
+                && types.is_empty()
+            {
+                return Rc::clone(types);
             }
-            KeptTypes::Off => Rc::new(klf_kir::infer_value_types_in(function, self.index)),
+            // Type-driven rewrites use `get`, so an absent fact only makes
+            // them skip work. Avoid a full SSA map for very large functions.
+            let types = Rc::new(ValueTypes::default());
+            *kept = KeptTypes::Known(Rc::clone(&types));
+            return types;
         }
+        let previous = std::mem::replace(&mut *kept, KeptTypes::Off);
+        let types = match previous {
+            KeptTypes::Known(types) => types,
+            KeptTypes::Stale(Some(previous)) => {
+                let previous =
+                    Rc::try_unwrap(previous).unwrap_or_else(|previous| (*previous).clone());
+                Rc::new(klf_kir::infer_value_types_in_reusing_owned(
+                    function, self.index, previous,
+                ))
+            }
+            KeptTypes::Stale(None) | KeptTypes::Off => {
+                Rc::new(klf_kir::infer_value_types_in(function, self.index))
+            }
+        };
+        *kept = KeptTypes::Known(Rc::clone(&types));
+        types
     }
 
     /// Forgets the types kept of the function a pass is adding values to.
     pub(crate) fn forget_types(&self) {
         let mut kept = self.types.borrow_mut();
-        if !matches!(*kept, KeptTypes::Off) {
-            *kept = KeptTypes::Stale;
-        }
+        let previous = match &*kept {
+            KeptTypes::Off => return,
+            KeptTypes::Stale(previous) => previous.clone(),
+            KeptTypes::Known(types) => Some(Rc::clone(types)),
+        };
+        *kept = KeptTypes::Stale(previous);
     }
 
     /// Answers whether the pass `pass` changed `function`, forgetting the
@@ -96,7 +127,12 @@ impl Context<'_> {
     fn changed(&self, changed: bool, pass: &str, function: &Function) -> bool {
         let mut kept = self.types.borrow_mut();
         if changed && !matches!(*kept, KeptTypes::Off) {
-            *kept = KeptTypes::Stale;
+            let previous = match &*kept {
+                KeptTypes::Stale(previous) => previous.clone(),
+                KeptTypes::Known(types) => Some(Rc::clone(types)),
+                KeptTypes::Off => None,
+            };
+            *kept = KeptTypes::Stale(previous);
         } else if cfg!(debug_assertions)
             && let KeptTypes::Known(types) = &*kept
         {
@@ -214,10 +250,7 @@ fn run(
         ..
     } = *this;
     let shared_functions = std::mem::take(&mut module.functions);
-    let functions: Vec<Function> = shared_functions
-        .iter()
-        .map(|function| function.as_ref().clone())
-        .collect();
+    let functions = shared_functions.clone();
     let count = functions.len();
     let before: Vec<Option<Made>> = if before.is_empty() {
         (0..count).map(|_| None).collect()
@@ -229,7 +262,7 @@ fn run(
     let input = |position: usize| -> &Function {
         before[position]
             .as_ref()
-            .map_or(&functions[position], |made| made.body(memo))
+            .map_or(functions[position].as_ref(), |made| made.body(memo))
     };
     let shell = signatures(module, &functions);
     let index = ModuleIndex::of(&shell);
@@ -241,7 +274,7 @@ fn run(
     let scanned: Vec<Vec<Name>> = (0..count)
         .map(|position| match before[position] {
             Some(_) => Vec::new(),
-            None => graph::calls_of(&functions[position]),
+            None => graph::calls_of(functions[position].as_ref()),
         })
         .collect();
     let calls: Vec<&[Name]> = (0..count)
@@ -340,7 +373,7 @@ fn run(
     };
     let digest_of = |memo: &dyn Memo, position: usize| {
         before[position].as_ref().map_or_else(
-            || memo::digest_of(memo, &functions[position], placeless),
+            || memo::digest_of(memo, functions[position].as_ref(), placeless),
             |made| made.digest,
         )
     };
@@ -381,7 +414,7 @@ fn run(
         let made = has_body(position).then(|| finished.wait(&done[position]));
         let key = memo.zip(run_digest).map(|(memo, run_digest)| {
             let body = made.map_or_else(
-                || memo::digest_of(memo, &functions[position], placeless),
+                || memo::digest_of(memo, functions[position].as_ref(), placeless),
                 |made| made.digest,
             );
             (
@@ -399,7 +432,7 @@ fn run(
             return;
         }
         let mut function = made
-            .map_or(&functions[position], |made| made.body(memo))
+            .map_or(functions[position].as_ref(), |made| made.body(memo))
             .clone();
         util::start_fresh(&function);
         machine::shape(&mut function, context);
@@ -409,7 +442,7 @@ fn run(
         }
         let _ = shaped[position].set(function);
     });
-    drop(before);
+    made::drop_parallel(before);
     let made: Vec<Option<Made>> = done.into_iter().map(OnceLock::into_inner).collect();
     if shape {
         module.functions = shaped
@@ -560,7 +593,7 @@ fn on_workers(
 /// Answers whether the function came to rest: a last round of every pass
 /// changed nothing.
 fn simplify(function: &mut Function, context: &Context<'_>, promote: bool) -> bool {
-    let outer = context.types.replace(KeptTypes::Stale);
+    let outer = context.types.replace(KeptTypes::Stale(None));
     let at_rest = simplify_rounds(function, context, promote);
     context.types.replace(outer);
     at_rest
@@ -615,16 +648,11 @@ fn strip_debug(function: &mut Function) {
 
 /// The module without function bodies: what passes need to type a call's
 /// results while the bodies themselves change.
-fn signatures(module: &Module, functions: &[Function]) -> Module {
+fn signatures(module: &Module, functions: &[std::sync::Arc<Function>]) -> Module {
     let mut shell = module.clone();
     shell.functions = functions
         .iter()
-        .map(|function| {
-            std::sync::Arc::new(Function {
-                blocks: Vec::new(),
-                ..function.clone()
-            })
-        })
+        .map(|function| std::sync::Arc::new(function.without_body()))
         .collect();
     shell
 }

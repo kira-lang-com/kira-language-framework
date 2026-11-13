@@ -165,7 +165,16 @@ fn same_operands(operator: BinaryOperator, ty: Option<&Type>) -> Option<Same> {
 #[allow(clippy::too_many_lines)]
 pub(super) fn fold(function: &mut Function, context: &Context<'_>) -> bool {
     let mut known = constants(function);
-    let types = context.types(function);
+    let needs_types = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| match &instruction.operation {
+            Operation::Binary { lhs, rhs, .. } => lhs == rhs,
+            Operation::Move(_) | Operation::Copy(_) => true,
+            _ => false,
+        });
+    let types = needs_types.then(|| context.types(function));
     let mut renames: HashMap<Name, Name> = HashMap::default();
     let mut changed = false;
     for block in &mut function.blocks {
@@ -205,16 +214,17 @@ pub(super) fn fold(function: &mut Function, context: &Context<'_>) -> bool {
                         })
                     }
                     _ if lhs == rhs => {
-                        same_operands(*operator, types.get(lhs)).map(|same| match same {
-                            Same::Zero(width) => Operation::ConstInt {
-                                ty: Type::Integer(width),
-                                value: 0,
-                            },
-                            Same::Operand => {
-                                renames.insert(result.clone().expect("a result"), lhs.clone());
-                                Operation::Nop
-                            }
-                        })
+                        same_operands(*operator, types.as_deref().and_then(|types| types.get(lhs)))
+                            .map(|same| match same {
+                                Same::Zero(width) => Operation::ConstInt {
+                                    ty: Type::Integer(width),
+                                    value: 0,
+                                },
+                                Same::Operand => {
+                                    renames.insert(result.clone().expect("a result"), lhs.clone());
+                                    Operation::Nop
+                                }
+                            })
                     }
                     _ => None,
                 },
@@ -272,7 +282,10 @@ pub(super) fn fold(function: &mut Function, context: &Context<'_>) -> bool {
                     _ => None,
                 },
                 Operation::Move(value) | Operation::Copy(value)
-                    if types.get(value).is_some_and(is_scalar) =>
+                    if types
+                        .as_deref()
+                        .and_then(|types| types.get(value))
+                        .is_some_and(is_scalar) =>
                 {
                     renames.insert(result.clone().expect("a result"), value.clone());
                     Some(Operation::Nop)

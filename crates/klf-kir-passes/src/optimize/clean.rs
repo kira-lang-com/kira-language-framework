@@ -14,6 +14,8 @@ use klf_kir::{
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
+const PARAMETER_REMOVAL_LIMIT: usize = 16_384;
+
 /// Whether dropping the instruction, when nothing reads its results, leaves
 /// behavior unchanged: it neither writes, traps, consumes nor calls.
 pub(super) fn pure(operation: &Operation) -> bool {
@@ -218,6 +220,16 @@ pub(super) fn remove_parameters(function: &mut Function) -> bool {
     if function.blocks.len() < 2 {
         return false;
     }
+    if function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.parameters)
+        .take(PARAMETER_REMOVAL_LIMIT + 1)
+        .count()
+        > PARAMETER_REMOVAL_LIMIT
+    {
+        return false;
+    }
     if function.blocks[1..]
         .iter()
         .all(|block| block.parameters.is_empty())
@@ -228,7 +240,13 @@ pub(super) fn remove_parameters(function: &mut Function) -> bool {
     let mut changed = false;
     loop {
         let positions = block_positions(function);
-        let mut renames: HashMap<Name, Name> = HashMap::default();
+        let parameter_count: usize = function
+            .blocks
+            .iter()
+            .map(|block| block.parameters.len())
+            .sum();
+        let mut renames: HashMap<Name, Name> =
+            HashMap::with_capacity_and_hasher(parameter_count, Default::default());
         let mut drop: Vec<HashSet<usize>> = vec![HashSet::default(); function.blocks.len()];
         let known = constants(function);
         let mut defined: Vec<(usize, Name, u16, i128)> = Vec::new();
@@ -277,7 +295,14 @@ pub(super) fn remove_parameters(function: &mut Function) -> bool {
                 }
             }
         }
-        dead_parameters(function, &pinned, &implicit_targets, &renames, &mut drop);
+        dead_parameters(
+            function,
+            &pinned,
+            &implicit_targets,
+            &renames,
+            &mut drop,
+            &edges,
+        );
         if drop.iter().all(HashSet::is_empty) {
             return changed;
         }
@@ -324,6 +349,7 @@ fn dead_parameters(
     implicit: &HashSet<usize>,
     renames: &HashMap<Name, Name>,
     drop: &mut [HashSet<usize>],
+    edges: &[Vec<&[Name]>],
 ) {
     let mut owner: HashMap<&Name, (usize, usize)> = HashMap::default();
     for (position, block) in function.blocks.iter().enumerate().skip(1) {
@@ -336,8 +362,6 @@ fn dead_parameters(
             }
         }
     }
-    let positions = block_positions(function);
-    let edges = incoming_arguments(function, &positions);
     let mut live: HashSet<&Name> = HashSet::default();
     let mut work: Vec<&Name> = Vec::new();
     // Uses outside edge arguments keep a value live.

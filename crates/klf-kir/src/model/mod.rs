@@ -412,6 +412,28 @@ pub struct Function {
     pub span: Span,
 }
 
+impl Function {
+    #[must_use]
+    pub fn without_body(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            linkage: self.linkage.clone(),
+            abi: self.abi.clone(),
+            nounwind: self.nounwind,
+            foreign: self.foreign,
+            c_prototype: self.c_prototype.clone(),
+            generics: self.generics.clone(),
+            attributes: self.attributes.clone(),
+            parameters: self.parameters.clone(),
+            result: self.result.clone(),
+            failure: self.failure.clone(),
+            engine: self.engine.clone(),
+            blocks: Vec::new(),
+            span: self.span.clone(),
+        }
+    }
+}
+
 /// A function's C signature. A `Value` parameter is a C aggregate passed by
 /// value, which the KIR signature carries as the address of a C-layout
 /// record; a `Value` result is written through an address the KIR signature

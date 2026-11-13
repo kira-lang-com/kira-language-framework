@@ -16,31 +16,50 @@ impl Module {
         &'a self,
         roots: impl IntoIterator<Item = &'a Name>,
     ) -> HashSet<usize> {
+        self.reachable_function_marks(roots)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(position, reached)| reached.then_some(position))
+            .collect()
+    }
+
+    /// A dense reachability map indexed like `functions`, for compiler passes
+    /// that retain or inspect functions in position order.
+    #[must_use]
+    pub fn reachable_function_marks<'a>(
+        &'a self,
+        roots: impl IntoIterator<Item = &'a Name>,
+    ) -> Vec<bool> {
         let index: HashMap<&Name, usize> = self
             .functions
             .iter()
             .enumerate()
             .map(|(position, function)| (&function.name, position))
             .collect();
-        let mut reached = HashSet::default();
-        let mut pending: Vec<usize> = roots
-            .into_iter()
-            .chain(self.implicit_roots())
-            .filter_map(|name| index.get(name).copied())
-            .collect();
-        while let Some(position) = pending.pop() {
-            if !reached.insert(position) {
-                continue;
+        let mut reached = vec![false; self.functions.len()];
+        let mut pending = Vec::with_capacity(self.functions.len().min(16_384));
+        for name in roots.into_iter().chain(self.implicit_roots()) {
+            if let Some(position) = index.get(name).copied()
+                && !reached[position]
+            {
+                reached[position] = true;
+                pending.push(position);
             }
+        }
+        while let Some(position) = pending.pop() {
             let body = self.functions[position]
                 .blocks
                 .iter()
                 .flat_map(|block| &block.instructions);
-            pending.extend(
-                body.filter_map(|instruction| named_function(&instruction.operation))
-                    .filter_map(|name| index.get(name).copied())
-                    .filter(|callee| !reached.contains(callee)),
-            );
+            for callee in body
+                .filter_map(|instruction| named_function(&instruction.operation))
+                .filter_map(|name| index.get(name).copied())
+            {
+                if !reached[callee] {
+                    reached[callee] = true;
+                    pending.push(callee);
+                }
+            }
         }
         reached
     }

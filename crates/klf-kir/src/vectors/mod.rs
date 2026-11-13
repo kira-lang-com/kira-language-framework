@@ -78,15 +78,7 @@ pub fn vectors_to_lanes(module: &Module) -> Option<Module> {
 
 /// Whether any value, parameter or result of `function` is a vector.
 fn holds_vectors(function: &Function, index: &ModuleIndex<'_>) -> bool {
-    if is_vector(&function.result)
-        || function
-            .parameters
-            .iter()
-            .any(|parameter| is_vector(&parameter.ty))
-    {
-        return true;
-    }
-    if function.blocks.is_empty() {
+    if function.blocks.is_empty() || !crate::analysis::may_infer_vector(function, index) {
         return false;
     }
     crate::infer_value_types_in(function, index)

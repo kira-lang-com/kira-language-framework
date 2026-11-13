@@ -99,14 +99,13 @@ pub(super) fn machine_flags(function: &mut Function, context: &Context<'_>) -> b
 /// and whether the compare answers that the result is exact.
 fn overflow_tests(function: &Function, context: &Context<'_>) -> Vec<(Name, Name, bool)> {
     let known = constants(function);
-    let types = klf_kir::infer_value_types_in(function, context.index);
     let mut definitions: HashMap<Name, Operation> = HashMap::default();
     for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
         if let [result] = instruction.results.as_slice() {
             definitions.insert(result.clone(), instruction.operation.clone());
         }
     }
-    let mut tests: Vec<(Name, Name, bool)> = Vec::new();
+    let mut candidates = Vec::new();
     for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
         let (
             [compared],
@@ -127,13 +126,24 @@ fn overflow_tests(function: &Function, context: &Context<'_>) -> Vec<(Name, Name
         if known.get(rhs).is_none_or(|&(_, value)| value != 0) {
             continue;
         }
-        if let Some(result) = checked(lhs, &definitions)
-            && types.get(&result).is_some_and(is_word)
-        {
-            tests.push((compared.clone(), result, exact));
+        if let Some(result) = checked(lhs, &definitions) {
+            candidates.push((compared.clone(), result, exact));
         }
     }
-    tests
+    if candidates.is_empty()
+        || function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .take(super::super::TYPE_INFERENCE_INSTRUCTION_LIMIT + 1)
+            .count()
+            > super::super::TYPE_INFERENCE_INSTRUCTION_LIMIT
+    {
+        return Vec::new();
+    }
+    let types = klf_kir::infer_value_types_in(function, context.index);
+    candidates.retain(|(_, result, _)| types.get(result).is_some_and(is_word));
+    candidates
 }
 
 /// The whole-word sum or difference `value`'s sign tests for overflow.

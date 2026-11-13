@@ -7,6 +7,18 @@
 use klf_core::Name;
 use klf_kir::{Function, Module};
 
+const PLACELESS_DIGEST_INSTRUCTION_LIMIT: usize = 16_384;
+
+fn can_normalize_spans(function: &Function) -> bool {
+    function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .take(PLACELESS_DIGEST_INSTRUCTION_LIMIT + 1)
+        .count()
+        <= PLACELESS_DIGEST_INSTRUCTION_LIMIT
+}
+
 /// Where optimized functions are kept between builds. The optimizer names
 /// an entry by `digest` and stores whatever bytes it likes under it. Every
 /// entry a build reads it puts or reuses, so a store can drop the others.
@@ -41,7 +53,7 @@ pub(super) struct Optimized {
 /// were written: those move whenever text above them changes, and a backend
 /// that reads none of them makes the same code either way.
 pub(super) fn digest_of(memo: &dyn Memo, function: &Function, placeless: bool) -> [u8; 32] {
-    if !placeless {
+    if !placeless || !can_normalize_spans(function) {
         return memo.digest(&postcard::to_stdvec(function).unwrap_or_default());
     }
     let mut moved = function.clone();
@@ -65,7 +77,7 @@ pub(super) fn digest_of(memo: &dyn Memo, function: &Function, placeless: bool) -
 /// share is kept once.
 pub(super) fn keep_body(memo: &dyn Memo, function: &Function, placeless: bool) -> [u8; 32] {
     let bytes = postcard::to_stdvec(function).unwrap_or_default();
-    let digest = if placeless {
+    let digest = if placeless && can_normalize_spans(function) {
         digest_of(memo, function, true)
     } else {
         memo.digest(&bytes)

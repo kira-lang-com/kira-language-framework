@@ -54,7 +54,7 @@ pub(crate) fn emit_binary(
     let scratch = Scratch::new()?;
     let exports = crate::module_pruning::program_exports(&module);
     let exports: Vec<(&str, &str)> = exports.iter().map(|name| (*name, *name)).collect();
-    std::thread::scope(|scope| {
+    let linked = std::thread::scope(|scope| {
         let natives = scope.spawn(|| Natives::of(&module, language, &target, &toolchain, &scratch));
         let (object, cache) =
             match klf_cranelift::CodeCache::for_artifact(module.name.as_str(), output, &target) {
@@ -104,28 +104,70 @@ pub(crate) fn emit_binary(
             }
         }
         Ok(())
-    })
+    });
+    drop(exports);
+    drop_module_functions_parallel(module);
+    linked
 }
 
-/// The archives a binary built from `module` links besides its own machine
-/// code, the runtime and the std library, when they are all it links:
-/// `None` when the module names C sources, libraries, link flags or
-/// resources of its own.
+/// Release a compiled module's function bodies on several workers. Large KIR
+/// modules contain many nested allocations, and serially dropping them after
+/// codegen can hold the build for minutes even though compilation is done.
+fn drop_module_functions_parallel(mut module: Module) {
+    let functions = std::mem::take(&mut module.functions);
+    drop(module);
+    let mut functions = functions.into_iter().map(Some).collect::<Vec<_>>();
+    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let chunk = functions.len().div_ceil(workers).max(1);
+    std::thread::scope(|scope| {
+        for entries in functions.chunks_mut(chunk) {
+            scope.spawn(move || {
+                for entry in entries {
+                    drop(entry.take());
+                }
+            });
+        }
+    });
+}
+
+/// The files whose contents decide a binary's link besides its own machine
+/// code, the runtime and the std library. Link flags themselves come from
+/// observed package inputs; path-valued libraries, C sources and resources
+/// are included here.
 pub(crate) fn linked_archives(
     module: &Module,
     language: &str,
     target: &str,
 ) -> Option<Vec<PathBuf>> {
-    if module
-        .attributes
-        .iter()
-        .any(|attribute| attribute.name.starts_with("link."))
-    {
-        return None;
-    }
     let mut archives = vec![Runtime::of(module).archive(target).ok()?];
     if let Some(root) = installed_sysroot() {
         archives.extend(carried_std(&root, language, target).ok()?);
+    }
+    for attribute in &module.attributes {
+        let Some(value) = attribute.value.as_deref() else {
+            continue;
+        };
+        match attribute.name.as_str() {
+            crate::native_link::LIBRARY_ATTRIBUTE if value.ends_with(".klbc") => {
+                archives.extend(
+                    crate::native_link::image_library(value, target)
+                        .into_iter()
+                        .filter(|argument| !argument.to_string_lossy().starts_with("-Wl,"))
+                        .map(PathBuf::from),
+                );
+            }
+            crate::native_link::LIBRARY_ATTRIBUTE => {
+                let path = PathBuf::from(value);
+                archives.push(std::path::absolute(&path).unwrap_or(path));
+            }
+            crate::native_link::C_SOURCE_ATTRIBUTE | crate::native_link::RESOURCE_ATTRIBUTE => {
+                if let Some(path) = value.split('\t').next().filter(|path| !path.is_empty()) {
+                    let path = PathBuf::from(path);
+                    archives.push(std::path::absolute(&path).unwrap_or(path));
+                }
+            }
+            _ => {}
+        }
     }
     Some(archives)
 }

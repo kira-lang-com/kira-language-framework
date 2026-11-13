@@ -35,8 +35,7 @@ impl Module {
 /// `None` when it has none.
 #[must_use]
 pub fn witness_calls_to_direct(module: &Module) -> Option<Module> {
-    let mut result = module.clone();
-    let mut changed = false;
+    let mut result = None;
     for (index, function) in module.functions.iter().enumerate() {
         for (block_index, block) in function.blocks.iter().enumerate() {
             for (position, instruction) in block.instructions.iter().enumerate() {
@@ -47,15 +46,15 @@ pub fn witness_calls_to_direct(module: &Module) -> Option<Module> {
                 else {
                     continue;
                 };
+                let result = result.get_or_insert_with(|| module.clone());
                 let function = std::sync::Arc::make_mut(&mut result.functions[index]);
                 function.blocks[block_index].instructions[position].operation = Operation::Call {
                     callee: callee.clone(),
                     generic_args: Vec::new(),
                     arguments: call.arguments.clone(),
                 };
-                changed = true;
             }
         }
     }
-    changed.then_some(result)
+    result
 }

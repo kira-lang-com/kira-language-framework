@@ -14,6 +14,10 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 /// The most places a block tracks at once.
 const MOST_PLACES: usize = 64;
 
+/// Full SSA type inference costs too much in giant functions for this local
+/// forwarding pass to justify it.
+const TYPE_INFERENCE_INSTRUCTION_LIMIT: usize = 16_384;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Step {
     Field(u32),
@@ -203,6 +207,23 @@ fn tag_bits(ty: Option<&Type>, context: &Context<'_>) -> Option<u16> {
 #[allow(clippy::too_many_lines)]
 pub(in crate::optimize) fn forward(function: &mut Function, context: &Context<'_>) -> bool {
     if function.blocks.is_empty() {
+        return false;
+    }
+    let mut instruction_count = 0usize;
+    let mut needs_types = false;
+    for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+        instruction_count = instruction_count.saturating_add(1);
+        needs_types |= matches!(
+            &instruction.operation,
+            Operation::Load {
+                mode: LoadMode::Trivial,
+                ..
+            } | Operation::Store { .. }
+                | Operation::EnumTag { .. }
+                | Operation::EnumInject { .. }
+        );
+    }
+    if !needs_types || instruction_count > TYPE_INFERENCE_INSTRUCTION_LIMIT {
         return false;
     }
     let types = context.types(function);

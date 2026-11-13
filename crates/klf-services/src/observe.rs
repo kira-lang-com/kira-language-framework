@@ -115,26 +115,37 @@ pub fn record_accesses() {
 
 /// Notes that the process read `path`, asked whether it exists, or listed it.
 pub fn note_access(path: &Path) {
+    note_access_many(std::iter::once(path));
+}
+
+/// Notes several paths together, taking the shared access-set lock once.
+pub fn note_access_many<'a>(paths: impl IntoIterator<Item = &'a Path>) {
     if !RECORDING.load(Ordering::Relaxed) {
         return;
     }
-    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = if absolute
-        .components()
-        .any(|component| component == Component::CurDir)
-    {
-        let mut normalized = PathBuf::new();
-        for component in absolute.components() {
-            if component != Component::CurDir {
-                normalized.push(component.as_os_str());
+    let mut normalized = BTreeSet::new();
+    for path in paths {
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let path = if absolute
+            .components()
+            .any(|component| component == Component::CurDir)
+        {
+            let mut path = PathBuf::new();
+            for component in absolute.components() {
+                if component != Component::CurDir {
+                    path.push(component.as_os_str());
+                }
             }
-        }
-        normalized
-    } else {
-        absolute
-    };
-    if let Ok(mut accessed) = ACCESSED.get_or_init(Default::default).lock() {
-        accessed.insert(path);
+            path
+        } else {
+            absolute
+        };
+        normalized.insert(path);
+    }
+    if !normalized.is_empty()
+        && let Ok(mut accessed) = ACCESSED.get_or_init(Default::default).lock()
+    {
+        accessed.extend(normalized);
     }
 }
 

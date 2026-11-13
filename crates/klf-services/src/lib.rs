@@ -45,7 +45,7 @@ pub use image::{
 pub use location::diagnostic_location;
 pub use observe::{
     FileIdentity, Observation, accessed, directory_overlay_entries, file_identity,
-    file_identity_from_metadata, note_access, record_accesses,
+    file_identity_from_metadata, note_access, note_access_many, record_accesses,
 };
 pub use query::{QueryDependency, QueryId, QueryPhase, QueryRecord, QueryStats};
 pub use scheduler::parallel_map;

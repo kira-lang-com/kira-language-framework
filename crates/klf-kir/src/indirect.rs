@@ -15,15 +15,14 @@ use std::collections::{HashMap, HashSet};
 /// `None` when it has none this can rewrite.
 #[must_use]
 pub fn indirect_branches_to_switches(module: &Module) -> Option<Module> {
-    let mut result = module.clone();
-    let mut changed = false;
-    for function in &mut result.functions {
+    let mut result = None;
+    for (position, function) in module.functions.iter().enumerate() {
         if let Some(rewritten) = rewrite(function) {
-            *function = std::sync::Arc::new(rewritten);
-            changed = true;
+            let result = result.get_or_insert_with(|| module.clone());
+            result.functions[position] = std::sync::Arc::new(rewritten);
         }
     }
-    changed.then_some(result)
+    result
 }
 
 fn rewrite(function: &Function) -> Option<Function> {

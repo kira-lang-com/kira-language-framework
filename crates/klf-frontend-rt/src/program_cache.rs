@@ -280,13 +280,30 @@ fn changed_metadata_since(metadata: &Metadata, started: SystemTime) -> bool {
 /// `key` still holds: the executable can run as it is.
 pub(crate) fn reusable(executable: &Path, key: &str) -> Option<String> {
     STARTED.get_or_init(SystemTime::now);
-    let bytes = std::fs::read(stamp_path(executable)).ok()?;
-    let stamp: Stamp = postcard::from_bytes(&bytes).ok()?;
-    if stamp.key != key || signature(executable)? != stamp.executable {
+    let stamp_path = stamp_path(executable);
+    let Ok(bytes) = std::fs::read(&stamp_path) else {
+        klf_diag::progress!("program cache miss reason=stamp-unreadable");
+        return None;
+    };
+    let Ok(stamp) = postcard::from_bytes::<Stamp>(&bytes) else {
+        klf_diag::progress!("program cache miss reason=stamp-invalid");
+        return None;
+    };
+    if stamp.key != key {
+        klf_diag::progress!("program cache miss reason=key-mismatch");
+        return None;
+    }
+    if signature(executable) != Some(stamp.executable) {
+        klf_diag::progress!("program cache miss reason=executable-changed");
         return None;
     }
     let (unchanged, work) = std::thread::scope(|scope| {
-        let workers = std::thread::available_parallelism().map_or(1, usize::from);
+        const MAX_WORKERS: usize = 64;
+        let cpu_workers = std::thread::available_parallelism().map_or(1, usize::from);
+        let workers = cpu_workers
+            .saturating_mul(4)
+            .clamp(32, MAX_WORKERS)
+            .min(stamp.inputs.len().max(1));
         let chunk = stamp.inputs.len().div_ceil(workers).max(1);
         let parts: Vec<_> = stamp
             .inputs
@@ -340,6 +357,7 @@ pub(crate) fn keep(executable: &Path, key: &str, links: &[PathBuf], warnings: &s
     let path = stamp_path(executable);
     let _ = std::fs::remove_file(&path);
     let Some(linked) = signature(executable) else {
+        klf_diag::progress!("program cache not kept reason=executable-unreadable");
         return;
     };
     let inputs: Vec<PathBuf> = klf_services::accessed()
@@ -352,6 +370,10 @@ pub(crate) fn keep(executable: &Path, key: &str, links: &[PathBuf], warnings: &s
     for input in inputs {
         let (was, changed) = held(&input, started, &mut directory_names);
         if changed {
+            klf_diag::progress!(
+                "program cache not kept reason=input-changed path={}",
+                input.display()
+            );
             return;
         }
         held_inputs.push((input, was));
@@ -363,10 +385,12 @@ pub(crate) fn keep(executable: &Path, key: &str, links: &[PathBuf], warnings: &s
         warnings: warnings.to_owned(),
     };
     let Ok(bytes) = postcard::to_stdvec(&stamp) else {
+        klf_diag::progress!("program cache not kept reason=stamp-encode-failed");
         return;
     };
     let staged = path.with_extension(format!("stamp.{}.partial", std::process::id()));
     if std::fs::write(&staged, bytes).is_err() || std::fs::rename(&staged, &path).is_err() {
+        klf_diag::progress!("program cache not kept reason=stamp-write-failed");
         let _ = std::fs::remove_file(&staged);
     }
 }

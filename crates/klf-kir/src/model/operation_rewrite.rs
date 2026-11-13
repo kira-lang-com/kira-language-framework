@@ -14,6 +14,253 @@ impl Operation {
         self.multiple_uses_mut()
     }
 
+    /// Visits every used value in order without allocating a temporary vector.
+    #[allow(clippy::too_many_lines)]
+    pub fn for_each_used_value_mut(&mut self, mut visit: impl FnMut(&mut Name)) {
+        if let Some(value) = self.single_use_mut() {
+            visit(value);
+            return;
+        }
+        match self {
+            Self::Binary { lhs, rhs, .. }
+            | Self::BinaryOverflow { lhs, rhs, .. }
+            | Self::IntegerCompare { lhs, rhs, .. }
+            | Self::FloatBinary { lhs, rhs, .. }
+            | Self::FloatCompare { lhs, rhs, .. }
+            | Self::PointerDiff { lhs, rhs }
+            | Self::VectorShuffle { lhs, rhs, .. } => {
+                visit(lhs);
+                visit(rhs);
+            }
+            Self::CopyAddr { source, dest, .. }
+            | Self::MoveAddr { source, dest, .. }
+            | Self::VaCopy { dest, source } => {
+                visit(source);
+                visit(dest);
+            }
+            Self::Store { value, address, .. }
+            | Self::RawStore {
+                value,
+                pointer: address,
+                ..
+            }
+            | Self::AtomicStore {
+                value,
+                pointer: address,
+                ..
+            }
+            | Self::LongJmp {
+                value,
+                buffer: address,
+            } => {
+                visit(value);
+                visit(address);
+            }
+            Self::PointerOffset { pointer, bytes } => {
+                visit(pointer);
+                visit(bytes);
+            }
+            Self::HeapAllocRaw { size, align } => {
+                visit(size);
+                visit(align);
+            }
+            Self::ElemAddr { base, index } => {
+                visit(base);
+                visit(index);
+            }
+            Self::AtomicLoad { pointer, .. } | Self::FieldAddr { base: pointer, .. } => {
+                visit(pointer);
+            }
+            Self::AtomicRmw { pointer, value, .. } => {
+                visit(pointer);
+                visit(value);
+            }
+            Self::VectorInsert { vector, value, .. } => {
+                visit(vector);
+                visit(value);
+            }
+            Self::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                visit(condition);
+                visit(then_value);
+                visit(else_value);
+            }
+            Self::FloatFma {
+                first,
+                second,
+                addend,
+            } => {
+                visit(first);
+                visit(second);
+                visit(addend);
+            }
+            Self::MemCopy {
+                dest,
+                source,
+                length,
+            }
+            | Self::MemMove {
+                dest,
+                source,
+                length,
+            } => {
+                visit(dest);
+                visit(source);
+                visit(length);
+            }
+            Self::MemSet { dest, byte, length } => {
+                visit(dest);
+                visit(byte);
+                visit(length);
+            }
+            Self::AtomicCompareExchange {
+                pointer,
+                expected,
+                replacement,
+                ..
+            } => {
+                visit(pointer);
+                visit(expected);
+                visit(replacement);
+            }
+            Self::Call { arguments, .. } | Self::CallForeign { arguments, .. } => {
+                for value in arguments {
+                    visit(value);
+                }
+            }
+            Self::CallWitness(call) => {
+                for value in &mut call.arguments {
+                    visit(value);
+                }
+            }
+            Self::Intrinsic(call) => {
+                for value in &mut call.arguments {
+                    visit(value);
+                }
+            }
+            Self::StructNew { fields, .. }
+            | Self::TupleNew(fields)
+            | Self::ArrayNew {
+                elements: fields, ..
+            }
+            | Self::EnumNew {
+                payload: fields, ..
+            }
+            | Self::LandingPad {
+                catches: fields, ..
+            } => {
+                for value in fields {
+                    visit(value);
+                }
+            }
+            Self::CallIndirect(call) => {
+                visit(&mut call.target);
+                for value in &mut call.arguments {
+                    visit(value);
+                }
+            }
+            Self::CallClosure(call) => {
+                visit(&mut call.closure);
+                for value in &mut call.arguments {
+                    visit(value);
+                }
+            }
+            Self::CallVtable(call) => {
+                visit(&mut call.object);
+                for value in &mut call.arguments {
+                    visit(value);
+                }
+            }
+            Self::CallVariadic {
+                fixed, variadic, ..
+            } => {
+                for value in fixed.iter_mut().chain(variadic) {
+                    visit(value);
+                }
+            }
+            Self::Asm(asm) => {
+                for value in &mut asm.arguments {
+                    visit(value);
+                }
+            }
+            Self::TryCall(call) => {
+                let call = &mut **call;
+                for value in call
+                    .arguments
+                    .iter_mut()
+                    .chain(&mut call.normal.arguments)
+                    .chain(&mut call.error.arguments)
+                {
+                    visit(value);
+                }
+            }
+            Self::Invoke(call) => {
+                let call = &mut **call;
+                for value in call
+                    .arguments
+                    .iter_mut()
+                    .chain(&mut call.normal.arguments)
+                    .chain(&mut call.unwind.arguments)
+                {
+                    visit(value);
+                }
+            }
+            Self::Branch(target) => {
+                for value in &mut target.arguments {
+                    visit(value);
+                }
+            }
+            Self::BranchIndirect { address, .. } => visit(address),
+            Self::ConditionalBranch(branch) => {
+                let branch = &mut **branch;
+                visit(&mut branch.condition);
+                for value in branch
+                    .then_target
+                    .arguments
+                    .iter_mut()
+                    .chain(&mut branch.else_target.arguments)
+                {
+                    visit(value);
+                }
+            }
+            Self::SwitchInt(switch) => {
+                let switch = &mut **switch;
+                visit(&mut switch.value);
+                for (_, target) in &mut switch.cases {
+                    for value in &mut target.arguments {
+                        visit(value);
+                    }
+                }
+                for value in &mut switch.default.arguments {
+                    visit(value);
+                }
+            }
+            Self::SwitchEnum(switch) => {
+                let switch = &mut **switch;
+                visit(&mut switch.value);
+                for (_, target) in &mut switch.cases {
+                    for value in &mut target.arguments {
+                        visit(value);
+                    }
+                }
+                if let Some(target) = &mut switch.default {
+                    for value in &mut target.arguments {
+                        visit(value);
+                    }
+                }
+            }
+            Self::Return(value) => {
+                if let Some(value) = value {
+                    visit(value);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn uses_single_or_none(&self) -> bool {
         self.nullary_or_unary_uses().is_some()
     }

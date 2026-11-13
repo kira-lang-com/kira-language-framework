@@ -39,6 +39,11 @@ pub(super) fn build(
     };
     let program_key = cache.as_ref().filter(|_| reuses).map(|cache| {
         let mut key = cache.build_key();
+        if toolchain::is_apple(&triple)
+            && let Some(sdk) = toolchain::apple_sdk(&triple)
+        {
+            key.push_str(&format!("Apple SDK {sdk}\n"));
+        }
         for input in &invocation.inputs {
             let input = std::path::absolute(input).unwrap_or_else(|_| input.clone());
             key.push_str(&format!("input {}\n", input.display()));

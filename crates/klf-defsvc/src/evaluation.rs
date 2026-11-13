@@ -285,11 +285,11 @@ fn initializers(module: &Module) -> impl Iterator<Item = &Name> {
 /// Keeps the functions `roots` and the initializers reach: an evaluation
 /// costs what it runs rather than the size of the module it runs in.
 pub(super) fn retain_reached(module: &mut Module, roots: &[Name]) {
-    let reached = module.reachable_functions(roots.iter().chain(initializers(module)));
+    let reached = module.reachable_function_marks(roots.iter().chain(initializers(module)));
     let mut position = 0;
     module.functions.retain(|_| {
         position += 1;
-        reached.contains(&(position - 1))
+        reached[position - 1]
     });
 }
 
@@ -297,12 +297,12 @@ pub(super) fn retain_reached(module: &mut Module, roots: &[Name]) {
 // or an initializer reaches.
 fn evaluator(module: &Module, called: Vec<&Name>) -> Module {
     let needed = needed_initializers(module, &called);
-    let reached = module.reachable_functions(called.into_iter().chain(needed.iter().copied()));
+    let reached = module.reachable_function_marks(called.into_iter().chain(needed.iter().copied()));
     let functions = module
         .functions
         .iter()
         .enumerate()
-        .filter(|(position, _)| reached.contains(position))
+        .filter(|(position, _)| reached[*position])
         .map(|(_, function)| {
             if needed.contains(&&function.name)
                 || !function
@@ -385,9 +385,11 @@ fn addressed_globals<'a>(
     roots: impl IntoIterator<Item = &'a Name>,
 ) -> std::collections::HashSet<&'a Name> {
     module
-        .reachable_functions(roots)
+        .reachable_function_marks(roots)
         .into_iter()
-        .flat_map(|position| &module.functions[position].blocks)
+        .enumerate()
+        .filter(|(_, reached)| *reached)
+        .flat_map(|(position, _)| &module.functions[position].blocks)
         .flat_map(|block| &block.instructions)
         .filter_map(|instruction| global_named(&instruction.operation))
         .collect()

@@ -103,3 +103,21 @@ pub(super) fn bodies(made: Vec<Option<Made>>, memo: Option<&dyn Memo>) -> Vec<Op
             .collect()
     })
 }
+
+/// Drop bodies from an earlier optimization round across the worker pool.
+/// A large module can hold several gigabytes of separately allocated KIR;
+/// dropping every nested vector on the caller thread otherwise serializes
+/// allocator work for minutes.
+pub(super) fn drop_parallel(mut made: Vec<Option<Made>>) {
+    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let chunk = made.len().div_ceil(workers).max(1);
+    std::thread::scope(|scope| {
+        for entries in made.chunks_mut(chunk) {
+            scope.spawn(move || {
+                for entry in entries {
+                    drop(entry.take());
+                }
+            });
+        }
+    });
+}

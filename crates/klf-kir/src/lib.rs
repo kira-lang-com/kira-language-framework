@@ -21,7 +21,8 @@ mod witness_calls;
 
 pub use aggregates::aggregates_to_memory;
 pub use analysis::{
-    ModuleIndex, ValueTypes, infer_value_types, infer_value_types_in, unmanaged_manifest,
+    ModuleIndex, ValueTypes, infer_value_types, infer_value_types_in, infer_value_types_in_reusing,
+    infer_value_types_in_reusing_owned, unmanaged_manifest,
 };
 pub use c_shim::c_shim_source;
 pub use indirect::indirect_branches_to_switches;

@@ -55,37 +55,47 @@ pub(super) fn rename_uses(function: &mut Function, renames: &HashMap<Name, Name>
     if renames.is_empty() {
         return;
     }
-    let resolve = |name: &Name| {
-        let mut current = name;
-        let mut steps = 0;
-        while let Some(next) = renames.get(current) {
-            current = next;
-            steps += 1;
-            if steps > renames.len() {
-                break;
-            }
-        }
-        current.clone()
-    };
     for block in &mut function.blocks {
         for instruction in &mut block.instructions {
-            for used in instruction.operation.used_values_mut() {
-                if renames.contains_key(used) {
-                    *used = resolve(used);
+            instruction.operation.for_each_used_value_mut(|used| {
+                if let Some(mut replacement) = renames.get(used) {
+                    let mut steps = 1;
+                    while let Some(next) = renames.get(replacement) {
+                        replacement = next;
+                        steps += 1;
+                        if steps > renames.len() {
+                            break;
+                        }
+                    }
+                    *used = replacement.clone();
                 }
-            }
+            });
         }
     }
 }
 
 /// How many times each value is used as an operand.
-pub(super) fn use_counts(function: &Function) -> HashMap<Name, usize> {
-    let mut counts: HashMap<Name, usize> = HashMap::default();
-    for block in &function.blocks {
-        for instruction in &block.instructions {
-            for used in instruction.operation.used_values() {
-                *counts.entry(used.clone()).or_default() += 1;
-            }
+pub(super) fn use_counts(function: &mut Function) -> HashMap<Name, usize> {
+    let capacity = function.parameters.len()
+        + function
+            .blocks
+            .iter()
+            .map(|block| {
+                block.parameters.len()
+                    + block
+                        .instructions
+                        .iter()
+                        .map(|instruction| instruction.results.len())
+                        .sum::<usize>()
+            })
+            .sum::<usize>();
+    let mut counts: HashMap<Name, usize> =
+        HashMap::with_capacity_and_hasher(capacity, rustc_hash::FxBuildHasher);
+    for block in &mut function.blocks {
+        for instruction in &mut block.instructions {
+            instruction
+                .operation
+                .for_each_used_value_mut(|used| *counts.entry(used.clone()).or_default() += 1);
         }
     }
     counts

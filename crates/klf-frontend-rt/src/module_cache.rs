@@ -36,6 +36,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 /// One thing the phases observed, as an entry keeps it.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -250,8 +251,13 @@ impl ModuleCache for DiskModuleCache {
         }
         let overlay = session.overlay();
         Some(Box::new(move || {
+            let read_started = Instant::now();
             let bytes = std::fs::read(&path).ok()?;
+            let read_ms = read_started.elapsed().as_millis();
+            let header_started = Instant::now();
             let (header, module): (Header, &[u8]) = postcard::take_from_bytes(&bytes).ok()?;
+            let header_ms = header_started.elapsed().as_millis();
+            let validation_started = Instant::now();
             let held = in_parallel(&header.seen, |seen| {
                 let mut work = ValidationWork::default();
                 let holds = holds(seen, &overlay, &mut work);
@@ -264,19 +270,31 @@ impl ModuleCache for DiskModuleCache {
                 work.include(part_work);
             }
             unchanged &= contracts_hold(&header, &overlay, &mut work);
+            let validation_ms = validation_started.elapsed().as_millis();
             klf_diag::progress!(
-                "query cache validation paths={} files={} directories={} content_reads={} content_hashes={} directory_lists={} contract_reads={}",
+                "query cache validation paths={} files={} directories={} content_reads={} content_hashes={} directory_lists={} contract_reads={} read_ms={} header_ms={} validate_ms={} entry_bytes={} module_bytes={}",
                 work.paths,
                 work.files,
                 work.directories,
                 work.content_reads,
                 work.content_hashes,
                 work.directory_lists,
-                work.contract_reads
+                work.contract_reads,
+                read_ms,
+                header_ms,
+                validation_ms,
+                bytes.len(),
+                module.len()
             );
             if !unchanged {
                 return None;
             }
+            klf_services::note_access_many(header.seen.iter().filter_map(|seen| match seen {
+                Seen::Read(path, ..) if !overlay.contains_key(&klf_services::overlay_key(path)) => {
+                    Some(path.as_path())
+                }
+                _ => None,
+            }));
             let start = bytes.len() - module.len();
             let decode: Decode = Box::new(move || {
                 let answer = match header.rejected {
@@ -477,7 +495,15 @@ fn write_entry(path: &std::path::Path, bytes: &[u8]) {
 /// `check` of every item, split across the machine's cores, in item order;
 /// `None` when a check panicked.
 fn in_parallel<T: Sync, R: Send>(items: &[T], check: impl Fn(&T) -> R + Sync) -> Option<Vec<R>> {
-    let workers = std::thread::available_parallelism().map_or(1, usize::from);
+    if items.is_empty() {
+        return Some(Vec::new());
+    }
+    // Validation is dominated by filesystem metadata and content reads, which
+    // wait on storage rather than consume a core. Use a bounded I/O pool so
+    // slow workspace providers do not serialize hundreds of observations.
+    const MAX_WORKERS: usize = 64;
+    let cpu_workers = std::thread::available_parallelism().map_or(1, usize::from);
+    let workers = cpu_workers.saturating_mul(4).clamp(32, MAX_WORKERS).min(items.len());
     let chunk = items.len().div_ceil(workers).max(1);
     let check = &check;
     std::thread::scope(|scope| {
@@ -564,11 +590,9 @@ fn holds(seen: &Seen, overlay: &HashMap<PathBuf, Arc<str>>, work: &mut Validatio
                         .is_some_and(|identity| FileSignature::from(identity) == *signature)
                 })
             {
-                klf_services::note_access(path);
                 return true;
             }
             if hash.is_none() && !overlaid {
-                klf_services::note_access(path);
                 return std::fs::metadata(path).is_err();
             }
             work.content_reads += 1;

@@ -66,6 +66,14 @@ fn struct_declaration<'a>(
 /// Splits `mem.copy` of a whole struct between two typed addresses into
 /// loads and stores of its fields.
 pub(in crate::optimize) fn split_copies(function: &mut Function, context: &Context<'_>) -> bool {
+    if !function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| matches!(&instruction.operation, Operation::MemCopy { .. }))
+    {
+        return false;
+    }
     let types = context.types(function);
     let mut casts: HashMap<Name, Name> = HashMap::default();
     let constants = super::util::constants(function);

@@ -18,6 +18,19 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// Answers whether anything changed.
 pub(super) fn convert(function: &mut Function, context: &Context<'_>) -> bool {
+    if !function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .any(|instruction| {
+            matches!(
+                &instruction.operation,
+                Operation::LoadBorrow(_) | Operation::BorrowBegin(_) | Operation::Copy(_)
+            )
+        })
+    {
+        return false;
+    }
     let types = context.types(function);
     let scalar = |name: &Name| types.get(name).is_some_and(is_scalar);
     let mut ended: HashSet<Name> = HashSet::default();
