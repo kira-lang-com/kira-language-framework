@@ -164,6 +164,15 @@ NIR has a text form (`.nir`), a parser and a printer, used only by tests and `kl
 `KLF_VERIFY_NIR=1`; never in release builds. A NIR interpreter in the test target runs any function on given inputs,
 so every pass is tested as "result before equals result after" on generated programs (section 13).
 
+### 4.6 Row conventions (as built in `Sources/NativeIR`)
+
+1. An opcode's number is its TVISA binary opcode for every instruction NIR shares with TVISA. NIR-only: `parameter` 0x800, `project` 0x801, and the selection-only forms from 0x810.
+2. Each row has a type, the TIR/TVISA modifier word unchanged (TIR.md section 22.8), and three 32-bit fields `a`, `b`, `c`. Comparison predicates are the modifier selector (bits 48 to 51), numbered as `ComparisonPredicate`. Types include `i1` for conditions and overflow bits.
+3. Block parameters are `parameter` rows at the start of the block (`a` is the position); the entry block's are the function's incoming values. Results after the first are `project` rows (`a` the instruction, `b` the result index).
+4. Plain operations keep value operands in `a`, `b`, `c`. Constants: `a` low and `b` high 32 bits. `raw.load`: address `a`; `raw.store`: value `a`, address `b`; both keep an access word in `c` (low 6 bits log2 alignment, upper 26 bits alias class id, 0 unknown). `trap.if`: condition `a`, code `b`.
+5. A target record in the operand pool is `[block, n, arguments]`. `br`: `b` is the pool offset of one record. `cond.br`: condition `a`, `b` the offset of the taken record then the not-taken record. `switch.int`: value `a`, `b` the offset of the default record then `keyLow, keyHigh, record` per case, `c` the case count. `return`, `call`, `call.runtime`: `b` the pool offset of the values, `c` their count; `call.indirect` adds the callee in `a` and the signature index and type tag after the arguments.
+6. `NIRShape` (one value per opcode) is the single description of these layouts; operand visiting, the text form and the verifier all read it. An opcode with no shape yet makes the verifier fail, which sends the function to the classic generator.
+
 ## 5. Input contract with A9 (TIR to TVISA lowering)
 
 ### 5.1 Facts A9 must keep (small additions to `TVISAProgram`, in memory; the `.tvisa` encoding gets them in a later version)
