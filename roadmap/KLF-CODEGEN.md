@@ -232,6 +232,14 @@ so every pass is tested as "result before equals result after" on generated prog
 5. A target record in the operand pool is `[block, n, arguments]`. `br`: `b` is the pool offset of one record. `cond.br`: condition `a`, `b` the offset of the taken record then the not-taken record. `switch.int`: value `a`, `b` the offset of the default record then `keyLow, keyHigh, record` per case, `c` the case count. `return`, `call`, `call.runtime`: `b` the pool offset of the values, `c` their count; `call.indirect` adds the callee in `a` and the signature index and type tag after the arguments.
 6. `NIRShape` (one value per opcode) is the single description of these layouts; operand visiting, the text form and the verifier all read it. An opcode with no shape yet makes the verifier fail, which sends the function to the classic generator.
 
+### 4.7 Vector rows (as built in `Sources/NativeIR`)
+
+1. A vector value has type `v128`, `v256` or `v512`. Its lane element type (`i8`, `i16`, `i32`, `i64`, `f32`, `f64`) is in modifier bits 56 to 59 as a `NIRType` raw value (`NIRModifier.lane`, `withLane`); the lane count is the vector width divided by the lane width. Every row of vector type carries it, block parameters included, and so do `vec.extract`, `vec.reduce` and `vec.store` for the vector they read.
+2. Element-wise arithmetic is the scalar opcode on a row of vector type, operands in `a`, `b`, `c` as for scalars. Scalar operands are not broadcast: use `vec.splat`. A `select` with an `i1` condition picks a whole vector.
+3. `vec.splat`: scalar `a`. `vec.extract`: vector `a`, lane index value `b`; out of range traps with code 5. `vec.insert`: vector `a`, index `b`, element `c`. `vec.reduce`: vector `a`, the operation in the modifier selector (`NIRReduction`, TIR's order); `fadd` and `fmul` fold in lane order unless the row carries `reassoc`.
+4. `vec.load`: address `a`, access word `c`, like `load`. `vec.store`: vector `a`, address `b`, access word `c`, like `store`. Lane 0 is at the lowest address. Both are unmasked.
+5. The TVISA reader does not make vector rows yet (a function with vector types goes to the classic generator); they come from the loop vectorizer. The interpreter runs all of the above, lane by lane.
+
 ## 5. Input contract with A9 (TIR to TVISA lowering)
 
 ### 5.1 Facts A9 must keep (small additions to `TVISAProgram`, in memory; the `.tvisa` encoding gets them in a later version)
