@@ -447,6 +447,7 @@ Rules:
 2. A failing signature (flag `fails`) has an implicit error result: the call yields one extra trailing `ptr` value, zero on success (section 9.5).
 3. A `group` member's value type is a scalar or a fixed vector of at most 16 bytes. Members do not overlap and lie within the group's size.
 4. Result items are leaves and at most one group, flattened in order into result leaves (section 9.4).
+5. A `byref` or `sret` item whose value has a generic parameter's type in a polymorphic entry (TIR.md section 18.1) has size 0 and alignment 1. The value's size and alignment are dynamic and are read from the parameter's descriptor (KLF-RIDL.md section 23.1). The caller allocates the storage.
 
 Rationale: whether a small aggregate fits in registers depends on the architecture (x64 has six integer argument registers, aarch64 and rv64 have eight; rv64 flattens vectors). The lowering cannot know the architecture, so it describes the aggregate and the finalizer decides. The callee's body sees the leaves as values either way.
 
