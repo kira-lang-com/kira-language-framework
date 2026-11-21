@@ -1015,6 +1015,7 @@ The heap is the TIR runtime allocator (section 28.10): spans, size classes, slot
 | Instruction | Semantics |
 | --- | --- |
 | `heap.alloc.counted T` | Owned `ref T`, strong count 1, uninitialized payload |
+| `heap.alloc.counted.tail T, E, %n` | Owned `ref T`, strong count 1, uninitialized payload followed by an uninitialized tail of `%n` contiguous `E` values. `%n` is `i64`; a negative count, or a total size that overflows, traps with `TIR-RT-0002` |
 | `heap.alloc.unique T` | Owned `uniq T` |
 | `ref.addr %r` | Payload address inside a borrow of the reference |
 | `uniq.addr %u` | |
@@ -1025,6 +1026,9 @@ The heap is the TIR runtime allocator (section 28.10): spans, size classes, slot
 | `weak.load %w` | `%Optional<ref T>` |
 | `ref.unowned %r` | `ptr` without ownership |
 | `ref.isunique %r` | `i1`, for copy-on-write |
+| `ref.tail.addr %r, E` | `*E` address of the first tail element inside a borrow of a reference made by `heap.alloc.counted.tail` with tail type `E` |
+
+A tail starts at the payload offset `size(T)` rounded up to `align(E)`, with stride `stride(E)`; `T` and `E` may be generic parameters, whose sizes come from their descriptors (V11). Releasing the last strong reference destroys the `T` payload through its policy and frees the whole slot; the runtime never destroys tail elements, so `T`'s destroy policy destroys the ones it initialized. Tails are never resized: a larger tail is a new allocation.
 
 ### 12.10 Ownership (range 0x180)
 
@@ -2372,7 +2376,7 @@ Instructions that produce no value do not advance the value numbering. A tuple r
 
 `stack.alloc` uses selector bits 48–51: 0 omits `<space>` and selects generic space for CPU and `target(cpu, gpu)` functions or `thread` for GPU-only functions; 1–9 select `device`, `constant`, `threadgroup`, `thread`, `object_payload`, `ray_payload`, `hit_attribute`, `tile` and `node_record` respectively; 10 explicitly selects generic space; 11–15 are invalid. It stores its type index, a ULEB count-present flag (0 absent, 1 present), and, when present, one value delta for `count %n`. GPU and kernel count operands must refer to a `const.int` result whose unsigned value is below 2^62; an absent count means one. Address operations encode field and variant indexes as ULEB immediates and address casts as type indexes; their value operands use the value-delta encoding above.
 
-In the 0x160 heap range, `heap.alloc.counted` and `heap.alloc.unique` carry a type index; `ref.addr`, `uniq.addr`, `weak.new`, `weak.load`, `ref.unowned` and `ref.isunique` carry one value; `heap.alloc.raw` carries size and alignment values; `heap.realloc.raw` carries pointer, size and alignment; and `heap.free.raw` carries one pointer. Only `heap.alloc.raw` accepts modifier bit 30 (`uninit`). All except `heap.free.raw` define one SSA value.
+In the 0x160 heap range, `heap.alloc.counted` and `heap.alloc.unique` carry a type index; `heap.alloc.counted.tail` carries the payload and tail type indexes and one count value; `ref.tail.addr` carries one value and a type index; `ref.addr`, `uniq.addr`, `weak.new`, `weak.load`, `ref.unowned` and `ref.isunique` carry one value; `heap.alloc.raw` carries size and alignment values; `heap.realloc.raw` carries pointer, size and alignment; and `heap.free.raw` carries one pointer. Only `heap.alloc.raw` accepts modifier bit 30 (`uninit`). All except `heap.free.raw` define one SSA value.
 
 `access.begin` uses selector bits 48–51: codes 0–5 are the Cartesian product of access mode (read 0, modify 1) and checking mode (static 0, dynamic 1, unchecked 2), with the access-mode code as the low bit. Omitted options select read/static (code 0). Other instructions in the 0x180 ownership range require selector 0.
 
