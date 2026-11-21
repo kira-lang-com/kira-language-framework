@@ -234,3 +234,30 @@ fn tir_7_10_address_only_and_register_only_have_no_memory_layout() {
         ));
     }
 }
+
+#[test]
+fn ridl_21_3_strong_references_take_the_pointer_niche_but_pointers_do_not() {
+    for (payload, size) in [
+        (Type::Reference(Box::new(Type::Integer(64))), 8),
+        (Type::Pointer(tir_types::AddressSpace::Generic), 16),
+    ] {
+        let mut engine = LayoutEngine::new();
+        let mut optional = definition(LayoutRule::Ridl);
+        optional.kind = DefinitionKind::Enum;
+        optional.fields.clear();
+        optional.variants = vec![
+            crate::EnumVariant { fields: vec![] },
+            crate::EnumVariant {
+                fields: vec![LayoutField::named("value", payload)],
+            },
+        ];
+        engine.add_definition(optional).expect("valid enum definition");
+        let layout = engine
+            .layout(&Type::Nominal {
+                path: "Smoke.Record".to_owned(),
+                arguments: vec![],
+            })
+            .expect("enum layout");
+        assert_eq!(layout, Layout::new(size, 8));
+    }
+}

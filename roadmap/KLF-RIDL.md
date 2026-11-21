@@ -1732,7 +1732,7 @@ Fields are placed in declaration order, each at the next offset that is a multip
 1. The tag is `U8` if the enum has at most 256 cases, `U16` up to 65,536, else `U32`. Cases are numbered from 0 in declaration order. An `@Open` enum always has a `U32` tag.
 2. Each case's payload is laid out as a tuple of its payload types.
 3. Payload offset `P` is the tag size rounded up to the maximum payload alignment `A`. Enum alignment is the maximum of tag alignment and `A`. Size is `P` plus the maximum payload size, rounded up to the alignment. An enum without payloads is just its tag.
-4. Pointer niche. An enum with exactly two cases, one without payload and one whose single payload is an opaque struct, a trait object or a closure, has no tag: the payload's first pointer word being zero encodes the payload-less case. `Optional<Scene>` is one pointer.
+4. Pointer niche. An enum with exactly two cases, one without payload and one whose single payload is an opaque struct, a trait object, a closure or a strong counted reference (TIR `ref T`), has no tag: the payload's first pointer word being zero encodes the payload-less case. `Optional<Scene>` and an optional class reference are one pointer. A plain pointer (TIR `ptr`) can be null and gets no niche.
 5. Bytes of the payload area not used by the active case, and padding, are unspecified and MUST NOT be read.
 
 ### 21.4 Strings and arrays

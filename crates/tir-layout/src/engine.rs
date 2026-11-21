@@ -372,7 +372,7 @@ impl LayoutEngine {
             .find(|(index, variant)| *index != empty && variant.fields.len() == 1)?;
         let ty = &payload.1.fields[0].ty;
         match ty {
-            Type::Closure(_) => Some((payload.0, ty.clone())),
+            Type::Closure(_) | Type::Reference(_) => Some((payload.0, ty.clone())),
             Type::Nominal { path, .. }
                 if self
                     .definitions
