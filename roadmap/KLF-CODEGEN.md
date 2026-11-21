@@ -58,7 +58,8 @@ throughput scales to at least 0.85 × core count on 8 cores.
 
 ### 2.3 Measured starting point and absolute targets
 
-First benchmark run: arm64 macOS, Apple M4 Pro VM, Swift 6.4, Apple clang 21, KLF's classic generator at main on
+Baseline (`languages/klf-swift/Benchmarks/codegen/baseline/macos-arm64.md`, rerun with
+`python3 Benchmarks/codegen/run.py`): arm64 macOS, Apple M4 Pro VM, Swift 6.4, Apple clang 21, KLF's classic generator at main on
 2026-11-21. Fastest of 3 compiles and 5 runs, 11 kernels. swiftc has no `-O1` or `-O3`, so its four levels are
 `-Onone`, `-Osize`, `-O`, `-Ounchecked`; clang compiles a line-for-line C twin. x86-64 Linux figures are added when
 the runner has them.
@@ -67,10 +68,10 @@ Where the classic generator stands (geometric mean, KLF / other; above 1 means K
 
 | Level | Run vs swiftc | Run vs clang | Code bytes vs swiftc | Code bytes vs clang | Whole compile vs swiftc | Whole compile vs clang |
 | --- | --- | --- | --- | --- | --- | --- |
-| `-O0` | 0.23 | 1.25 | 1.07 | 4.58 | 2.27 | 9.02 |
-| `-O1` | 3.48 | 4.03 | 2.97 | 9.29 | 2.08 | 8.86 |
-| `-O2` | 2.42 | 2.71 | 2.35 | 6.42 | 2.20 | 9.23 |
-| `-O3` | 2.54 | 2.83 | 2.62 | 4.91 | 2.33 | 8.91 |
+| `-O0` | 0.23 | 1.22 | 1.07 | 4.58 | 2.58 | 9.01 |
+| `-O1` | 3.34 | 3.82 | 2.97 | 9.29 | 2.07 | 8.40 |
+| `-O2` | 2.34 | 2.62 | 2.35 | 6.42 | 2.19 | 9.05 |
+| `-O3` | 2.52 | 2.82 | 2.62 | 4.91 | 2.31 | 8.93 |
 
 Today `-O1` runs like `-O0` and `-O3` like `-O2`: there are two tiers, and the new generator must make four.
 
@@ -79,35 +80,36 @@ no kernel may stay above 1.5 times.
 
 | Kernel | KLF today, ms | swiftc `-O`, ms | clang `-O2`, ms | Target, ms | KLF today, bytes | swiftc, bytes | clang, bytes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| bitmix | 459 | 435 | 442 | 435 | 592 | 368 | 132 |
-| closures | 779 | 72 | 69 | 69 | 2504 | 680 | 268 |
-| collatz | 391 | 300 | 199 | 199 | 928 | 560 | 144 |
-| fib | 823 | 545 | 465 | 465 | 800 | 276 | 136 |
-| gcd | 278 | 279 | 255 | 255 | 912 | 420 | 120 |
-| mandelbrot | 624 | 154 | 123 | 123 | 1552 | 628 | 220 |
-| matmul | 1709 | 210 | 207 | 207 | 3784 | 1620 | 600 |
-| nbody | 1051 | 192 | 140 | 140 | 6460 | 1948 | 816 |
-| quicksort | 945 | 660 | 652 | 652 | 3256 | 1616 | 576 |
-| sieve | 673 | 364 | 380 | 364 | 2568 | 828 | 420 |
-| structs | 495 | 319 | 310 | 310 | 960 | 588 | 184 |
+| bitmix | 457 | 470 | 469 | 469 | 592 | 368 | 132 |
+| closures | 792 | 79 | 79 | 79 | 2504 | 680 | 268 |
+| collatz | 427 | 301 | 209 | 209 | 928 | 560 | 144 |
+| fib | 921 | 552 | 468 | 468 | 800 | 276 | 136 |
+| gcd | 309 | 292 | 278 | 278 | 912 | 420 | 120 |
+| mandelbrot | 663 | 164 | 141 | 141 | 1552 | 628 | 220 |
+| matmul | 1787 | 209 | 200 | 200 | 3784 | 1620 | 600 |
+| nbody | 1054 | 207 | 146 | 146 | 6460 | 1948 | 816 |
+| quicksort | 927 | 716 | 657 | 657 | 3256 | 1616 | 576 |
+| sieve | 536 | 295 | 307 | 295 | 2568 | 828 | 420 |
+| structs | 395 | 340 | 316 | 316 | 960 | 588 | 184 |
 
 What the gaps say about the work:
 
-1. closures (11 times): no inlining through closure values. That is TIR-level work (A7, section 3.2); the generator's
+1. closures (10 times): no inlining through closure values. That is TIR-level work (A7, section 3.2); the generator's
    part is cheap `try.call.closure` sequences.
-2. matmul (8 times): bounds checks kept and no vectorization. `checks` and `indvars` remove the checks; loop
+2. matmul (9 times): bounds checks kept and no vectorization. `checks` and `indvars` remove the checks; loop
    vectorization is not in this design's pass lists and is the first addition if matmul misses its gate.
-3. nbody, mandelbrot (4 to 7 times), and the `-O0` weak spots (mandelbrot 1.9, nbody 2.3, sieve 3.6 times clang
+3. nbody, mandelbrot (4 to 7 times), and the `-O0` weak spots (mandelbrot 1.9, nbody 2.2, sieve 3.4 times clang
    `-O0`): floating point and array access. Selection rules and allocation of float registers (sections 9, 10).
 4. fib, collatz, quicksort, sieve, structs (1.3 to 1.9 times): general code quality, the core of sections 6 to 12.
 
 Other absolute targets:
 
 - Code size at `-O2`: at most 1.25 times clang's bytes per kernel (today 6.4 times), and at most swiftc's.
-- `-O0` run time: at most 0.70 of clang `-O0` (today 1.25); already 0.23 of swiftc `-Onone`.
-- Generator time: a whole KLF compile is 370 to 500 ms per kernel against 135 to 305 ms for swiftc and 40 to 66 ms
-  for clang, but about 390 ms of that is fixed front-end start cost (a one-line `print(1)` takes 390 ms). Optimizer,
-  generator and link together are 10 to 35 ms per kernel today. The generator is therefore measured on its own
+- `-O0` run time: at most 0.70 of clang `-O0` (today 1.22); already 0.23 of swiftc `-Onone`.
+- Generator time: a whole KLF compile at `-O2` is 384 to 442 ms per kernel against 137 to 268 ms for swiftc and 39 to
+  52 ms for clang, but about 370 ms of that is fixed front-end start cost (a one-line program takes 371 ms with KLF,
+  127 ms with swiftc, 39 ms with clang). Optimizer,
+  generator and link together are 13 to 71 ms per kernel today. The generator is therefore measured on its own
   (`klf build --codegen-report`, `klf bench-codegen`), with the target that TIR optimization, code generation and
   link stay under 10 ms per kernel at `-O0` and under 35 ms at `-O3`, so the better code costs no more time than the
   classic path. The 2.2 ratios against LLVM's back end need LLVM's back end timed alone (`clang -ftime-report`),
@@ -665,5 +667,5 @@ end-to-end target: `-O0` on x86-64 Linux (runs directly on the build VM), then a
 2. A13 (libtirrt): freeze the reference-count word layout for 6.4.
 3. Benchmark piece: x86-64 Linux figures, and LLVM's back-end time alone, for section 2.3.
 4. A7: `-O3` currently runs the `-O2` TIR set; profile-guided and link-time work (TIR 26.3) remain there.
-5. KLF front end: the fixed start cost of about 390 ms per `klf build` (section 2.3) hides every back-end gain in
+5. KLF front end: the fixed start cost of about 370 ms per `klf build` (section 2.3) hides every back-end gain in
    whole-compile comparisons.
