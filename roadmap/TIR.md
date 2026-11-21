@@ -677,7 +677,7 @@ A module is memory-safe when every function is managed or sandboxed and every im
 | V7 | `static` accesses do not conflict |
 | V8 | Address-only types never appear as loadable SSA values |
 | V9 | A function with engine `runtime` or `any` contains no `asm`, `target.intrinsic` or device I/O instruction |
-| V10 | `try.call` is used if and only if the callee type has `fails`; `invoke` is used only in functions without `nounwind` |
+| V10 | `try.call`, `try.call.indirect` and `try.call.closure` are used if and only if the callee type has `fails`; `try.await` is used if and only if the awaited frame's function has `fails`; `invoke` is used only in functions without `nounwind` |
 | V11 | Generic parameters appear only in generic functions and types; every operation needing a size or witness has the descriptor available |
 | V12 | Exported functions use only RIDL-representable types (KLF.md section 20, extended by section 19.2) |
 | V13 | Every instruction and attribute is permitted by the module's profile (6.3) |
@@ -1049,6 +1049,10 @@ A tail starts at the payload offset `size(T)` rounded up to `align(E)`, with str
 | `call.foreign @sym(args)` | Platform C convention to a symbol declared by a `.klffi` import (KLF.md section 26) or by a platform import (section 32.6). System, driver and kernel profiles, and platform modules |
 | `call.variadic callee(fixed; variadic)` | C variadics: RIDL mode per KLF.md section 29.5, platform mode per the architecture's C ABI |
 | `invoke callee(args) to bbN unwind bbU` | Terminator. A call that may unwind (section 14). `bbN` receives the result, with no parameter for `unit` or `never`; `bbU` has no parameters and begins with `landingpad` |
+| `try.call.indirect %fn : fnT (args) normal bbN, error bbE` | Terminator. `call.indirect` through a function value whose stated type has `fails`, with the targets of `try.call` |
+| `try.call.closure %c(args) normal bbN, error bbE` | Terminator. `call.closure` through a closure whose function type has `fails`, with the targets of `try.call` |
+
+Arguments of the three `try.call` forms follow their parameter conventions on both edges: owned arguments are consumed by the call whether it returns or fails. The error delivered to `bbE` is owned by `bbE`, which MUST consume or destroy it (V4).
 
 Direct generic callees of `call` and `tail.call` supply one explicit type
 argument per generic parameter, in declaration order. Direct generic callees
@@ -1231,6 +1235,7 @@ A function whose type is `async` is an async function.
 4. Destroying a pending frame runs the cleanups of the live values at its current suspension point, in reverse order of initialization. Destroy timing of `scoped` types is preserved. This is cancellation.
 5. Async functions cannot use `coro.yield`. Async streams are library types built on futures.
 6. An async function exported through RIDL is exported as a function returning `Any Future<R>` (section 19.3); `tirc` boxes the frame.
+7. `try.await %f normal bbN, error bbE` is a terminator allowed only in async functions. `%f` is an owned `frame @f` whose function has `fails E`; `await` does not accept such a frame. It polls `%f` as `await` does. When `@f` returns, it destroys `%f` and branches to `bbN` with the result; when `@f` fails, it destroys `%f` and branches to `bbE` with the owned error, which `bbE` MUST consume or destroy (V4). A `unit` or `never` value contributes no block parameter.
 
 ### 13.5 Profiles and engines
 
@@ -1242,7 +1247,7 @@ Coroutines and async functions are allowed in every profile except in GPU code. 
 
 ### 13.7 Rules (V17)
 
-1. `coro.yield` appears only in coroutine functions; `await` and `async.waker` only in async functions.
+1. `coro.yield` appears only in coroutine functions; `await`, `try.await` and `async.waker` only in async functions.
 2. Section 13.3 holds.
 3. `setjmp`, `longjmp`, `va.*` and `br.indirect` do not appear in coroutine or async functions.
 4. A destroy path ends in `coro.finish` and consumes every owned value live at its suspension point.
@@ -1261,6 +1266,7 @@ Coroutines and async functions are allowed in every profile except in GPU code. 
 | `coro.frame.align @f` | `i64` |
 | `await %f` | Section 13.4 |
 | `async.waker` | Borrowed `%Async.Waker` |
+| `try.await %f normal bbN, error bbE` | Terminator. Section 13.4 |
 
 ---
 
@@ -2366,9 +2372,9 @@ The retained 0x140 memory instructions carry `raw.load` as type, pointer and ali
 
 In the 0x210 range, `va.start` and `va.end` each carry one list value; `va.arg` carries a type index and one list value; `va.copy` carries destination and source list values; `setjmp` carries one buffer value and defines one result; `longjmp` carries buffer and value operands and is a terminator. These instructions require zero modifiers.
 
-Call records use counted value lists. `call` stores a function symbol, counted generic type indexes and counted arguments; `call.indirect` stores the function value, function type index and arguments. `closure.new` stores code and context values; `call.closure` stores the closure value and arguments; `closure.callback` stores a ULEB parameter index and function type index. `call.witness` stores a type index, a STRINGS index for the qualified `Trait.method` name, and arguments. `call.vtable` stores the object value, a data-object vtable symbol, ULEB slot and arguments. `call.foreign` stores a function symbol and arguments. `call.variadic` stores a function symbol, function type index, fixed-argument count, variadic-argument count, then those two value lists. `try.call` and `invoke` store a function symbol, arguments and two block indexes. `try.call` supplies its normal result and owned error to the corresponding target parameters; `invoke` supplies its normal result, while its unwind target has no parameters and begins with `landingpad`. A `unit` or `never` result contributes no target parameter. `tail.call` uses the `call` fields and is a terminator. Ordinary calls define zero or one result as required by their function type; `closure.new` and `closure.callback` define one; `try.call`, `invoke` and `tail.call` define none. Call attributes use bits 41–45; `inline` and `noinline` are mutually exclusive. Modifier bit 46 means `foreign_unwind` only on `invoke` and `saturate` only on `fcvt`.
+Call records use counted value lists. `call` stores a function symbol, counted generic type indexes and counted arguments; `call.indirect` stores the function value, function type index and arguments. `closure.new` stores code and context values; `call.closure` stores the closure value and arguments; `closure.callback` stores a ULEB parameter index and function type index. `call.witness` stores a type index, a STRINGS index for the qualified `Trait.method` name, and arguments. `call.vtable` stores the object value, a data-object vtable symbol, ULEB slot and arguments. `call.foreign` stores a function symbol and arguments. `call.variadic` stores a function symbol, function type index, fixed-argument count, variadic-argument count, then those two value lists. `try.call` and `invoke` store a function symbol, arguments and two block indexes. `try.call.indirect` stores the `call.indirect` fields followed by two block indexes, and `try.call.closure` stores the `call.closure` fields followed by two block indexes; both supply their targets as `try.call` does. `try.call` supplies its normal result and owned error to the corresponding target parameters; `invoke` supplies its normal result, while its unwind target has no parameters and begins with `landingpad`. A `unit` or `never` result contributes no target parameter. `tail.call` uses the `call` fields and is a terminator. Ordinary calls define zero or one result as required by their function type; `closure.new` and `closure.callback` define one; `try.call`, `try.call.indirect`, `try.call.closure`, `invoke` and `tail.call` define none. Call attributes use bits 41–45; `inline` and `noinline` are mutually exclusive. Modifier bit 46 means `foreign_unwind` only on `invoke` and `saturate` only on `fcvt`.
 
-In the 0x1C0 coroutine range, `coro.start` stores a function symbol and counted arguments; selector 0 allocates on the heap and selector 1 is followed by the inline frame-slot value. `coro.yield` stores its yielded value and resume/destroy block indexes. `coro.resume` stores handle and resume values followed by yielded/done block indexes. These block targets have no explicit argument list; their coroutine-provided values correspond to the block parameters in section 13.2. `coro.finish` and `async.waker` have no operands; `coro.destroy`, `coro.done` and `await` store one value; `coro.frame.size` and `coro.frame.align` store a function symbol. Only `coro.start` uses selector bits 48–51, and selectors above 1 are invalid.
+In the 0x1C0 coroutine range, `coro.start` stores a function symbol and counted arguments; selector 0 allocates on the heap and selector 1 is followed by the inline frame-slot value. `coro.yield` stores its yielded value and resume/destroy block indexes. `coro.resume` stores handle and resume values followed by yielded/done block indexes. These block targets have no explicit argument list; their coroutine-provided values correspond to the block parameters in section 13.2. `coro.finish` and `async.waker` have no operands; `coro.destroy`, `coro.done` and `await` store one value; `try.await` stores one value and normal and error block indexes, supplies its targets as `try.call` does and defines no value; `coro.frame.size` and `coro.frame.align` store a function symbol. Only `coro.start` uses selector bits 48–51, and selectors above 1 are invalid.
 
 `asm` stores a ULEB index into ASM, a counted list of value deltas for its inputs, and a result type index. A `unit` result has no SSA result; every other result type has one. `asm.goto` stores a ULEB ASM index, a counted list of input value deltas, the normal successor's block index, a ULEB label count and that many label block indexes. These successors carry no block arguments, so every destination block has zero parameters. The normal successor and labels are all control-flow edges.
 
