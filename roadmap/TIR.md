@@ -498,6 +498,7 @@ fn([context] [conv] T, ...) -> R [fails E] [async] [abi(ridl | c)] [foreign]
 | Borrowed closure | `borrow closure (A, B) -> R` | Non-escaping closure |
 | Coroutine handle | `coro<Y, U, R>` | Owned handle to a suspended coroutine that yields `Y`, is resumed with `U` and returns `R` (section 13.2) |
 | Frame | `frame @f` | The frame of the coroutine or async function `@f`. Address-only; its size is known after lowering (`coro.frame.size`) |
+| Any future | `any.future<R>`, `any.future<R fails E>` | Owned pointer to the frame of an async function that is not known statically, returning `R` and, with `fails`, failing with `E` (section 13.4) |
 
 ### 7.7 Generic parameters
 
@@ -679,7 +680,7 @@ A module is memory-safe when every function is managed or sandboxed and every im
 | V7 | `static` accesses do not conflict |
 | V8 | Address-only types never appear as loadable SSA values |
 | V9 | A function with engine `runtime` or `any` contains no `asm`, `target.intrinsic` or device I/O instruction |
-| V10 | `try.call`, `try.call.indirect` and `try.call.closure` are used if and only if the callee type has `fails`; `try.await` is used if and only if the awaited frame's function has `fails`; `invoke` is used only in functions without `nounwind` |
+| V10 | `try.call`, `try.call.indirect` and `try.call.closure` are used if and only if the callee type has `fails` and is not `async`; `try.await` is used if and only if the awaited frame's function, or the awaited `any.future`, has `fails`; `invoke` is used only in functions without `nounwind` |
 | V11 | Generic parameters appear only in generic functions and types; every operation needing a size or witness has the descriptor available |
 | V12 | Exported functions use only RIDL-representable types (KLF.md section 20, extended by section 19.2) |
 | V13 | Every instruction and attribute is permitted by the module's profile (6.3) |
@@ -1232,12 +1233,13 @@ A coroutine function carries the attribute `coro(yield: Y, resume: U)` and has a
 A function whose type is `async` is an async function.
 
 1. Calling an async function with `call` does not run it. The result is an owned value of type `frame @f`, initialized with the arguments. `frame @f` conforms to the RIDL trait `Async.Future<R>` (section 19.3), whose `poll` method `tirc` generates.
-2. `await %f` is allowed only in async functions. `%f` is an owned future: a concrete frame, a value of a generic type bounded by `Future<T>`, or an `Any Future<T>`. `await` consumes `%f` and repeats: poll `%f` with the current waker; on `Ready(v)`, destroy `%f` and produce `v`; on `Pending`, suspend the enclosing async function so that its own `poll` returns `Pending`, and poll `%f` again when the enclosing function is polled again.
+2. `await %f` is allowed only in async functions. `%f` is an owned future: a concrete frame, a value of a generic type bounded by `Future<T>`, an `Any Future<T>`, or an `any.future<T>` without `fails`. `await` consumes `%f` and repeats: poll `%f` with the current waker; on `Ready(v)`, destroy `%f` and produce `v`; on `Pending`, suspend the enclosing async function so that its own `poll` returns `Pending`, and poll `%f` again when the enclosing function is polled again.
 3. `async.waker` yields the borrowed waker of the current poll, for code that implements leaf futures inline.
 4. Destroying a pending frame runs the cleanups of the live values at its current suspension point, in reverse order of initialization. Destroy timing of `scoped` types is preserved. This is cancellation.
 5. Async functions cannot use `coro.yield`. Async streams are library types built on futures.
 6. An async function exported through RIDL is exported as a function returning `Any Future<R>` (section 19.3); `tirc` boxes the frame.
-7. `try.await %f normal bbN, error bbE` is a terminator allowed only in async functions. `%f` is an owned `frame @f` whose function has `fails E`; `await` does not accept such a frame. It polls `%f` as `await` does. When `@f` returns, it destroys `%f` and branches to `bbN` with the result; when `@f` fails, it destroys `%f` and branches to `bbE` with the owned error, which `bbE` MUST consume or destroy (V4). A `unit` or `never` value contributes no block parameter.
+7. `try.await %f normal bbN, error bbE` is a terminator allowed only in async functions. `%f` is an owned `frame @f` whose function has `fails E`, or an owned `any.future<R fails E>`; `await` does not accept either. It polls `%f` as `await` does. When `@f` returns, it destroys `%f` and branches to `bbN` with the result; when `@f` fails, it destroys `%f` and branches to `bbE` with the owned error, which `bbE` MUST consume or destroy (V4). A `unit` or `never` value contributes no block parameter.
+8. Calling a function value of an `async` function type with `call.indirect` or `call.closure`, or an `async` entry with `call.vtable` or `call.witness`, does not run it. The result is an owned `any.future<R>`, with `fails E` when the function type has `fails E`; the call itself never fails, so it uses the non-`try` form (V10). An `any.future` points to a frame whose header holds, as on every runtime frame, the poll function at field 0, the destroy function at field 1, the state at field 2, the result at field 6 and the error at field 7. `await` and `try.await` poll and destroy it through those fields. A value of `any.future` that is not awaited MUST be destroyed with `destroy`, which calls the frame's destroy function (V4).
 
 ### 13.5 Profiles and engines
 
@@ -2464,6 +2466,7 @@ Unassigned opcodes are reserved. A later TIR version adds instructions at the en
 | 0x31 | Closure | Function type index, `u8` borrowed |
 | 0x32 | `coro<Y, U, R>` | Three type indices |
 | 0x33 | `frame @f` | Function index |
+| 0x34 | `any.future<R [fails E]>` | Result type index; error type index + 1, or 0 when absent |
 | 0x40 | `texture` | `u8` dimension (0 1d, 1 2d, 2 3d, 3 cube, 4 1darray, 5 2darray, 6 cubearray), component type index, `u8` access (0 sample, 1 read, 2 write, 3 readwrite), `u8` multisampled |
 | 0x41 | `sampler` | |
 | 0x42 | `accel` | |
