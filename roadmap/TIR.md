@@ -635,6 +635,8 @@ Results are owned or trivial.
 
 `access.begin [read | modify] [static | dynamic | unchecked] %addr` brackets an access. Under `static`, `tirc` proves no two overlapping accesses to the same storage conflict (two modifies, or a modify and a read). Under `dynamic`, the runtime checks through `tir_rt_access_begin` and traps with `TIR-RT-0003`. Under `unchecked`, nothing is enforced and the function is unmanaged.
 
+`ref.tail.addr %r, E` yields an address that is valid only inside a borrow of its base. `%r` MUST be a borrowed value: a `borrow.begin` or `load.borrow` result, or a `borrow` parameter. The address, and every address projected from it by `elem.addr`, `field.addr` or `access.begin`, MUST NOT be used after the `borrow.end` of that scope, and MUST NOT be returned, stored, passed to an `owned` parameter or captured by an escaping closure. Stores through it follow the ownership of `E`: `store` consumes an owned `E` value, and a trivial `E` imposes nothing (V5, V6).
+
 ### 9.5 Unmanaged escape
 
 `into.raw`, `from.raw`, `raw.load`, `raw.store`, `ptr.offset`, `ptr.diff`, `ptr.toaddr`, `addr.toptr`, `inttoptr`, `heap.alloc.raw`, `heap.realloc.raw`, `heap.free.raw`, `mem.copy`, `mem.move`, `mem.set` on `ptr` operands, `access.begin [unchecked]`, `call.foreign`, `call.variadic`, `va.*`, `setjmp`, `longjmp`, `asm`, `asm.goto`, `target.intrinsic`, `mmio.*` and `kernel.*` are the unmanaged instructions.
@@ -672,8 +674,8 @@ A module is memory-safe when every function is managed or sandboxed and every im
 | V2 | Every instruction is well typed per sections 12, 16 and 17 |
 | V3 | Every block ends in exactly one terminator |
 | V4 | Every owned value is consumed exactly once on every path to `return`, `fail`, `resume`, `tail.call`, `deopt`, `coro.yield`'s destroy path, or `unreachable`. Paths ending in `trap` are exempt |
-| V5 | No borrowed value is an operand of a consuming instruction, of `store`, of `return`, or of an escaping capture |
-| V6 | Every `borrow.begin` and `load.borrow` has exactly one matching `borrow.end` on every path, properly nested |
+| V5 | No borrowed value is an operand of a consuming instruction, of `store`, of `return`, or of an escaping capture; no `ref.tail.addr` address escapes the borrow of its base (section 9.4) |
+| V6 | Every `borrow.begin` and `load.borrow` has exactly one matching `borrow.end` on every path, properly nested; `ref.tail.addr` takes a borrowed base, and its address is not used after that borrow ends |
 | V7 | `static` accesses do not conflict |
 | V8 | Address-only types never appear as loadable SSA values |
 | V9 | A function with engine `runtime` or `any` contains no `asm`, `target.intrinsic` or device I/O instruction |
