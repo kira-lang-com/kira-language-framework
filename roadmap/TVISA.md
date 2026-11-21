@@ -759,6 +759,7 @@ All `rtcc` arguments and results are integer-class: floating-point values travel
 | 0x000F | `slot.check` | rtcc | ptr → | | Traps with `TIR-RT-0004` if the slot was deleted |
 | 0x0010 | `access.begin` | rtcc | ptr, kind, record → | | Dynamic exclusivity (KLF.md section 18.7); traps with `TIR-RT-0003` |
 | 0x0011 | `access.end` | rtcc | record → | | |
+| 0x0012 | `weak.retain` | rtcc | ptr → ptr | | Weak count + 1 by address; returns its argument. `copy` of a `weak T` |
 | 0x0020 | `coro.alloc` | rtcc | size, align → ptr | | Coroutine and async frame |
 | 0x0021 | `coro.free` | rtcc | ptr, size, align → | | |
 | 0x0030 | `throw` | ridl | box, typeid → | N U | Starts two-phase unwinding |
@@ -781,6 +782,8 @@ All `rtcc` arguments and results are integer-class: floating-point values travel
 | 0xF000–0xFFFF | Development entries | rtcc | Per `TVISA-RUNTIME-DEV.md` | | Sanitizer and instrumentation hooks; rejected in pipeline builds (`TVISA-VFY-0041`) |
 
 Identifiers not listed are reserved. A TVISA version adds entries; it never renumbers or changes one.
+
+The access record of `access.begin` and `access.end` is 24 bytes of caller storage aligned to 8, the size of Swift's `swift_beginAccess` value buffer. The caller allocates it, uninitialized, for each `access.begin [dynamic]`, keeps it at the same address until the matching `access.end`, and does not read or write it in between; `libtirrt` owns its contents. `kind` bit 0 is the access mode (1 modify, 0 read) and the other bits are zero. A begin traps with `TIR-RT-0003` when another active access to the same address is a modify, or when it is a modify and another access to that address is active.
 
 ### 12.3 Binding and versioning
 
