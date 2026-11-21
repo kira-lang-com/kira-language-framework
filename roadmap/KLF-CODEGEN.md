@@ -400,7 +400,7 @@ tier, which must succeed on every verified function.
 | `TIRCodegenX64`: `X64Assembler`, `X64Register`, `X64Object`, `X64Unwind` | A11 | **Reused**, same terms |
 | `TIRCodegenX64`: `X64FunctionCompiler`, `X64RegisterAllocator`, `X64Scalarize`, `X64TVISAReader`, `X64Codegen`, `X64Layout` | A11 | **Replaced** at the x86-64 gate, same terms |
 | `TIRImage` (objects, linker, Mach-O / ELF / Tarwin writers, debug line tables) | A12 | **Left alone**. No format or API change is needed |
-| `KLFDriver/NativeBuilder` | A14 | **Edited once**, by G1: a `codeGenerator` option (`classic`, `optimizing`) chooses which finalizer fills the objects; default stays `classic` until the gates pass |
+| `KLFDriver/NativeBuilder` | A14 | **Edited once**, by G1: a `codeGenerator` option (`classic`, `optimizing`; `klf build --codegen`) chooses which finalizer fills the objects; default stays `classic` until the gates pass |
 | `TIRInterpreter` | A8 | **Left alone**; used as the reference in differential tests |
 | A10's arm64 emulator in `Tests/TIRCodegenARM64Tests` | A10 | **Reused** by G5's tests (moved to a shared test-support target by G1's package change) |
 
@@ -509,21 +509,24 @@ public struct PassEffect: OptionSet { /* changedInstructions, changedBlocks, cha
 public protocol TargetBackend { /* section 8.2 */ }
 public struct MachineFunction: ~Copyable { /* MIR arrays, frame, unwind rows, trap sites, line rows */ }
 public enum MachinePipeline<Target: TargetBackend> {
-    public static func compile(_ function: consuming NIRFunction, level: OptimizationLevel,
+    public static func compile(_ function: consuming NIRFunction, level: CodegenLevel,
                                target: borrowing Target) throws(CodegenError) -> EmittedFunction }
 public struct EmittedFunction: Sendable { /* bytes, relocations, symbols, unwind, traps, lines */ }
 
-// NativeCodegen (G1)
+// NativeCodegen (G1). Synchronous, like `NativeBuilder`; it runs its own worker threads inside.
 public struct NativeCodeGenerator: Sendable {
-    public init(level: OptimizationLevel, workers: Int? = nil)
-    public func finalizeARM64(_ program: TVISAProgram, platform: ARM64Platform, debug: ARM64DebugInput?) async
+    public init(level: CodegenLevel, workers: Int? = nil)
+    public func finalizeARM64(_ program: TVISAProgram, platform: ARM64Platform, debug: ARM64DebugInput?)
         -> (object: ARM64Object, diagnostics: DiagnosticBag)
-    public func finalizeX64(_ program: TVISAProgram, target: CPUTarget, debug: DebugLineInput?) async
+    public func finalizeX64(_ program: TVISAProgram, debug: DebugLineInput?)
         -> (object: X64Object, diagnostics: DiagnosticBag) }
 ```
 
+`CodegenLevel` (`O0`, `O1`, `O2`, `O3`, `Os`) is NativeIR's own level type, so the generator does not depend on
+`TIROptimize`; `NativeBuilder` maps `OptimizationLevel` to it by name. The stubs of all of these are on main.
+
 G2 and G3 expose only `enum ScalarPasses` / `enum LoopPasses` with one `NIRPass` type per pass name in 6.1; the level
-tables in `NativeCodegen` name them. Parallelism is a `TaskGroup` over function indices; no locks, no shared caches.
+tables in `NativeCodegen` name them. Parallelism is one worker thread per core over function indices; no locks, no shared caches.
 
 ### 14.3 Order of work
 
